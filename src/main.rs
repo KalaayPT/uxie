@@ -296,13 +296,27 @@ fn cmd_parse_enum(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::
         Some(e) => {
             if json {
                 #[derive(serde::Serialize)]
+                struct EnumVariant {
+                    name: String,
+                    value: i64,
+                }
+                #[derive(serde::Serialize)]
                 struct EnumOutput {
                     name: Option<String>,
-                    variants: Vec<(String, Option<i64>)>,
+                    variants: Vec<EnumVariant>,
                 }
+                let mut current = 0i64;
+                let variants = e.variants.iter().map(|v| {
+                    if let Some(val) = v.value {
+                        current = val;
+                    }
+                    let variant = EnumVariant { name: v.name.clone(), value: current };
+                    current += 1;
+                    variant
+                }).collect();
                 let output = EnumOutput {
                     name: e.name.clone(),
-                    variants: e.variants.iter().map(|v| (v.name.clone(), v.value)).collect(),
+                    variants,
                 };
                 println!("{}", serde_json::to_string_pretty(&output)?);
             } else {
