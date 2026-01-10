@@ -5,14 +5,19 @@
 //! - Reading and writing map headers (binary and C format)
 //! - Parsing C header files (enums, defines, includes)
 //! - Querying relationships between game data (e.g., script -> text archive)
+//! - Reading ds-rom extracted project files
 //!
 //! Designed to be used by DSPRE, Rotom, and the pokeplatinum/pokeheartgold decomps.
 
 pub mod c_parser;
+pub mod ds_rom;
 pub mod game;
 pub mod map_header;
 pub mod provider;
+pub mod rom_header;
 
 pub use game::{Game, GameFamily};
 pub use map_header::{MapHeader, MapHeaderPt, MapHeaderDP, MapHeaderHGSS};
 pub use provider::{DataProvider, Arm9Provider, DecompProvider};
+pub use rom_header::RomHeader;
+pub use ds_rom::{DsRomProject, DsRomArm9Config};
