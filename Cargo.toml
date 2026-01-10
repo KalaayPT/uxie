@@ -2,9 +2,14 @@
 name = "uxie"
 version = "0.1.0"
 edition = "2024"
-description = "Data fetching library for Pokemon Gen 4 Romhacking - map headers, C parsing, and more"
+description = "Data fetching library for Pokemon Gen 4 romhacking - map headers, C parsing, and more"
 license = "MIT"
 repository = "https://github.com/kalaay/uxie"
+homepage = "https://github.com/KalaayPT/uxie"
+documentation = "https://docs.rs/uxie"
+readme = "README.md"
+keywords = ["pokemon", "rom", "romhacking", "ds", "nintendo"]
+categories = ["parser-implementations", "game-development"]
 
 [lib]
 name = "uxie"
