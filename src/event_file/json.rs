@@ -165,7 +165,11 @@ impl JsonEventFile {
                 hidden_flag: if obj.hidden_flag == 0 {
                     Some("0".into())
                 } else {
-                    symbols.resolve_name(obj.hidden_flag as i64, "FLAG_")
+                    Some(
+                        symbols
+                            .resolve_name(obj.hidden_flag as i64, "FLAG_")
+                            .unwrap_or_else(|| obj.hidden_flag.to_string()),
+                    )
                 },
                 script: obj.script,
                 initial_dir: obj.dir,
