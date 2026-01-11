@@ -90,7 +90,8 @@ impl Workspace {
                 .join(format!("unpacked/textArchives/{:04}", location_text_id));
             if archive_path.exists() {
                 let mut file = std::fs::File::open(archive_path)?;
-                if let Ok(archive) = crate::text_bank::TextArchive::from_binary(&mut file) {
+                let charmap = chatot::get_default_charmap();
+                if let Ok(archive) = chatot::decode_archive(charmap, &mut file, false) {
                     self.location_names = Some(archive.messages);
                 }
             }
