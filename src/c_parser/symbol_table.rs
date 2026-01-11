@@ -1,5 +1,3 @@
-//! C header parsing with constant resolution
-
 use std::collections::HashMap;
 use std::path::Path;
 
@@ -7,7 +5,6 @@ pub use crate::c_parser::defines::parse_value;
 pub use crate::c_parser::defines::parse_defines;
 pub use crate::c_parser::enums::parse_enum;
 
-/// Symbol table for constant resolution
 #[derive(Debug, Clone)]
 pub struct SymbolTable {
     pub defines: HashMap<String, i64>,
@@ -84,21 +81,39 @@ impl SymbolTable {
     }
 
     pub fn resolve_name(&self, value: i64, prefix: &str) -> Option<String> {
+        let mut best_match = None;
         for (name, &val) in &self.defines {
             if val == value && name.starts_with(prefix) {
-                return Some(name.clone());
+                if best_match.as_ref().map_or(true, |m: &String| name.len() < m.len()) {
+                    best_match = Some(name.clone());
+                }
+            }
+        }
+        best_match
+    }
+
+    pub fn resolve_names(&self, value: i64, prefixes: &[&str]) -> Vec<String> {
+        let mut matches = Vec::new();
+        for (name, &val) in &self.defines {
+            if val == value {
+                if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
+                    matches.push(name.clone());
+                }
             }
         }
         
         for (_enum_name, variants) in &self.enums {
             for (variant_name, val) in variants {
-                if val == &Some(value) && variant_name.starts_with(prefix) {
-                    return Some(variant_name.clone());
+                if val == &Some(value) {
+                    if prefixes.is_empty() || prefixes.iter().any(|p| variant_name.starts_with(p)) {
+                        matches.push(variant_name.clone());
+                    }
                 }
             }
         }
         
-        None
+        matches.sort_by_key(|n| n.len());
+        matches
     }
 
     pub fn load_list_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -106,28 +121,43 @@ impl SymbolTable {
             Ok(c) => c,
             Err(_) => return Ok(()),
         };
-        
-        let re = regex::Regex::new(r"^\s*([A-Za-z0-9_]+)\s*=\s*(0x[0-9A-Fa-f]+|[0-9]+)").unwrap();
-        
+        self.load_list_file_str(&content)
+    }
+
+    pub fn load_list_file_str(&mut self, content: &str) -> std::io::Result<()> {
         let mut current_index = 0i64;
+        let mut pending_defines: Vec<crate::c_parser::defines::CDefine> = self.defines.iter().map(|(n, v)| {
+            crate::c_parser::defines::CDefine { name: n.clone(), value: v.to_string(), resolved: Some(*v) }
+        }).collect();
+        
         for line in content.lines() {
             let line = line.trim();
-            if line.is_empty() {
+            if line.is_empty() || line.starts_with("//") || line.starts_with("#") {
                 continue;
             }
             
-            if let Some(caps) = re.captures(line) {
-                let name = caps[1].to_string();
-                let val_str = caps[2].trim();
-                let value = if val_str.starts_with("0x") || val_str.starts_with("0X") {
-                    i64::from_str_radix(&val_str[2..], 16).unwrap_or(current_index)
-                } else {
-                    val_str.parse().unwrap_or(current_index)
-                };
-                self.defines.insert(name, value);
-                current_index = value + 1;
+            if let Some(pos) = line.find('=') {
+                let name = line[..pos].trim().to_string();
+                let expr = line[pos+1..].trim().to_string();
+                
+                if let Some(val) = crate::c_parser::parse_value(&expr, &pending_defines) {
+                    current_index = val;
+                }
+                
+                self.defines.insert(name.clone(), current_index);
+                pending_defines.push(crate::c_parser::defines::CDefine {
+                    name,
+                    value: expr,
+                    resolved: Some(current_index),
+                });
+                current_index += 1;
             } else {
                 self.defines.insert(line.to_string(), current_index);
+                pending_defines.push(crate::c_parser::defines::CDefine {
+                    name: line.to_string(),
+                    value: current_index.to_string(),
+                    resolved: Some(current_index),
+                });
                 current_index += 1;
             }
         }
@@ -209,5 +239,25 @@ enum Direction {
         assert_eq!(table.resolve_constant("SOUTH"), Some(1));
         assert_eq!(table.resolve_constant("EAST"), Some(2));
         assert_eq!(table.resolve_constant("WEST"), Some(3));
+    }
+
+    #[test]
+    fn test_load_list_file() {
+        let source = r#"
+VARS_START = 16384
+MAP_LOCAL_VARS_START = VARS_START
+VAR_MAP_LOCAL_0 = MAP_LOCAL_VARS_START
+VAR_MAP_LOCAL_1
+SOME_ENUM_VAL
+        "#;
+        
+        let mut table = SymbolTable::new();
+        table.load_list_file_str(source).unwrap();
+        
+        assert_eq!(table.resolve_constant("VARS_START"), Some(16384));
+        assert_eq!(table.resolve_constant("MAP_LOCAL_VARS_START"), Some(16384));
+        assert_eq!(table.resolve_constant("VAR_MAP_LOCAL_0"), Some(16384));
+        assert_eq!(table.resolve_constant("VAR_MAP_LOCAL_1"), Some(16385));
+        assert_eq!(table.resolve_constant("SOME_ENUM_VAL"), Some(16386));
     }
 }

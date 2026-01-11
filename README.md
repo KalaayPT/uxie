@@ -3,7 +3,7 @@
 # `uxie`
 
 A data fetching library for Pokemon Gen 4 romhacking. Provides unified access to
-ROM data from NdsTool extractions, ds-rom projects, and decompilation sources.
+ROM data from DSPRE projects and decompilation sources.
 
 ## Table of Contents
 
@@ -15,14 +15,18 @@ ROM data from NdsTool extractions, ds-rom projects, and decompilation sources.
   - [Build from Source](#build-from-source)
   - [As a Library](#as-a-library)
 - [CLI Usage](#cli-usage)
-  - [rom-header](#rom-header)
-  - [map-header](#map-header)
-  - [script-text](#script-text)
-  - [ds-rom](#ds-rom)
-  - [parse-enum](#parse-enum)
-  - [parse-defines](#parse-defines)
+  - [header](#header)
+  - [map](#map)
+  - [event](#event)
+  - [symbols](#symbols)
+  - [resolve-script](#resolve-script)
 - [Integration](#integration)
 - [Library Usage](#library-usage)
+  - [High-Level Workspace](#high-level-workspace)
+  - [Reading ROM Headers](#reading-rom-headers)
+  - [Reading Map Headers](#reading-map-headers)
+  - [Working with DSPRE Projects](#working-with-dspre-projects)
+  - [Parsing C Headers](#parsing-c-headers)
 - [Supported Games](#supported-games)
 - [License](#license)
 <!--toc:end-->
@@ -30,9 +34,10 @@ ROM data from NdsTool extractions, ds-rom projects, and decompilation sources.
 ## Background
 
 Working with Pokemon Gen 4 ROMs involves multiple data sources: binary files
-extracted via NdsTool, YAML-based ds-rom projects, and modern JSON/C source
-structures from decompilation projects like pokeplatinum/pokeheartgold. Each
-source has different formats and conventions.
+extracted via `ndstool` or `ds-rom`, `DSPRE` projects (folders containing `arm9.bin` and
+`unpacked/` filesystem), and modern JSON/C source structures from
+decompilation projects (pokeplatinum/pokeheartgold). Each source has
+different formats and conventions.
 
 `uxie` provides a unified interface for reading ROM data regardless of source.
 Its `RomHeader::open()` function auto-detects the format and returns a
@@ -42,16 +47,17 @@ parsing C enums and defines, and querying relationships between game data.
 ### Etymology
 
 `uxie` takes its name from [Uxie][uxie-bulbapedia], the legendary Pokemon known
-as the "Being of Knowledge." Just as Uxie embodies wisdom in the Pokemon world,
-this library aims to provide knowledge about ROM data structures.
+as the "Being of Knowledge."
 
 ## Features
 
-- **Unified ROM Access**: Auto-detects and reads data from NdsTool extractions, `ds-rom` projects, and decompilation sources.
+- **Unified ROM Access**: Auto-detects and reads data from DSPRE projects and decompilation sources.
+- **High-Level Workspace**: Unified API for managing symbols, script mappings, and text banks across a project. Automatically detects project types.
 - **Complex Expression Resolution**: Evaluates C expressions in `#define` and `enum` blocks, including bitwise OR (`|`), left shifts (`<<`), and nested parentheses.
-- **Symbolic Resolution**: Automatically resolves cross-references between constants (e.g., `(A | B)` where A and B are other defines).
-- **Map Header Parsing**: Unified access to area data, music, scripts, and worldmap coordinates across all Gen 4 games.
+- **Enhanced Symbol Table**: Automatically resolves cross-references between constants and supports `.txt` files with incremental indexing (e.g., `VAR_0 = 0`, `VAR_1`).
+- **Map Header Parsing**: Unified access to area data, scripts, and events (so far) across all Gen 4 games.
 - **Format Agnostic**: Seamlessly bridge legacy binary formats and modern JSON/YAML source data for both input and output.
+- **Bidirectional Script Resolution**: Resolve script constants from names to values AND values to names using a shortest-name heuristic.
 
 ## Install
 
@@ -84,126 +90,76 @@ uxie = { git = "https://github.com/KalaayPT/uxie.git", branch = "mother" }
 uxie <COMMAND> [OPTIONS]
 ```
 
-### rom-header
+### header
 
-Read ROM header information from any supported format:
+Read ROM header information. Auto-detects format from a file path or project directory:
 
 ```shell
-# From NdsTool header.bin
-uxie rom-header -p /path/to/header.bin
+# From current directory (auto-detects project type)
+uxie header
 
-# From ds-rom header.yaml
-uxie rom-header -p /path/to/header.yaml
+# From a specific ROM file or header.bin
+uxie header path/to/header.bin
 
-# From ds-rom project directory
-uxie rom-header -p /path/to/ds-rom-project/
+# From a DSPRE project directory
+uxie header path/to/dspre-project/
 
 # Output as JSON
-uxie rom-header -p /path/to/header.bin --json
+uxie header --json
 ```
 
-Example output:
+### map
 
-```
-ROM Header Information
-======================
-Source:      NdsTool
-Title:       POKEMON PL
-Game Code:   CPUE
-Maker Code:  01
-ROM Version: 0
-Game:        Platinum
-Family:      Platinum
-Region:      USA
-
-ARM9 Offset: 0x00004000
-ARM9 Size:   0xB52A0 (742048 bytes)
-```
-
-### map-header
-
-Read map header data from ARM9 binary:
+Read map header data. Automatically detects game version and table offsets from the project:
 
 ```shell
-# Read map header ID 0 from Platinum
-uxie map-header 0 -a /path/to/arm9.bin -g pt
+# Read map header ID 0 from current project
+uxie map 0
 
-# Read map header ID 100 from HeartGold/SoulSilver
-uxie map-header 100 -a /path/to/arm9.bin -g hgss
+# Read from a specific project path
+uxie map 100 -p /path/to/project/
 
-# Output as JSON
-uxie map-header 0 -a /path/to/arm9.bin -g pt --json
+# Read from DSPRE project but resolve symbols using a decomp root
+uxie map 3 -p /path/to/dspre/ --decomp /path/to/decomp/
 ```
 
-Game family options: `dp`, `pt`, `hgss`
+### event
 
-### script-text
-
-Find which text archive a script file uses:
+Load and resolve event file data:
 
 ```shell
-uxie script-text 42 -a /path/to/arm9.bin -g pt
-# Output: Script 42 uses text archive 123
+# Resolve events for map 3 using current workspace
+uxie event 3
+
+# Resolve using a specific decomp root for symbols
+uxie event 3 --decomp /path/to/pokeplatinum/
 ```
 
-### ds-rom
+### symbols
 
-Read ds-rom project information:
+Parse C header files or symbol list files:
 
 ```shell
-# From project directory
-uxie ds-rom /path/to/ds-rom-project/
+# Parse and resolve complex expressions in a header
+uxie symbols constants.h
 
-# From config.yaml directly
-uxie ds-rom /path/to/config.yaml
+# Parse a .txt list with incremental indexing
+uxie symbols variables.txt
 
-# Output as JSON
-uxie ds-rom /path/to/ds-rom-project/ --json
+# Output only enums as JSON
+uxie symbols constants.h --only-enums --json
 ```
 
-### parse-enum
+### resolve-script (untested)
 
-Parse C enum definitions from header files:
+Bidirectionally resolve constants within a script file (Names -> Values AND Values -> Names):
 
 ```shell
-uxie parse-enum /path/to/header.h
+# Resolve symbols in a script using current directory as workspace
+uxie resolve-script game_script.s
 
-# Output as JSON
-uxie parse-enum /path/to/header.h --json
-```
-
-### parse-defines
-
-Parse `#define` constants from header files with expression evaluation:
-
-```shell
-# Parse and resolve complex expressions
-uxie parse-defines constants.h
-
-# Filter by prefix (e.g., pokeplatinum constants)
-uxie parse-defines constants.h -p MAP_
-```
-
-Example output:
-```text
-#define TRAINER          (1 << 0) (= 1)
-#define DOUBLES          (1 << 1) (= 2)
-#define TRAINER_DOUBLES  (DOUBLES | TRAINER) (= 3)
-```
-
-JSON output includes a `resolved` field for easy integration:
-```shell
-uxie parse-defines constants.h --json
-```
-
-```json
-[
-  {
-    "name": "TRAINER_DOUBLES",
-    "value": "(DOUBLES | TRAINER)",
-    "resolved": 3
-  }
-]
+# Resolve using a specific decomp root
+uxie resolve-script game_script.s --decomp /path/to/pokeplatinum/
 ```
 
 ## Integration
@@ -211,15 +167,38 @@ uxie parse-defines constants.h --json
 `uxie` is designed to bridge the gap between different toolchains in the Gen 4
 romhacking ecosystem:
 
-- **Decompilation Projects**: Fully compatible with the JSON formats used by
+- **Decompilation Projects**: Fully compatible with the formats used by
   `pokeplatinum` and `pokeheartgold`. Provides a seamless bridge between raw
   binary and modern source-controlled data.
 - **DSPRE / Binary Tools**: Ensures 1:1 binary round-tripping for map headers
   and event files, maintaining compatibility with standard ROM editing tools.
-- **ds-rom**: Native support for `ds-rom` project structures, providing a
-  modern Rust interface for legacy configurations.
+- **Unified Workspace**: Transparently handles both legacy binary projects and
+  modern source trees, allowing tools to be built once and run anywhere.
 
 ## Library Usage
+
+### High-Level Workspace
+
+The `Workspace` struct is the primary entry point. It automatically detects the project type (DSPRE or Decompilation) and sets up the environment.
+
+```rust
+use uxie::Workspace;
+
+// Auto-detect and load from any supported project path
+let workspace = Workspace::open("path/to/project")?;
+
+// Resolve a constant name to its value
+let val = workspace.resolve_constant("VARS_START"); // Some(16384)
+
+// Bidirectional resolution: Names -> Values AND Values -> Names
+let script = "SetFlag FLAG_UNK_0x000A";
+let resolved = workspace.resolve_script_symbols(script);
+println!("{}", resolved); // "SetFlag 10"
+
+let binary_script = "SetFlag 10";
+let symbolic = workspace.resolve_script_symbols(binary_script);
+println!("{}", symbolic); // "SetFlag FLAG_UNK_0x000A" (shortest name heuristic)
+```
 
 ### Reading ROM Headers
 
@@ -228,59 +207,62 @@ use uxie::RomHeader;
 
 // Auto-detect format from path
 let header = RomHeader::open("path/to/header.bin")?;
-let header = RomHeader::open("path/to/header.yaml")?;
-let header = RomHeader::open("path/to/ds-rom-project/")?;
-
-// Or use specific methods
-let header = RomHeader::from_binary("path/to/header.bin")?;
-let header = RomHeader::from_ds_rom_yaml("path/to/header.yaml")?;
-let header = RomHeader::from_ds_rom_project("path/to/project/")?;
+let header = RomHeader::open("path/to/dspre-project/")?;
 
 // Access header data
 println!("Game: {:?}", header.detect_game());       // Some(Platinum)
 println!("Family: {:?}", header.detect_game_family()); // Some(Platinum)
 println!("Region: {:?}", header.region());          // Some("USA")
-println!("Source: {:?}", header.source);            // NdsTool, DsRom, or Decomp
 ```
 
 ### Reading Map Headers
 
 ```rust
-use uxie::{Arm9Provider, DataProvider, GameFamily};
+use uxie::{Arm9Provider, GameFamily};
 
+// Low-level provider access
 let provider = Arm9Provider::new(
     "path/to/arm9.bin",
-    0xE601C,  // Header table offset for Platinum US
-    559,      // Number of map headers
+    0xE601C,  // Table offset
+    559,      // Count
     GameFamily::Platinum,
 );
 
 let header = provider.get_map_header(0)?;
 println!("Script file: {}", header.script_file_id());
-println!("Text archive: {}", header.text_archive_id());
 ```
 
-### Working with ds-rom Projects
+### Working with DSPRE Projects
 
 ```rust
-use uxie::DsRomProject;
+use uxie::Workspace;
 
-let project = DsRomProject::open("path/to/config.yaml")?;
+// Workspace handles DSPRE projects transparently
+let workspace = Workspace::open("path/to/dspre-project")?;
 
-// Access unified ROM header
-println!("Game: {:?}", project.game());
-println!("Title: {}", project.header.game_title);
-
-// Access ARM9 config
-println!("Base address: 0x{:08X}", project.arm9_config.base_address);
-println!("SDK version: {}", project.arm9_config.sdk_version_string());
-
-// Get file paths
-let arm9_path = project.arm9_bin_path();
-let files_dir = project.files_dir();
+println!("Project Type: {:?}", workspace.project_type); // Dspre
+println!("Detected Game: {:?}", workspace.game);
 ```
 
 ### Parsing C Headers
+
+For complex projects, use `SymbolTable` to load multiple headers and resolve cross-references:
+
+```rust
+use uxie::SymbolTable;
+
+let mut symbols = SymbolTable::new();
+
+// Load all headers from a directory (handles .h, .hpp, and .txt)
+symbols.load_headers_from_dir("include/constants")?;
+
+// Resolve a constant from any of the loaded files
+if let Some(val) = symbols.resolve_constant("ITEM_POKE_BALL") {
+    println!("ID: {}", val);
+}
+```
+
+You can also use the low-level parsing functions for single files:
 
 ```rust
 use uxie::c_parser::{parse_enum, parse_and_resolve_defines};
@@ -299,8 +281,6 @@ let defines = parse_and_resolve_defines(&content);
 for d in &defines {
     if let Some(resolved) = d.resolved {
         println!("#define {} {} (= {})", d.name, d.value, resolved);
-    } else {
-        println!("#define {} {}", d.name, d.value);
     }
 }
 ```

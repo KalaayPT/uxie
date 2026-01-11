@@ -8,7 +8,7 @@ repository = "https://github.com/kalaay/uxie"
 homepage = "https://github.com/KalaayPT/uxie"
 documentation = "https://docs.rs/uxie"
 readme = "README.md"
-keywords = ["pokemon", "rom", "romhacking", "ds", "nintendo"]
+keywords = ["pokemon", "rom", "romhacking", "ds", "nintendo", "platinum", "dspre", "heartgold"]
 categories = ["parser-implementations", "game-development"]
 
 [lib]

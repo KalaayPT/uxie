@@ -151,7 +151,7 @@ struct RawProjectConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct DsRomProject {
+pub struct DsRomToolProject {
     root: PathBuf,
     pub header: RomHeader,
     pub arm9_config: DsRomArm9Config,
@@ -163,7 +163,7 @@ pub struct DsRomProject {
     files_dir: PathBuf,
 }
 
-impl DsRomProject {
+impl DsRomToolProject {
     pub fn open(config_path: impl AsRef<Path>) -> io::Result<Self> {
         let config_path = config_path.as_ref();
         let root = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();

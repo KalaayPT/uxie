@@ -11,7 +11,7 @@ pub const ROM_HEADER_SIZE: usize = 0x200;
 pub enum RomHeaderSource {
     #[default]
     NdsTool,
-    DsRom,
+    DsRomTool,
     Decomp,
 }
 
@@ -62,7 +62,12 @@ impl RomHeader {
         if path.is_dir() {
             let config = path.join("config.yaml");
             if config.exists() {
-                return Self::from_ds_rom_project(path);
+                return Self::from_ds_rom_tool_project(path);
+            }
+            
+            let header_bin = path.join("header.bin");
+            if header_bin.exists() {
+                return Self::from_binary(header_bin);
             }
         }
         
@@ -71,7 +76,7 @@ impl RomHeader {
             "yaml" | "yml" => {
                 let filename = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
                 if filename == "config.yaml" {
-                    Self::from_ds_rom_project(path.parent().unwrap_or(path))
+                    Self::from_ds_rom_tool_project(path.parent().unwrap_or(path))
                 } else {
                     Self::from_ds_rom_yaml(path)
                 }
@@ -142,11 +147,11 @@ impl RomHeader {
             fat_offset: None,
             fat_size: None,
             header_crc: None,
-            source: RomHeaderSource::DsRom,
+            source: RomHeaderSource::DsRomTool,
         })
     }
 
-    pub fn from_ds_rom_project(project_dir: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn from_ds_rom_tool_project(project_dir: impl AsRef<Path>) -> io::Result<Self> {
         let project_dir = project_dir.as_ref();
         
         let config_path = if project_dir.is_file() {
@@ -332,7 +337,7 @@ mod tests {
             fat_offset: None,
             fat_size: None,
             header_crc: None,
-            source: RomHeaderSource::DsRom,
+            source: RomHeaderSource::DsRomTool,
         };
 
         assert_eq!(header.detect_game(), Some(Game::Platinum));
@@ -357,7 +362,7 @@ secure_area_delay: 3454
         assert_eq!(header.game_title, "POKEMON PL");
         assert_eq!(header.game_code, "CPUE");
         assert_eq!(header.rom_version, 1);
-        assert_eq!(header.source, RomHeaderSource::DsRom);
+        assert_eq!(header.source, RomHeaderSource::DsRomTool);
         assert!(header.arm9_size.is_none());
         
         std::fs::remove_file(&temp).ok();

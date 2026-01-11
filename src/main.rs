@@ -2,12 +2,10 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use uxie::{
     SymbolTable,
-    DsRomProject, DspreProject,
-    GameFamily,
-    MapHeader, MapHeaderJson,
-    DataProvider, Arm9Provider,
+    MapHeaderJson,
+    Workspace,
+    MapHeader,
     RomHeader,
-    JsonEventFile,
 };
 
 #[derive(Parser)]
@@ -22,144 +20,86 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Read and display ROM header information
-    RomHeader {
-        /// Path to header.bin, header.yaml, or ds-rom project directory
-        #[arg(short, long)]
+    Header {
+        #[arg(default_value = ".")]
         path: PathBuf,
 
-        /// Output as JSON
         #[arg(long)]
         json: bool,
     },
 
-    /// Read map header from ARM9 binary
-    MapHeader {
-        /// Map header ID (0-based index)
+    Map {
         id: u16,
 
-        /// Path to arm9.bin file
-        #[arg(short, long)]
-        arm9: PathBuf,
-
-        /// Game family: dp, pt, or hgss
-        #[arg(short, long)]
-        game: String,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Parse C enum definitions from a header file
-    ParseEnum {
-        /// Path to the C header file
-        path: PathBuf,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Parse #define constants from a header file
-    ParseDefines {
-        /// Path to the C header file
-        path: PathBuf,
-
-        /// Filter by prefix (e.g., "MAP_" to only show MAP_* defines)
-        #[arg(short, long)]
-        prefix: Option<String>,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Find text archive ID for a script file
-    ScriptText {
-        /// Script file ID
-        script_id: u16,
-
-        /// Path to arm9.bin file
-        #[arg(short, long)]
-        arm9: PathBuf,
-
-        /// Game family: dp, pt, or hgss
-        #[arg(short, long)]
-        game: String,
-    },
-
-    /// Read ds-rom extracted project info
-    DsRom {
-        /// Path to config.yaml or project directory
-        path: PathBuf,
-
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-    },
-
-    /// Load binary events from DSPRE project and resolve with C headers
-    DspreEvent {
-        /// Path to DSPRE project root
+        #[arg(short, long, default_value = ".")]
         project: PathBuf,
 
-        /// Event file ID
+        #[arg(short, long)]
+        decomp: Option<PathBuf>,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    Event {
         id: u32,
 
-        /// Path to C headers directory for constant resolution
-        #[arg(short, long)]
-        headers: PathBuf,
-    },
-
-    /// Load binary map header from DSPRE project and resolve with C headers
-    DspreMapHeader {
-        /// Path to DSPRE project root
+        #[arg(short, long, default_value = ".")]
         project: PathBuf,
 
-        /// Map header ID
-        id: u16,
-
-        /// Path to C headers directory for constant resolution
         #[arg(short, long)]
-        headers: PathBuf,
+        decomp: Option<PathBuf>,
+
+        #[arg(long)]
+        json: bool,
     },
-}
 
-fn parse_game_family(s: &str) -> Result<GameFamily, String> {
-    match s.to_lowercase().as_str() {
-        "dp" | "diamond" | "pearl" => Ok(GameFamily::DP),
-        "pt" | "platinum" => Ok(GameFamily::Platinum),
-        "hgss" | "heartgold" | "soulsilver" => Ok(GameFamily::HGSS),
-        _ => Err(format!(
-            "Unknown game family '{}'. Use: dp, pt, or hgss",
-            s
-        )),
-    }
-}
+    Encounter {
+        id: u32,
 
-fn get_header_table_config(family: GameFamily) -> (u64, usize) {
-    match family {
-        GameFamily::DP => (0xE4B24, 559),
-        GameFamily::Platinum => (0xE601C, 559),
-        GameFamily::HGSS => (0xF6BE0, 540),
-    }
+        #[arg(short, long, default_value = ".")]
+        project: PathBuf,
+
+        #[arg(short, long)]
+        decomp: Option<PathBuf>,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    Symbols {
+        path: PathBuf,
+
+        #[arg(long)]
+        only_defines: bool,
+
+        #[arg(long)]
+        only_enums: bool,
+
+        #[arg(long)]
+        json: bool,
+    },
+
+    ResolveScript {
+        path: PathBuf,
+
+        #[arg(short, long, default_value = ".")]
+        decomp: PathBuf,
+    },
 }
 
 fn main() {
     let cli = Cli::parse();
 
     let result = match cli.command {
-        Commands::RomHeader { path, json } => cmd_rom_header(&path, json),
-        Commands::MapHeader { id, arm9, game, json } => cmd_map_header(id, &arm9, &game, json),
-        Commands::ParseEnum { path, json } => cmd_parse_enum(&path, json),
-        Commands::ParseDefines { path, prefix, json } => {
-            cmd_parse_defines(&path, prefix.as_deref(), json)
+        Commands::Header { path, json } => cmd_header(&path, json),
+        Commands::Map { id, project, decomp, json } => cmd_map(id, &project, decomp, json),
+        Commands::Event { id, project, decomp, json } => cmd_event(id, &project, decomp, json),
+        Commands::Encounter { id, project, decomp, json } => cmd_encounter(id, &project, decomp, json),
+        Commands::Symbols { path, only_defines, only_enums, json } => {
+            cmd_parse_header(&path, only_defines, only_enums, json)
         }
-        Commands::ScriptText { script_id, arm9, game } => cmd_script_text(script_id, &arm9, &game),
-        Commands::DsRom { path, json } => cmd_ds_rom(&path, json),
-        Commands::DspreEvent { project, id, headers } => cmd_dspre_event(&project, id, &headers),
-        Commands::DspreMapHeader { project, id, headers } => cmd_dspre_map_header(&project, id, &headers),
+        Commands::ResolveScript { path, decomp } => cmd_resolve_script(&path, &decomp),
     };
 
     if let Err(e) = result {
@@ -168,35 +108,7 @@ fn main() {
     }
 }
 
-fn cmd_dspre_event(project_path: &PathBuf, id: u32, headers_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let project = DspreProject::open(project_path)?;
-    let mut symbols = SymbolTable::new();
-    symbols.load_headers_from_dir(headers_path)?;
-
-    let bin_event = project.load_event_file(id)?;
-    let json_event = JsonEventFile::from_binary(&bin_event, &symbols);
-
-    println!("{}", serde_json::to_string_pretty(&json_event)?);
-    Ok(())
-}
-
-fn cmd_dspre_map_header(project_path: &PathBuf, id: u16, headers_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let _project = DspreProject::open(project_path)?;
-    let mut symbols = SymbolTable::new();
-    symbols.load_headers_from_dir(headers_path)?;
-
-    let arm9_path = project_path.join("arm9.bin");
-    let (offset, count) = get_header_table_config(GameFamily::Platinum);
-    let provider = Arm9Provider::new(&arm9_path, offset, count, GameFamily::Platinum);
-    
-    let bin_header = provider.get_map_header(id)?;
-    let json_header = MapHeaderJson::from_binary(&bin_header, &symbols);
-
-    println!("{}", serde_json::to_string_pretty(&json_header)?);
-    Ok(())
-}
-
-fn cmd_rom_header(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+fn cmd_header(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let header = RomHeader::open(path)?;
 
     if json {
@@ -221,63 +133,206 @@ fn cmd_rom_header(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::
             println!("Region:      {}", region);
         }
 
-        if header.arm9_rom_offset.is_some() || header.arm9_size.is_some() {
-            println!();
-            if let Some(offset) = header.arm9_rom_offset {
-                println!("ARM9 Offset: 0x{:08X}", offset);
-            }
-            if let Some(size) = header.arm9_size {
-                println!("ARM9 Size:   0x{:X} ({} bytes)", size, size);
-            }
-            if let Some(offset) = header.arm7_rom_offset {
-                println!("ARM7 Offset: 0x{:08X}", offset);
-            }
-            if let Some(size) = header.arm7_size {
-                println!("ARM7 Size:   0x{:X} ({} bytes)", size, size);
-            }
+        if let Some(offset) = header.arm9_rom_offset {
+            println!("\nARM9 Offset: 0x{:08X}", offset);
+        }
+        if let Some(size) = header.arm9_size {
+            println!("ARM9 Size:   0x{:X} ({} bytes)", size, size);
+        }
+        if let Some(offset) = header.arm7_rom_offset {
+            println!("ARM7 Offset: 0x{:08X}", offset);
+        }
+        if let Some(size) = header.arm7_size {
+            println!("ARM7 Size:   0x{:X} ({} bytes)", size, size);
         }
 
-        if header.fnt_offset.is_some() {
-            println!();
-            if let (Some(fnt_off), Some(fnt_sz)) = (header.fnt_offset, header.fnt_size) {
-                println!("FNT Offset:  0x{:08X} (size: 0x{:X})", fnt_off, fnt_sz);
-            }
-            if let (Some(fat_off), Some(fat_sz)) = (header.fat_offset, header.fat_size) {
-                println!("FAT Offset:  0x{:08X} (size: 0x{:X})", fat_off, fat_sz);
-            }
+        if let (Some(fnt_off), Some(fnt_sz)) = (header.fnt_offset, header.fnt_size) {
+            println!("\nFNT Offset:  0x{:08X} (size: 0x{:X})", fnt_off, fnt_sz);
+        }
+        if let (Some(fat_off), Some(fat_sz)) = (header.fat_offset, header.fat_size) {
+            println!("FAT Offset:  0x{:08X} (size: 0x{:X})", fat_off, fat_sz);
         }
 
         if let Some(crc) = header.header_crc {
-            println!();
-            println!("Header CRC:  0x{:04X}", crc);
+            println!("\nHeader CRC:  0x{:04X}", crc);
         }
     }
 
     Ok(())
 }
 
-fn cmd_map_header(
+fn cmd_map(
     id: u16,
-    arm9_path: &PathBuf,
-    game_str: &str,
+    path: &PathBuf,
+    decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let family = parse_game_family(game_str)?;
-    let (offset, count) = get_header_table_config(family);
-
-    if id as usize >= count {
-        return Err(format!("Map ID {} out of range (max: {})", id, count - 1).into());
+    let mut ws = Workspace::open(path)?;
+    if let Some(d) = decomp {
+        ws.symbols.load_headers_from_dir(d.join("include/constants"))?;
+        ws.symbols.load_headers_from_dir(d.join("generated"))?;
     }
 
-    let provider = Arm9Provider::new(arm9_path, offset, count, family);
-    let header = provider.get_map_header(id)?;
+    let header = ws.provider.get_map_header(id)?;
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&header)?);
+        let json_header = MapHeaderJson::from_binary(&header, &ws.symbols);
+        println!("{}", serde_json::to_string_pretty(&json_header)?);
     } else {
         print_map_header(&header, id);
     }
+    Ok(())
+}
 
+fn cmd_event(
+    id: u32,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    _json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        ws.symbols.load_headers_from_dir(d.join("include/constants"))?;
+        ws.symbols.load_headers_from_dir(d.join("generated"))?;
+    }
+
+    let dspre = uxie::DspreProject::open(project_path)?;
+    let bin_event = dspre.load_event_file(id)?;
+    let json_event = uxie::JsonEventFile::from_binary(&bin_event, &ws.symbols);
+
+    println!("{}", serde_json::to_string_pretty(&json_event)?);
+    Ok(())
+}
+
+fn cmd_encounter(
+    id: u32,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    _json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        ws.symbols.load_headers_from_dir(d.join("include/constants"))?;
+        ws.symbols.load_headers_from_dir(d.join("generated"))?;
+    }
+
+    let narc_path = match ws.family {
+        uxie::GameFamily::DP => project_path.join("data/fielddata/encountdata/d_enc_data.narc"),
+        uxie::GameFamily::Platinum => project_path.join("data/fielddata/encountdata/pl_enc_data.narc"),
+        uxie::GameFamily::HGSS => project_path.join("data/a/0/3/7"),
+    };
+
+    let bin_data = if narc_path.exists() {
+        let mut file = std::fs::File::open(narc_path)?;
+        let narc = uxie::narc::Narc::from_binary(&mut file)?;
+        narc.members.get(id as usize).cloned().ok_or("Encounter ID out of range in NARC")?
+    } else {
+        let unpacked_path = project_path.join("unpacked/encounters").join(format!("{:04}", id));
+        if unpacked_path.exists() {
+            std::fs::read(unpacked_path)?
+        } else {
+            return Err("Encounter data not found (tried NARC and unpacked/encounters)".into());
+        }
+    };
+
+    let mut reader = std::io::Cursor::new(bin_data);
+    let bin = uxie::encounter_file::BinaryEncounterFile::from_binary(&mut reader, ws.family)?;
+    let json = uxie::JsonEncounterFile::from_binary(&bin, &ws.symbols, ws.family);
+    println!("{}", serde_json::to_string_pretty(&json)?);
+    
+    Ok(())
+}
+
+fn cmd_parse_header(
+
+    path: &PathBuf,
+    only_defines: bool,
+    only_enums: bool,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(path)?;
+    let mut symbols = SymbolTable::new();
+
+    let is_txt = path.extension().and_then(|s| s.to_str()) == Some("txt");
+
+    if is_txt {
+        symbols.load_list_file_str(&content)?;
+    } else {
+        symbols.load_header_str(&content)?;
+    }
+
+    if json {
+        #[derive(serde::Serialize)]
+        struct HeaderOutput {
+            defines: Option<Vec<uxie::c_parser::defines::CDefine>>,
+            enums: Option<std::collections::HashMap<String, Vec<(String, Option<i64>)>>>,
+        }
+        
+        let defines = if !only_enums {
+            if is_txt {
+                Some(symbols.defines.iter().map(|(n, v)| {
+                    uxie::c_parser::defines::CDefine {
+                        name: n.clone(),
+                        value: v.to_string(),
+                        resolved: Some(*v),
+                    }
+                }).collect())
+            } else {
+                Some(uxie::c_parser::defines::parse_and_resolve_defines(&content))
+            }
+        } else {
+            None
+        };
+
+        let output = HeaderOutput {
+            defines,
+            enums: if !only_defines { Some(symbols.enums.clone()) } else { None },
+        };
+        println!("{}", serde_json::to_string_pretty(&output)?);
+    } else {
+        if !only_enums {
+            if is_txt {
+                let mut defs: Vec<_> = symbols.defines.iter().collect();
+                defs.sort_by_key(|(n, _)| *n);
+                if !defs.is_empty() {
+                    println!("Symbols (from .txt):");
+                    for (name, value) in defs {
+                        println!("  {} = {}", name, value);
+                    }
+                }
+            } else {
+                let defs = uxie::c_parser::defines::parse_and_resolve_defines(&content);
+                if !defs.is_empty() {
+                    println!("Defines:");
+                    for d in defs {
+                        if let Some(resolved) = d.resolved {
+                            println!("  #define {} {} (= {})", d.name, d.value, resolved);
+                        } else {
+                            println!("  #define {} {}", d.name, d.value);
+                        }
+                    }
+                }
+            }
+        }
+        if !only_defines && !symbols.enums.is_empty() {
+            println!("\nEnums:");
+            for (name, variants) in &symbols.enums {
+                println!("  enum {} {{", name);
+                for (v_name, v_val) in variants {
+                    println!("    {} = {:?},", v_name, v_val);
+                }
+                println!("  }}");
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_resolve_script(path: &PathBuf, decomp_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(path)?;
+    let ws = Workspace::open_decomp(decomp_path)?;
+    println!("{}", ws.resolve_script_symbols(&content));
     Ok(())
 }
 
@@ -336,191 +391,4 @@ fn print_map_header(header: &MapHeader, id: u16) {
             println!("Flags:           0x{:02X}", h.flags);
         }
     }
-}
-
-fn cmd_parse_enum(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(path)?;
-    
-    match uxie::c_parser::parse_enum(&content) {
-        Some(e) => {
-            if json {
-                #[derive(serde::Serialize)]
-                struct EnumVariant {
-                    name: String,
-                    value: i64,
-                }
-                #[derive(serde::Serialize)]
-                struct EnumOutput {
-                    name: Option<String>,
-                    variants: Vec<EnumVariant>,
-                }
-                let mut current = 0i64;
-                let variants = e.variants.iter().map(|v| {
-                    if let Some(val) = v.value {
-                        current = val;
-                    }
-                    let variant = EnumVariant { name: v.name.clone(), value: current };
-                    current += 1;
-                    variant
-                }).collect();
-                let output = EnumOutput {
-                    name: e.name.clone(),
-                    variants,
-                };
-                println!("{}", serde_json::to_string_pretty(&output)?);
-            } else {
-                if let Some(name) = &e.name {
-                    println!("enum {} {{", name);
-                } else {
-                    println!("enum {{");
-                }
-                let mut current = 0i64;
-                for v in &e.variants {
-                    if let Some(val) = v.value {
-                        current = val;
-                    }
-                    println!("    {} = {},", v.name, current);
-                    current += 1;
-                }
-                println!("}}");
-            }
-        }
-        None => {
-            println!("No enum found in {}", path.display());
-        }
-    }
-
-    Ok(())
-}
-
-fn cmd_parse_defines(
-    path: &PathBuf,
-    prefix: Option<&str>,
-    json: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(path)?;
-    let mut defs = uxie::c_parser::parse_and_resolve_defines(&content);
-
-    if let Some(prefix) = prefix {
-        defs.retain(|d| d.name.starts_with(prefix));
-    }
-
-    if defs.is_empty() {
-        if let Some(prefix) = prefix {
-            println!("No defines found with prefix '{}' in {}", prefix, path.display());
-        } else {
-            println!("No defines found in {}", path.display());
-        }
-        return Ok(());
-    }
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&defs)?);
-    } else {
-        defs.sort_by(|a, b| a.name.cmp(&b.name));
-        for d in &defs {
-            if let Some(resolved) = d.resolved {
-                println!("#define {} {} (= {})", d.name, d.value, resolved);
-            } else {
-                println!("#define {} {}", d.name, d.value);
-            }
-        }
-    }
-
-    Ok(())
-}
-
-fn cmd_script_text(
-    script_id: u16,
-    arm9_path: &PathBuf,
-    game_str: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let family = parse_game_family(game_str)?;
-    let (offset, count) = get_header_table_config(family);
-
-    let provider = uxie::provider::Arm9Provider::new(arm9_path, offset, count, family);
-
-    match provider.get_text_archive_for_script(script_id)? {
-        Some(text_id) => println!("Script {} uses text archive {}", script_id, text_id),
-        None => println!("No map found using script {}", script_id),
-    }
-
-    Ok(())
-}
-
-fn cmd_ds_rom(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let config_path = if path.is_dir() {
-        path.join("config.yaml")
-    } else {
-        path.clone()
-    };
-
-    let project = DsRomProject::open(&config_path)?;
-
-    if json {
-        #[derive(serde::Serialize)]
-        struct ProjectInfo {
-            title: String,
-            gamecode: String,
-            makercode: String,
-            rom_version: u8,
-            game: Option<String>,
-            family: Option<String>,
-            region: Option<String>,
-            arm9_base: String,
-            arm9_entry: String,
-            sdk_version: String,
-            arm9_bin: String,
-            files_dir: String,
-        }
-        let info = ProjectInfo {
-            title: project.header.game_title.clone(),
-            gamecode: project.header.game_code.clone(),
-            makercode: project.header.maker_code.clone(),
-            rom_version: project.header.rom_version,
-            game: project.game().map(|g| format!("{:?}", g)),
-            family: project.game_family().map(|f| format!("{:?}", f)),
-            region: project.header.region().map(|s| s.to_string()),
-            arm9_base: format!("0x{:08X}", project.arm9_config.base_address),
-            arm9_entry: format!("0x{:08X}", project.arm9_config.entry_function),
-            sdk_version: project.arm9_config.sdk_version_string(),
-            arm9_bin: project.arm9_bin_path().display().to_string(),
-            files_dir: project.files_dir().display().to_string(),
-        };
-        println!("{}", serde_json::to_string_pretty(&info)?);
-    } else {
-        println!("ds-rom Project Information");
-        println!("==========================");
-        println!("Title:       {}", project.header.game_title);
-        println!("Game Code:   {}", project.header.game_code);
-        println!("Maker Code:  {}", project.header.maker_code);
-        println!("ROM Version: {}", project.header.rom_version);
-
-        if let Some(game) = project.game() {
-            println!("Game:        {:?}", game);
-            println!("Family:      {:?}", game.family());
-        }
-
-        if let Some(region) = project.header.region() {
-            println!("Region:      {}", region);
-        }
-
-        println!();
-        println!("ARM9 Base:   0x{:08X}", project.arm9_config.base_address);
-        println!("ARM9 Entry:  0x{:08X}", project.arm9_config.entry_function);
-        println!("SDK Version: {}", project.arm9_config.sdk_version_string());
-        
-        if project.arm9_config.compressed {
-            println!("ARM9:        compressed");
-        }
-        if project.arm9_config.encrypted {
-            println!("ARM9:        encrypted");
-        }
-
-        println!();
-        println!("ARM9 Binary: {}", project.arm9_bin_path().display());
-        println!("Files Dir:   {}", project.files_dir().display());
-    }
-
-    Ok(())
 }
