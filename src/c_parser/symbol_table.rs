@@ -201,6 +201,7 @@ impl SymbolTable {
 
     pub fn load_from_url(&mut self, url: &str) -> std::io::Result<()> {
         let output = std::process::Command::new("curl")
+            .arg("-L")
             .arg("-s")
             .arg(url)
             .output()?;

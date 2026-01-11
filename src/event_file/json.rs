@@ -10,7 +10,7 @@ pub use crate::c_parser::symbol_table::SymbolTable;
 pub struct BgEventJson {
     pub script: u16,
     #[serde(rename = "type")]
-    pub event_type: u16,
+    pub event_type: String,
     pub x: i32,
     pub z: i32,
     pub y: i32,
@@ -138,7 +138,9 @@ impl JsonEventFile {
         for bg in &bin.bg_events {
             bg_events.push(BgEventJson {
                 script: bg.script,
-                event_type: bg.event_type,
+                event_type: symbols
+                    .resolve_name(bg.event_type as i64, "BG_EVENT_TYPE_")
+                    .unwrap_or_else(|| bg.event_type.to_string()),
                 x: (bg.x % 32) as i32,
                 z: (bg.z % 32) as i32,
                 y: bg.y,
@@ -184,6 +186,7 @@ impl JsonEventFile {
                 z: (warp.z % 32) as u16,
                 dest_header_id: symbols
                     .resolve_name(warp.dest_header_id as i64, "MAP_HEADER_")
+                    .or_else(|| symbols.resolve_name(warp.dest_header_id as i64, "MAP_"))
                     .unwrap_or_else(|| warp.dest_header_id.to_string()),
                 dest_warp_id: warp.dest_warp_id,
             });

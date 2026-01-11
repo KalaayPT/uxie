@@ -165,26 +165,7 @@ fn cmd_map(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(path)?;
     if let Some(d) = decomp {
-        let d_str = d.to_string_lossy();
-        if d_str.starts_with("http") {
-            let base = if d_str.ends_with('/') {
-                d_str.to_string()
-            } else {
-                format!("{}/", d_str)
-            };
-            let files = [
-                "generated/sdat.txt",
-                "generated/vars_flags.txt",
-                "generated/maps.txt",
-            ];
-            for f in files {
-                let _ = ws.symbols.load_from_url(&format!("{}{}", base, f));
-            }
-        } else {
-            ws.symbols
-                .load_headers_from_dir(d.join("include/constants"))?;
-            ws.symbols.load_headers_from_dir(d.join("generated"))?;
-        }
+        load_symbols_from_decomp(&mut ws.symbols, &d)?;
     }
 
     let header = ws.provider.get_map_header(id)?;
@@ -206,9 +187,7 @@ fn cmd_event(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(project_path)?;
     if let Some(d) = decomp {
-        ws.symbols
-            .load_headers_from_dir(d.join("include/constants"))?;
-        ws.symbols.load_headers_from_dir(d.join("generated"))?;
+        load_symbols_from_decomp(&mut ws.symbols, &d)?;
     }
 
     let dspre = DspreProject::open(project_path)?;
@@ -227,9 +206,7 @@ fn cmd_encounter(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(project_path)?;
     if let Some(d) = decomp {
-        ws.symbols
-            .load_headers_from_dir(d.join("include/constants"))?;
-        ws.symbols.load_headers_from_dir(d.join("generated"))?;
+        load_symbols_from_decomp(&mut ws.symbols, &d)?;
     }
 
     let narc_path = match ws.family {
@@ -364,6 +341,66 @@ fn cmd_resolve_script(
     let content = std::fs::read_to_string(path)?;
     let ws = Workspace::open(decomp_path)?;
     println!("{}", ws.resolve_script_symbols(&content));
+    Ok(())
+}
+
+fn load_symbols_from_decomp(
+    symbols: &mut SymbolTable,
+    d: &PathBuf,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let d_str = d.to_string_lossy();
+    if d_str.starts_with("http") || d_str.contains("github.com") {
+        let mut base = if d_str.starts_with("git@github.com:") {
+            let repo = d_str.replace("git@github.com:", "").replace(".git", "");
+            format!("https://raw.githubusercontent.com/{}/master/", repo)
+        } else if d_str.contains("github.com") && !d_str.contains("raw.githubusercontent.com") {
+            let repo_path = if let Some(pos) = d_str.find("github.com/") {
+                &d_str[pos + 11..]
+            } else {
+                &d_str
+            };
+            let repo_path = repo_path.trim_end_matches('/');
+            format!("https://raw.githubusercontent.com/{}/master/", repo_path)
+        } else {
+            d_str.to_string()
+        };
+
+        if !base.ends_with('/') {
+            base.push('/');
+        }
+
+        let files = [
+            "generated/sdat.txt",
+            "generated/vars_flags.txt",
+            "generated/maps.txt",
+            "generated/species.txt",
+            "generated/moves.txt",
+            "generated/items.txt",
+            "generated/object_events.txt",
+            "generated/movement_types.txt",
+            "generated/trainer_types.txt",
+            "generated/bg_event_dirs.txt",
+            "generated/bg_event_types.txt",
+            "generated/map_headers.txt",
+            "generated/battle_backgrounds.txt",
+            "generated/overworld_weather.txt",
+            "include/constants/species.h",
+            "include/constants/moves.h",
+            "include/constants/items.h",
+            "include/constants/flags.h",
+            "include/constants/vars.h",
+            "include/constants/map_object.h",
+            "include/constants/map_sections.h",
+            "include/constants/overworld_weather.h",
+            "include/constants/battle.h",
+        ];
+        for f in files {
+            let _ = symbols.load_from_url(&format!("{}{}", base, f));
+        }
+    } else {
+        let _ = symbols.load_headers_from_dir(d.join("include/constants"));
+        let _ = symbols.load_headers_from_dir(d.join("generated"));
+    }
     Ok(())
 }
 
