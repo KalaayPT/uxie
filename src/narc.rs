@@ -1,5 +1,5 @@
-use std::io::{self, Read, Seek, SeekFrom};
 use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read, Seek, SeekFrom};
 
 pub struct Narc {
     pub members: Vec<Vec<u8>>,
@@ -10,19 +10,25 @@ impl Narc {
         let mut magic = [0u8; 4];
         reader.read_exact(&mut magic)?;
         if &magic != b"NARC" {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Not a NARC file"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Not a NARC file",
+            ));
         }
 
-        reader.seek(SeekFrom::Current(12))?; 
-        
+        reader.seek(SeekFrom::Current(12))?;
+
         let mut btaf_magic = [0u8; 4];
         reader.read_exact(&mut btaf_magic)?;
         if &btaf_magic != b"BTAF" {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "Missing BTAF chunk"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Missing BTAF chunk",
+            ));
         }
         let btaf_size = reader.read_u32::<LittleEndian>()?;
         let entry_count = reader.read_u32::<LittleEndian>()?;
-        
+
         let mut entries = Vec::with_capacity(entry_count as usize);
         for _ in 0..entry_count {
             let start = reader.read_u32::<LittleEndian>()?;
@@ -34,7 +40,7 @@ impl Narc {
         let mut btnf_magic = [0u8; 4];
         reader.read_exact(&mut btnf_magic)?;
         let btnf_size = reader.read_u32::<LittleEndian>()?;
-        
+
         reader.seek(SeekFrom::Start(16 + btaf_size as u64 + btnf_size as u64))?;
         let mut gmif_magic = [0u8; 4];
         reader.read_exact(&mut gmif_magic)?;

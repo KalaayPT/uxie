@@ -1,16 +1,15 @@
-use std::path::{Path, PathBuf};
-use std::io;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::game::{Game, GameFamily};
 use crate::rom_header::RomHeader;
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use std::io;
+use std::path::{Path, PathBuf};
 
 pub use crate::event_file::BinaryEventFile;
 
 fn from_yaml_file<T: DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> {
     let content = std::fs::read_to_string(path)?;
-    serde_yaml::from_str(&content).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-    })
+    serde_yaml::from_str(&content)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
 #[derive(Debug, Clone)]
@@ -22,7 +21,10 @@ impl DspreProject {
     pub fn open(root: impl AsRef<Path>) -> io::Result<Self> {
         let root = root.as_ref().to_path_buf();
         if !root.join("unpacked").exists() {
-            return Err(io::Error::new(io::ErrorKind::NotFound, "Not a DSPRE project (missing 'unpacked' directory)"));
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Not a DSPRE project (missing 'unpacked' directory)",
+            ));
         }
         Ok(Self { root })
     }
@@ -167,11 +169,10 @@ impl DsRomToolProject {
     pub fn open(config_path: impl AsRef<Path>) -> io::Result<Self> {
         let config_path = config_path.as_ref();
         let root = config_path.parent().unwrap_or(Path::new(".")).to_path_buf();
-        
+
         let content = std::fs::read_to_string(config_path)?;
-        let raw: RawProjectConfig = serde_yaml::from_str(&content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })?;
+        let raw: RawProjectConfig = serde_yaml::from_str(&content)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
         let mut header = RomHeader::from_ds_rom_yaml(root.join(&raw.header))?;
         let arm9_config = DsRomArm9Config::from_yaml(root.join(&raw.arm9_config))?;

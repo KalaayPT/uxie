@@ -1,5 +1,5 @@
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct TextBankTable {
@@ -31,7 +31,7 @@ impl TextBankTable {
             } else {
                 line.to_string()
             };
-            
+
             if !self.name_to_id.contains_key(&name) {
                 self.name_to_id.insert(name.clone(), self.names.len());
                 self.names.push(name);

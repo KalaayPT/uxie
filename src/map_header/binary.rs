@@ -1,13 +1,17 @@
-use std::io::{self, Read, Seek, SeekFrom};
-use byteorder::{LittleEndian, ReadBytesExt};
-use crate::game::GameFamily;
 use super::types::*;
+use crate::game::GameFamily;
+use byteorder::{LittleEndian, ReadBytesExt};
+use std::io::{self, Read, Seek, SeekFrom};
 
 pub fn read_map_header_from_bytes(data: &[u8], family: GameFamily) -> io::Result<MapHeader> {
     if data.len() < MAP_HEADER_SIZE {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            format!("Buffer too small: {} bytes, need {}", data.len(), MAP_HEADER_SIZE),
+            format!(
+                "Buffer too small: {} bytes, need {}",
+                data.len(),
+                MAP_HEADER_SIZE
+            ),
         ));
     }
 
@@ -187,7 +191,9 @@ pub fn write_map_header_to_bytes(header: &MapHeader) -> Vec<u8> {
             let area_props = (h.area_icon & 0b_1111) | ((h.unknown1 & 0b_1111) << 4);
             buf.write_u8(area_props).unwrap();
             let mut last32: u32 = 0;
-            if h.kanto_flag { last32 |= 1; }
+            if h.kanto_flag {
+                last32 |= 1;
+            }
             last32 |= (h.weather_id as u32 & 0b_111_1111) << 1;
             last32 |= (h.location_type as u32 & 0b_1111) << 8;
             last32 |= (h.camera_angle_id as u32 & 0b_11_1111) << 12;

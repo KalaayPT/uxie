@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
-use std::collections::HashMap;
-use crate::provider::{DataProvider, Arm9Provider};
 use crate::c_parser::SymbolTable;
+use crate::game::{Game, GameFamily};
+use crate::provider::{Arm9Provider, DataProvider};
+use crate::rom_header::RomHeader;
 use crate::script_file::ScriptTable;
 use crate::text_bank::TextBankTable;
-use crate::game::{Game, GameFamily};
-use crate::rom_header::RomHeader;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
@@ -23,23 +23,120 @@ pub struct Workspace {
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
     script_to_text_cache: HashMap<u16, u16>,
+    location_names: Option<Vec<String>>,
+    internal_names: Option<Vec<String>>,
 }
 
 impl Workspace {
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
-        
-        if path.join("include/constants").exists() || path.join("res/field/scripts").exists() {
-            Self::open_decomp(path)
+
+        let mut ws =
+            if path.join("include/constants").exists() || path.join("res/field/scripts").exists() {
+                Self::open_decomp(path)?
+            } else {
+                Self::open_dspre(path)?
+            };
+
+        ws.load_names()?;
+        Ok(ws)
+    }
+
+    fn load_names(&mut self) -> std::io::Result<()> {
+        if self.project_type == ProjectType::Dspre {
+            let mapname_bin = self
+                .project_path
+                .join("data/fielddata/maptable/mapname.bin");
+            if mapname_bin.exists() {
+                let data = std::fs::read(mapname_bin)?;
+                let mut names = Vec::new();
+                for chunk in data.chunks_exact(16) {
+                    let name = String::from_utf8_lossy(chunk)
+                        .trim_end_matches('\0')
+                        .to_string();
+                    names.push(name);
+                }
+                self.internal_names = Some(names);
+            }
         } else {
-            Self::open_dspre(path)
+            let maps_txt = self.project_path.join("generated/maps.txt");
+            if maps_txt.exists() {
+                let content = std::fs::read_to_string(maps_txt)?;
+                let mut names = Vec::new();
+                for line in content.lines() {
+                    let line = line.trim();
+                    if !line.is_empty() && !line.starts_with('#') {
+                        let name = if let Some(pos) = line.find('=') {
+                            line[..pos].trim()
+                        } else {
+                            line
+                        };
+                        names.push(name.to_string());
+                    }
+                }
+                self.internal_names = Some(names);
+            }
         }
+
+        let location_text_id = match self.family {
+            GameFamily::DP => 382,
+            GameFamily::Platinum => 433,
+            GameFamily::HGSS => 279,
+        };
+
+        if self.project_type == ProjectType::Dspre {
+            let archive_path = self
+                .project_path
+                .join(format!("unpacked/textArchives/{:04}", location_text_id));
+            if archive_path.exists() {
+                let mut file = std::fs::File::open(archive_path)?;
+                if let Ok(archive) = crate::text_bank::TextArchive::from_binary(&mut file) {
+                    self.location_names = Some(archive.messages);
+                }
+            }
+        } else {
+            let location_json = self.project_path.join("res/text/location_names.json");
+            if location_json.exists() {
+                let content = std::fs::read_to_string(location_json)?;
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(messages) = json.get("messages").and_then(|m| m.as_array()) {
+                        let names: Vec<String> = messages
+                            .iter()
+                            .map(|m| {
+                                m.get("en_US")
+                                    .or_else(|| m.get("ja_JP"))
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("Unknown")
+                                    .to_string()
+                            })
+                            .collect();
+                        self.location_names = Some(names);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_map_internal_name(&self, id: u16) -> Option<String> {
+        self.internal_names.as_ref()?.get(id as usize).cloned()
+    }
+
+    pub fn get_map_location_name(&self, location_id: u8) -> Option<String> {
+        self.location_names
+            .as_ref()?
+            .get(location_id as usize)
+            .cloned()
     }
 
     fn open_dspre(path: PathBuf) -> std::io::Result<Self> {
         let header = RomHeader::open(&path)?;
         let game = header.detect_game().ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "Could not detect game from ROM header")
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Could not detect game from ROM header",
+            )
         })?;
         let family = game.family();
 
@@ -72,52 +169,63 @@ impl Workspace {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             script_to_text_cache: HashMap::new(),
+            location_names: None,
+            internal_names: None,
         })
     }
 
     pub fn open_decomp(root: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = root.as_ref().to_path_buf();
-        
-        let (game, family) = if root.to_string_lossy().contains("pokeheartgold") || root.to_string_lossy().contains("pokesoulsilver") {
-             (Game::HeartGold, GameFamily::HGSS)
+
+        let (game, family) = if root.to_string_lossy().contains("pokeheartgold")
+            || root.to_string_lossy().contains("pokesoulsilver")
+        {
+            (Game::HeartGold, GameFamily::HGSS)
         } else {
-             (Game::Platinum, GameFamily::Platinum)
+            (Game::Platinum, GameFamily::Platinum)
         };
 
         let mut symbols = SymbolTable::new();
-        
+
         let include_dir = root.join("include/constants");
         if include_dir.exists() {
             symbols.load_headers_from_dir(include_dir)?;
         }
-        
+
         let generated_dir = root.join("generated");
         if generated_dir.exists() {
             symbols.load_headers_from_dir(generated_dir.clone())?;
         }
-        
+
+        let build_dir = root.join("build");
+        if build_dir.exists() {
+            symbols.load_headers_from_dir(build_dir)?;
+        }
+
         let mut scripts = ScriptTable::new();
         let scripts_order = root.join("res/field/scripts/scripts.order");
         if scripts_order.exists() {
             scripts.load_order_file(scripts_order)?;
         }
-        
+
         let mut text_banks = TextBankTable::new();
         let text_banks_list = root.join("generated/text_banks.txt");
         if text_banks_list.exists() {
             text_banks.load_list_file(text_banks_list)?;
         }
-        
+
         Ok(Self {
-            project_path: root,
+            project_path: root.clone(),
             project_type: ProjectType::Decomp,
             game,
             family,
-            provider: Box::new(Arm9Provider::new("dummy", 0, 0, family)),
+            provider: Box::new(crate::provider::DecompProvider::new(root, symbols.clone())),
             symbols,
             scripts,
             text_banks,
             script_to_text_cache: HashMap::new(),
+            location_names: None,
+            internal_names: None,
         })
     }
 
@@ -137,6 +245,8 @@ impl Workspace {
             scripts,
             text_banks,
             script_to_text_cache: HashMap::new(),
+            location_names: None,
+            internal_names: None,
         }
     }
 
@@ -153,7 +263,11 @@ impl Workspace {
         }
 
         Ok(Self {
-            project_path: arm9_path.as_ref().parent().unwrap_or(Path::new(".")).to_path_buf(),
+            project_path: arm9_path
+                .as_ref()
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf(),
             project_type: ProjectType::Dspre,
             game: Game::Platinum,
             family,
@@ -162,6 +276,8 @@ impl Workspace {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             script_to_text_cache: HashMap::new(),
+            location_names: None,
+            internal_names: None,
         })
     }
 
@@ -173,7 +289,10 @@ impl Workspace {
         self.text_banks.load_list_file(path)
     }
 
-    pub fn get_text_bank_name_for_script(&mut self, script_id: u16) -> std::io::Result<Option<String>> {
+    pub fn get_text_bank_name_for_script(
+        &mut self,
+        script_id: u16,
+    ) -> std::io::Result<Option<String>> {
         if let Some(&text_id) = self.script_to_text_cache.get(&script_id) {
             return Ok(self.text_banks.get_name(text_id as usize).cloned());
         }
@@ -204,7 +323,7 @@ impl Workspace {
     pub fn resolve_script_symbols(&self, script: &str) -> String {
         let mut result = String::with_capacity(script.len());
         let mut current_token = String::new();
-        
+
         for c in script.chars() {
             if c.is_alphanumeric() || c == '_' {
                 current_token.push(c);
@@ -213,12 +332,12 @@ impl Workspace {
                     if let Some(val) = self.resolve_constant(&current_token) {
                         result.push_str(&val.to_string());
                     } else if let Ok(val) = current_token.parse::<i64>() {
-                         let matches = self.resolve_names(val, &[]);
-                         if !matches.is_empty() {
-                             result.push_str(&matches[0]);
-                         } else {
-                             result.push_str(&current_token);
-                         }
+                        let matches = self.resolve_names(val, &[]);
+                        if !matches.is_empty() {
+                            result.push_str(&matches[0]);
+                        } else {
+                            result.push_str(&current_token);
+                        }
                     } else {
                         result.push_str(&current_token);
                     }
@@ -227,22 +346,22 @@ impl Workspace {
                 result.push(c);
             }
         }
-        
+
         if !current_token.is_empty() {
             if let Some(val) = self.resolve_constant(&current_token) {
                 result.push_str(&val.to_string());
             } else if let Ok(val) = current_token.parse::<i64>() {
-                 let matches = self.resolve_names(val, &[]);
-                 if !matches.is_empty() {
-                     result.push_str(&matches[0]);
-                 } else {
-                     result.push_str(&current_token);
-                 }
+                let matches = self.resolve_names(val, &[]);
+                if !matches.is_empty() {
+                    result.push_str(&matches[0]);
+                } else {
+                    result.push_str(&current_token);
+                }
             } else {
                 result.push_str(&current_token);
             }
         }
-        
+
         result
     }
 }
@@ -260,10 +379,13 @@ mod tests {
         }
 
         let workspace = Workspace::open_decomp(decomp_path).unwrap();
-        
-        assert_eq!(workspace.get_script_name(2), Some("scripts_jubilife_city".to_string()));
+
+        assert_eq!(
+            workspace.get_script_name(2),
+            Some("scripts_jubilife_city".to_string())
+        );
         assert_eq!(workspace.resolve_constant("VARS_START"), Some(16384));
-        
+
         let mut workspace = workspace;
         if let Ok(Some(name)) = workspace.get_text_bank_name_for_script(2) {
             assert_eq!(name, "TEXT_BANK_JUBILIFE_CITY");

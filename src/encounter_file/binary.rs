@@ -1,6 +1,6 @@
-use std::io::{self, Read, Write, Seek, SeekFrom};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use crate::game::GameFamily;
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EncounterEntry {
@@ -119,7 +119,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            surf_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            surf_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         reader.seek(SeekFrom::Start(0x124))?;
@@ -131,7 +135,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            old_rod_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            old_rod_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let good_rod_rate = reader.read_u32::<LittleEndian>()?;
@@ -141,7 +149,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            good_rod_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            good_rod_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let super_rod_rate = reader.read_u32::<LittleEndian>()?;
@@ -151,7 +163,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            super_rod_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            super_rod_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         Ok(Self {
@@ -197,7 +213,10 @@ impl BinaryEncounterFile {
         let mut morning_encounters = Vec::with_capacity(12);
         for i in 0..12 {
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            morning_encounters.push(EncounterEntry { level: walking_levels[i], species });
+            morning_encounters.push(EncounterEntry {
+                level: walking_levels[i],
+                species,
+            });
         }
 
         let mut day_encounters = Vec::with_capacity(12);
@@ -232,7 +251,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            surf_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            surf_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let mut rock_smash_encounters = Vec::with_capacity(2);
@@ -240,7 +263,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            rock_smash_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            rock_smash_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let mut old_rod_encounters = Vec::with_capacity(5);
@@ -248,7 +275,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            old_rod_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            old_rod_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let mut good_rod_encounters = Vec::with_capacity(5);
@@ -256,7 +287,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            good_rod_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            good_rod_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let mut super_rod_encounters = Vec::with_capacity(5);
@@ -264,7 +299,11 @@ impl BinaryEncounterFile {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            super_rod_encounters.push(WaterEncounterEntry { min_level, max_level, species });
+            super_rod_encounters.push(WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            });
         }
 
         let mut special = hoenn_music;
@@ -349,7 +388,7 @@ impl BinaryEncounterFile {
             writer.write_all(&[0, 0])?;
             writer.write_u32::<LittleEndian>(e.species)?;
         }
-        
+
         // Handle gap to 0x124
         // Current pos is 4 + 96 + 8 + 8 + 8 + 16 + 20 + 4 + 8 + 8 + 8 + 8 + 8 + 4 + 40 = 248
         // Need to pad 44 bytes
@@ -404,7 +443,7 @@ impl BinaryEncounterFile {
         for &s in &self.swarm_encounters {
             writer.write_u16::<LittleEndian>(s as u16)?;
         }
-        
+
         // hoenn/sinnoh music
         for i in 0..4 {
             if let Some(&s) = self.radar_encounters.get(i) {

@@ -15,9 +15,10 @@ ROM data from DSPRE projects and decompilation sources.
   - [Build from Source](#build-from-source)
   - [As a Library](#as-a-library)
 - [CLI Usage](#cli-usage)
+  - [Common Flags](#common-flags)
   - [header](#header)
   - [map](#map)
-  - [event](#event)
+  - [event & encounter](#event--encounter)
   - [symbols](#symbols)
   - [resolve-script](#resolve-script)
 - [Integration](#integration)
@@ -51,12 +52,13 @@ as the "Being of Knowledge."
 
 ## Features
 
+- **Smart Discovery**: Automatically detects game version, internal project names, and table offsets. No manual configuration required for standard projects.
 - **Unified ROM Access**: Auto-detects and reads data from DSPRE projects and decompilation sources.
-- **High-Level Workspace**: Unified API for managing symbols, script mappings, and text banks across a project. Automatically detects project types.
+- **High-Level Workspace**: Unified API for managing symbols, script mappings, and text banks across a project
 - **Complex Expression Resolution**: Evaluates C expressions in `#define` and `enum` blocks, including bitwise OR (`|`), left shifts (`<<`), and nested parentheses.
-- **Enhanced Symbol Table**: Automatically resolves cross-references between constants and supports `.txt` files with incremental indexing (e.g., `VAR_0 = 0`, `VAR_1`).
-- **Map Header Parsing**: Unified access to area data, scripts, and events (so far) across all Gen 4 games.
-- **Format Agnostic**: Seamlessly bridge legacy binary formats and modern JSON/YAML source data for both input and output.
+- **Enhanced Symbol Table**: Automatically resolves cross-references between constants and supports `.txt` files with incremental indexing.
+- **Map Header Parsing**: Unified access to area data, scripts, and events across all Gen 4 games.
+- **Format Agnostic**: Seamlessly bridge legacy binary formats and modern JSON/YAML source data.
 - **Bidirectional Script Resolution**: Resolve script constants from names to values AND values to names using a shortest-name heuristic.
 
 ## Install
@@ -86,23 +88,26 @@ uxie = { git = "https://github.com/KalaayPT/uxie.git", branch = "mother" }
 
 ## CLI Usage
 
-```shell
-uxie <COMMAND> [OPTIONS]
-```
+The Being of Knowledge offers several ways to query the secrets of the Sinnoh and Johto regions.
+
+### Common Flags
+
+Most commands (`map`, `event`, `encounter`, `resolve-script`) share these common options:
+
+- `--project, -p`: Path to the project root (defaults to current directory).
+- `--decomp, -d`: Optional local path OR GitHub raw URL (e.g., `https://raw.githubusercontent.com/pret/pokeplatinum/master/`) for symbol resolution.
+- `--json`: Output the result as a structured JSON object.
 
 ### header
 
 Read ROM header information. Auto-detects format from a file path or project directory:
 
 ```shell
-# From current directory (auto-detects project type)
+# From current directory
 uxie header
 
 # From a specific ROM file or header.bin
 uxie header path/to/header.bin
-
-# From a DSPRE project directory
-uxie header path/to/dspre-project/
 
 # Output as JSON
 uxie header --json
@@ -110,29 +115,38 @@ uxie header --json
 
 ### map
 
-Read map header data. Automatically detects game version and table offsets from the project:
+Read map header data, including internal and pretty names.
 
 ```shell
 # Read map header ID 0 from current project
 uxie map 0
 
-# Read from a specific project path
-uxie map 100 -p /path/to/project/
-
-# Read from DSPRE project but resolve symbols using a decomp root
-uxie map 3 -p /path/to/dspre/ --decomp /path/to/decomp/
+# Read from DSPRE project but resolve symbols using a remote decomp
+uxie map 3 -p /path/to/dspre/ -d https://raw.githubusercontent.com/pret/pokeplatinum/master/
 ```
 
-### event
+**Example Output:**
+```text
+Map Header 0 (Platinum)
+Internal Name:   D21R0101
+Pretty Name:     Twinleaf Town
+=========================
+Area Data ID:    0
+Matrix ID:       0
+Script File ID:  0
+...
+```
 
-Load and resolve event file data:
+### event & encounter
+
+Load and resolve event or encounter data:
 
 ```shell
-# Resolve events for map 3 using current workspace
+# Resolve events for map 3
 uxie event 3
 
-# Resolve using a specific decomp root for symbols
-uxie event 3 --decomp /path/to/pokeplatinum/
+# Fetch encounters for map 100 in JSON format
+uxie encounter 100 --json
 ```
 
 ### symbols
@@ -140,7 +154,7 @@ uxie event 3 --decomp /path/to/pokeplatinum/
 Parse C header files or symbol list files:
 
 ```shell
-# Parse and resolve complex expressions in a header
+# Parse and resolve complex expressions
 uxie symbols constants.h
 
 # Parse a .txt list with incremental indexing
@@ -155,10 +169,7 @@ uxie symbols constants.h --only-enums --json
 Bidirectionally resolve constants within a script file (Names -> Values AND Values -> Names):
 
 ```shell
-# Resolve symbols in a script using current directory as workspace
-uxie resolve-script game_script.s
-
-# Resolve using a specific decomp root
+# Resolve using a specific decomp root (optional)
 uxie resolve-script game_script.s --decomp /path/to/pokeplatinum/
 ```
 
@@ -167,13 +178,10 @@ uxie resolve-script game_script.s --decomp /path/to/pokeplatinum/
 `uxie` is designed to bridge the gap between different toolchains in the Gen 4
 romhacking ecosystem:
 
-- **Decompilation Projects**: Fully compatible with the formats used by
-  `pokeplatinum` and `pokeheartgold`. Provides a seamless bridge between raw
-  binary and modern source-controlled data.
-- **DSPRE / Binary Tools**: Ensures 1:1 binary round-tripping for map headers
-  and event files, maintaining compatibility with standard ROM editing tools.
-- **Unified Workspace**: Transparently handles both legacy binary projects and
-  modern source trees, allowing tools to be built once and run anywhere.
+- **Universal Symbols**: Bridges C headers, assembly constants, and binary offsets into a single, searchable namespace.
+- **Text & Archives**: Seamlessly maps text archive IDs to their symbolic names and content, linking binary data to human-readable strings.
+- **Format Fluidity**: Provides a unified bridge between legacy binary formats (NARC, arm9.bin) and modern source-controlled data (JSON, YAML, C).
+- **Toolchain Agnostic**: Handles both legacy binary projects and modern decompilation trees transparently, allowing your tools to work anywhere knowledge is stored.
 
 ## Library Usage
 

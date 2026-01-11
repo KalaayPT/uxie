@@ -1,7 +1,7 @@
-use serde::{Deserialize, Serialize};
 use crate::c_parser::SymbolTable;
 use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
 use crate::game::GameFamily;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncounterEntryJson {
@@ -43,7 +43,7 @@ pub struct JsonEncounterFile {
     pub good_rod_encounters: Vec<WaterEncounterEntryJson>,
     pub super_rod_rate: u32,
     pub super_rod_encounters: Vec<WaterEncounterEntryJson>,
-    
+
     // HGSS specific
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rock_smash_rate: Option<u32>,
@@ -56,13 +56,19 @@ pub struct JsonEncounterFile {
 impl JsonEncounterFile {
     pub fn to_binary(&self, symbols: &SymbolTable, _family: GameFamily) -> BinaryEncounterFile {
         let resolve = |name: &str| {
-            symbols.resolve_constant(name)
+            symbols
+                .resolve_constant(name)
                 .map(|v| v as u32)
                 .unwrap_or_else(|| name.parse().unwrap_or(0))
         };
 
-        let grass_encounters = self.land_encounters.iter()
-            .map(|e| EncounterEntry { level: e.level, species: resolve(&e.species) })
+        let grass_encounters = self
+            .land_encounters
+            .iter()
+            .map(|e| EncounterEntry {
+                level: e.level,
+                species: resolve(&e.species),
+            })
             .collect();
 
         let swarm_encounters = self.swarms.iter().map(|s| resolve(s)).collect();
@@ -75,17 +81,41 @@ impl JsonEncounterFile {
         let dual_slot_firered = self.firered.iter().map(|s| resolve(s)).collect();
         let dual_slot_leafgreen = self.leafgreen.iter().map(|s| resolve(s)).collect();
 
-        let surf_encounters = self.surf_encounters.iter()
-            .map(|e| WaterEncounterEntry { min_level: e.level_min, max_level: e.level_max, species: resolve(&e.species) })
+        let surf_encounters = self
+            .surf_encounters
+            .iter()
+            .map(|e| WaterEncounterEntry {
+                min_level: e.level_min,
+                max_level: e.level_max,
+                species: resolve(&e.species),
+            })
             .collect();
-        let old_rod_encounters = self.old_rod_encounters.iter()
-            .map(|e| WaterEncounterEntry { min_level: e.level_min, max_level: e.level_max, species: resolve(&e.species) })
+        let old_rod_encounters = self
+            .old_rod_encounters
+            .iter()
+            .map(|e| WaterEncounterEntry {
+                min_level: e.level_min,
+                max_level: e.level_max,
+                species: resolve(&e.species),
+            })
             .collect();
-        let good_rod_encounters = self.good_rod_encounters.iter()
-            .map(|e| WaterEncounterEntry { min_level: e.level_min, max_level: e.level_max, species: resolve(&e.species) })
+        let good_rod_encounters = self
+            .good_rod_encounters
+            .iter()
+            .map(|e| WaterEncounterEntry {
+                min_level: e.level_min,
+                max_level: e.level_max,
+                species: resolve(&e.species),
+            })
             .collect();
-        let super_rod_encounters = self.super_rod_encounters.iter()
-            .map(|e| WaterEncounterEntry { min_level: e.level_min, max_level: e.level_max, species: resolve(&e.species) })
+        let super_rod_encounters = self
+            .super_rod_encounters
+            .iter()
+            .map(|e| WaterEncounterEntry {
+                min_level: e.level_min,
+                max_level: e.level_max,
+                species: resolve(&e.species),
+            })
             .collect();
 
         BinaryEncounterFile {
@@ -95,7 +125,13 @@ impl JsonEncounterFile {
             day_encounters,
             night_encounters,
             radar_encounters,
-            form_encounter_rates: vec![self.rate_form0, self.rate_form1, self.rate_form2, self.rate_form3, self.rate_form4],
+            form_encounter_rates: vec![
+                self.rate_form0,
+                self.rate_form1,
+                self.rate_form2,
+                self.rate_form3,
+                self.rate_form4,
+            ],
             unown_table_id: self.unown_table,
             dual_slot_ruby,
             dual_slot_sapphire,
@@ -111,23 +147,52 @@ impl JsonEncounterFile {
             super_rod_rate: self.super_rod_rate,
             super_rod_encounters,
             rock_smash_rate: self.rock_smash_rate.unwrap_or(0),
-            rock_smash_encounters: self.rock_smash_encounters.as_ref().map(|e| e.iter()
-                .map(|e| WaterEncounterEntry { min_level: e.level_min, max_level: e.level_max, species: resolve(&e.species) })
-                .collect()).unwrap_or_default(),
-            morning_encounters: self.morning.as_ref().map(|e| e.iter()
-                .map(|e| EncounterEntry { level: e.level, species: resolve(&e.species) })
-                .collect()).unwrap_or_default(),
+            rock_smash_encounters: self
+                .rock_smash_encounters
+                .as_ref()
+                .map(|e| {
+                    e.iter()
+                        .map(|e| WaterEncounterEntry {
+                            min_level: e.level_min,
+                            max_level: e.level_max,
+                            species: resolve(&e.species),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            morning_encounters: self
+                .morning
+                .as_ref()
+                .map(|e| {
+                    e.iter()
+                        .map(|e| EncounterEntry {
+                            level: e.level,
+                            species: resolve(&e.species),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
-    pub fn from_binary(bin: &BinaryEncounterFile, symbols: &SymbolTable, family: GameFamily) -> Self {
+    pub fn from_binary(
+        bin: &BinaryEncounterFile,
+        symbols: &SymbolTable,
+        family: GameFamily,
+    ) -> Self {
         let resolve = |id: u32| {
-            symbols.resolve_name(id as i64, "SPECIES_")
+            symbols
+                .resolve_name(id as i64, "SPECIES_")
                 .unwrap_or_else(|| id.to_string())
         };
 
-        let land_encounters = bin.grass_encounters.iter()
-            .map(|e| EncounterEntryJson { level: e.level, species: resolve(e.species) })
+        let land_encounters = bin
+            .grass_encounters
+            .iter()
+            .map(|e| EncounterEntryJson {
+                level: e.level,
+                species: resolve(e.species),
+            })
             .collect();
 
         let swarms = bin.swarm_encounters.iter().map(|&s| resolve(s)).collect();
@@ -138,19 +203,47 @@ impl JsonEncounterFile {
         let sapphire = bin.dual_slot_sapphire.iter().map(|&s| resolve(s)).collect();
         let emerald = bin.dual_slot_emerald.iter().map(|&s| resolve(s)).collect();
         let firered = bin.dual_slot_firered.iter().map(|&s| resolve(s)).collect();
-        let leafgreen = bin.dual_slot_leafgreen.iter().map(|&s| resolve(s)).collect();
+        let leafgreen = bin
+            .dual_slot_leafgreen
+            .iter()
+            .map(|&s| resolve(s))
+            .collect();
 
-        let surf_encounters = bin.surf_encounters.iter()
-            .map(|e| WaterEncounterEntryJson { level_min: e.min_level, level_max: e.max_level, species: resolve(e.species) })
+        let surf_encounters = bin
+            .surf_encounters
+            .iter()
+            .map(|e| WaterEncounterEntryJson {
+                level_min: e.min_level,
+                level_max: e.max_level,
+                species: resolve(e.species),
+            })
             .collect();
-        let old_rod_encounters = bin.old_rod_encounters.iter()
-            .map(|e| WaterEncounterEntryJson { level_min: e.min_level, level_max: e.max_level, species: resolve(e.species) })
+        let old_rod_encounters = bin
+            .old_rod_encounters
+            .iter()
+            .map(|e| WaterEncounterEntryJson {
+                level_min: e.min_level,
+                level_max: e.max_level,
+                species: resolve(e.species),
+            })
             .collect();
-        let good_rod_encounters = bin.good_rod_encounters.iter()
-            .map(|e| WaterEncounterEntryJson { level_min: e.min_level, level_max: e.max_level, species: resolve(e.species) })
+        let good_rod_encounters = bin
+            .good_rod_encounters
+            .iter()
+            .map(|e| WaterEncounterEntryJson {
+                level_min: e.min_level,
+                level_max: e.max_level,
+                species: resolve(e.species),
+            })
             .collect();
-        let super_rod_encounters = bin.super_rod_encounters.iter()
-            .map(|e| WaterEncounterEntryJson { level_min: e.min_level, level_max: e.max_level, species: resolve(e.species) })
+        let super_rod_encounters = bin
+            .super_rod_encounters
+            .iter()
+            .map(|e| WaterEncounterEntryJson {
+                level_min: e.min_level,
+                level_max: e.max_level,
+                species: resolve(e.species),
+            })
             .collect();
 
         let mut res = Self {
@@ -186,12 +279,25 @@ impl JsonEncounterFile {
 
         if family == GameFamily::HGSS {
             res.rock_smash_rate = Some(bin.rock_smash_rate);
-            res.rock_smash_encounters = Some(bin.rock_smash_encounters.iter()
-                .map(|e| WaterEncounterEntryJson { level_min: e.min_level, level_max: e.max_level, species: resolve(e.species) })
-                .collect());
-            res.morning = Some(bin.morning_encounters.iter()
-                .map(|e| EncounterEntryJson { level: e.level, species: resolve(e.species) })
-                .collect());
+            res.rock_smash_encounters = Some(
+                bin.rock_smash_encounters
+                    .iter()
+                    .map(|e| WaterEncounterEntryJson {
+                        level_min: e.min_level,
+                        level_max: e.max_level,
+                        species: resolve(e.species),
+                    })
+                    .collect(),
+            );
+            res.morning = Some(
+                bin.morning_encounters
+                    .iter()
+                    .map(|e| EncounterEntryJson {
+                        level: e.level,
+                        species: resolve(e.species),
+                    })
+                    .collect(),
+            );
         }
 
         res

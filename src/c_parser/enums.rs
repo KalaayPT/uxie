@@ -43,13 +43,9 @@ impl CEnum {
 }
 
 pub fn parse_enum(source: &str) -> Option<CEnum> {
-    let enum_pattern = Regex::new(
-        r"enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]+)\}"
-    ).unwrap();
-    
-    let variant_pattern = Regex::new(
-        r"([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*([^,\n]+))?"
-    ).unwrap();
+    let enum_pattern = Regex::new(r"enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]+)\}").unwrap();
+
+    let variant_pattern = Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*([^,\n]+))?").unwrap();
 
     let caps = enum_pattern.captures(source)?;
     let name = caps.get(1).map(|m| m.as_str().to_string());
@@ -61,7 +57,7 @@ pub fn parse_enum(source: &str) -> Option<CEnum> {
         if line.is_empty() || line.starts_with("//") {
             continue;
         }
-        
+
         if let Some(var_caps) = variant_pattern.captures(line) {
             let var_name = var_caps[1].to_string();
             let value = var_caps.get(2).and_then(|m| {
@@ -72,7 +68,10 @@ pub fn parse_enum(source: &str) -> Option<CEnum> {
                     v.parse().ok()
                 }
             });
-            variants.push(CEnumVariant { name: var_name, value });
+            variants.push(CEnumVariant {
+                name: var_name,
+                value,
+            });
         }
     }
 

@@ -1,9 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
     use crate::c_parser::SymbolTable;
-    use crate::event_file::binary::{BinaryEventFile, BgEventBinary, ObjectEventBinary, WarpEventBinary, CoordEventBinary};
+    use crate::event_file::binary::{
+        BgEventBinary, BinaryEventFile, CoordEventBinary, ObjectEventBinary, WarpEventBinary,
+    };
     use crate::event_file::json::JsonEventFile;
+    use std::io::Cursor;
 
     #[test]
     fn test_event_binary_roundtrip() {
@@ -64,7 +66,9 @@ mod tests {
     #[test]
     fn test_json_resolution() {
         let mut symbols = SymbolTable::new();
-        symbols.defines.insert("MAP_HEADER_JUBILIFE_CITY".into(), 10);
+        symbols
+            .defines
+            .insert("MAP_HEADER_JUBILIFE_CITY".into(), 10);
         symbols.defines.insert("VAR_STORY_PROGRESS".into(), 0x4000);
         symbols.defines.insert("OBJ_EVENT_GFX_PLAYER".into(), 1);
         symbols.defines.insert("BG_EVENT_DIR_NORTH".into(), 1);
@@ -112,12 +116,14 @@ mod tests {
     #[test]
     #[ignore]
     fn integration_dspre_event_eterna_dp_gym() {
-        use std::path::Path;
         use crate::ds_rom::DspreProject;
+        use std::path::Path;
 
         let dspre_path = Path::new("/home/kalaay/Desktop/pt_DSPRE_contents");
         let headers_path = Path::new("/home/kalaay/dev/pokeplatinum/build/generated");
-        let expected_path = Path::new("/home/kalaay/dev/pokeplatinum/res/field/events/events_eterna_city_dp_gym.json");
+        let expected_path = Path::new(
+            "/home/kalaay/dev/pokeplatinum/res/field/events/events_eterna_city_dp_gym.json",
+        );
 
         if !dspre_path.exists() || !headers_path.exists() || !expected_path.exists() {
             eprintln!("Skipping: test data not available");
@@ -131,16 +137,19 @@ mod tests {
         let bin_event = project.load_event_file(67).unwrap();
         let json_event = JsonEventFile::from_binary(&bin_event, &symbols);
 
-        let expected: JsonEventFile = serde_json::from_str(
-            &std::fs::read_to_string(expected_path).unwrap()
-        ).unwrap();
+        let expected: JsonEventFile =
+            serde_json::from_str(&std::fs::read_to_string(expected_path).unwrap()).unwrap();
 
         assert_eq!(json_event.bg_events.len(), expected.bg_events.len());
         assert_eq!(json_event.object_events.len(), expected.object_events.len());
         assert_eq!(json_event.warp_events.len(), expected.warp_events.len());
         assert_eq!(json_event.coord_events.len(), expected.coord_events.len());
 
-        for (got, exp) in json_event.warp_events.iter().zip(expected.warp_events.iter()) {
+        for (got, exp) in json_event
+            .warp_events
+            .iter()
+            .zip(expected.warp_events.iter())
+        {
             assert_eq!(got.x, exp.x);
             assert_eq!(got.z, exp.z);
             assert_eq!(got.dest_header_id, exp.dest_header_id);

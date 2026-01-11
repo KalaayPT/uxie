@@ -1,9 +1,9 @@
-use std::io::{self, Read, Seek, SeekFrom};
-use std::path::Path;
-use std::fs::File;
+use crate::game::{Game, GameFamily};
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
-use crate::game::{Game, GameFamily};
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom};
+use std::path::Path;
 
 pub const ROM_HEADER_SIZE: usize = 0x200;
 
@@ -23,7 +23,7 @@ pub struct RomHeader {
     pub unit_code: u8,
     pub rom_version: u8,
     pub secure_area_delay: u16,
-    
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub arm9_rom_offset: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,7 +50,7 @@ pub struct RomHeader {
     pub fat_size: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub header_crc: Option<u16>,
-    
+
     #[serde(skip)]
     pub source: RomHeaderSource,
 }
@@ -58,19 +58,19 @@ pub struct RomHeader {
 impl RomHeader {
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
-        
+
         if path.is_dir() {
             let config = path.join("config.yaml");
             if config.exists() {
                 return Self::from_ds_rom_tool_project(path);
             }
-            
+
             let header_bin = path.join("header.bin");
             if header_bin.exists() {
                 return Self::from_binary(header_bin);
             }
         }
-        
+
         let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         match extension.to_lowercase().as_str() {
             "yaml" | "yml" => {
@@ -87,7 +87,7 @@ impl RomHeader {
                 let mut magic = [0u8; 4];
                 file.read_exact(&mut magic)?;
                 file.seek(SeekFrom::Start(0))?;
-                
+
                 if magic.starts_with(b"titl") || magic.starts_with(b"game") {
                     drop(file);
                     Self::from_ds_rom_yaml(path)
@@ -109,7 +109,7 @@ impl RomHeader {
 
     pub fn from_ds_rom_yaml(path: impl AsRef<Path>) -> io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
-        
+
         #[derive(Deserialize)]
         struct DsRomYaml {
             title: String,
@@ -122,11 +122,10 @@ impl RomHeader {
             #[serde(default)]
             secure_area_delay: u16,
         }
-        
-        let yaml: DsRomYaml = serde_yaml::from_str(&content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })?;
-        
+
+        let yaml: DsRomYaml = serde_yaml::from_str(&content)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
         Ok(Self {
             game_title: yaml.title,
             game_code: yaml.gamecode,
@@ -153,35 +152,34 @@ impl RomHeader {
 
     pub fn from_ds_rom_tool_project(project_dir: impl AsRef<Path>) -> io::Result<Self> {
         let project_dir = project_dir.as_ref();
-        
+
         let config_path = if project_dir.is_file() {
             project_dir.to_path_buf()
         } else {
             project_dir.join("config.yaml")
         };
-        
+
         let config_content = std::fs::read_to_string(&config_path)?;
-        
+
         #[derive(Deserialize)]
         struct ConfigYaml {
             header: String,
             arm9_config: Option<String>,
         }
-        
-        let config: ConfigYaml = serde_yaml::from_str(&config_content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })?;
-        
+
+        let config: ConfigYaml = serde_yaml::from_str(&config_content)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
         let root = config_path.parent().unwrap_or(Path::new("."));
         let header_path = root.join(&config.header);
-        
+
         let mut header = Self::from_ds_rom_yaml(&header_path)?;
-        
+
         if let Some(arm9_config_rel) = config.arm9_config {
             let arm9_config_path = root.join(&arm9_config_rel);
             if arm9_config_path.exists() {
                 let arm9_content = std::fs::read_to_string(&arm9_config_path)?;
-                
+
                 #[derive(Deserialize)]
                 struct Arm9Yaml {
                     #[serde(default)]
@@ -189,20 +187,20 @@ impl RomHeader {
                     #[serde(default)]
                     entry_function: u32,
                 }
-                
+
                 if let Ok(arm9) = serde_yaml::from_str::<Arm9Yaml>(&arm9_content) {
                     header.arm9_ram_address = Some(arm9.base_address);
                     header.arm9_entry_address = Some(arm9.entry_function);
                 }
             }
         }
-        
+
         Ok(header)
     }
 
     fn from_reader<R: Read + Seek>(reader: &mut R, source: RomHeaderSource) -> io::Result<Self> {
         reader.seek(SeekFrom::Start(0))?;
-        
+
         let mut title_buf = [0u8; 12];
         reader.read_exact(&mut title_buf)?;
         let game_title = String::from_utf8_lossy(&title_buf)
@@ -220,16 +218,16 @@ impl RomHeader {
         let unit_code = reader.read_u8()?;
         let _encryption_seed = reader.read_u8()?;
         let _device_capacity = reader.read_u8()?;
-        
+
         let mut _reserved = [0u8; 7];
         reader.read_exact(&mut _reserved)?;
-        
+
         let rom_version = reader.read_u8()?;
         let _autostart = reader.read_u8()?;
-        
+
         let mut _padding = [0u8; 2];
         reader.read_exact(&mut _padding)?;
-        
+
         let arm9_rom_offset = reader.read_u32::<LittleEndian>()?;
         let arm9_entry_address = reader.read_u32::<LittleEndian>()?;
         let arm9_ram_address = reader.read_u32::<LittleEndian>()?;
@@ -246,14 +244,14 @@ impl RomHeader {
         let _arm9_overlay_size = reader.read_u32::<LittleEndian>()?;
         let _arm7_overlay_offset = reader.read_u32::<LittleEndian>()?;
         let _arm7_overlay_size = reader.read_u32::<LittleEndian>()?;
-        
+
         let mut _port_settings = [0u8; 8];
         reader.read_exact(&mut _port_settings)?;
-        
+
         let _icon_title_offset = reader.read_u32::<LittleEndian>()?;
         let _secure_area_crc = reader.read_u16::<LittleEndian>()?;
         let secure_area_delay = reader.read_u16::<LittleEndian>()?;
-        
+
         reader.seek(SeekFrom::Start(0x15E))?;
         let header_crc = reader.read_u16::<LittleEndian>()?;
 
@@ -357,14 +355,14 @@ secure_area_delay: 3454
 "#;
         let temp = std::env::temp_dir().join("test_header.yaml");
         std::fs::write(&temp, yaml).unwrap();
-        
+
         let header = RomHeader::from_ds_rom_yaml(&temp).unwrap();
         assert_eq!(header.game_title, "POKEMON PL");
         assert_eq!(header.game_code, "CPUE");
         assert_eq!(header.rom_version, 1);
         assert_eq!(header.source, RomHeaderSource::DsRomTool);
         assert!(header.arm9_size.is_none());
-        
+
         std::fs::remove_file(&temp).ok();
     }
 }

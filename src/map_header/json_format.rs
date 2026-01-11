@@ -43,7 +43,7 @@ impl MapHeaderJson {
                 }
             };
         }
-        
+
         resolve_field!(id);
         resolve_field!(music_day_id);
         resolve_field!(music_night_id);
@@ -61,7 +61,9 @@ impl MapHeaderJson {
     pub fn from_binary(header: &crate::map_header::MapHeader, symbols: &SymbolTable) -> Self {
         macro_rules! resolve {
             ($val:expr, $prefix:expr) => {
-                symbols.resolve_name($val as i64, $prefix).unwrap_or_else(|| $val.to_string())
+                symbols
+                    .resolve_name($val as i64, $prefix)
+                    .unwrap_or_else(|| $val.to_string())
             };
         }
 
@@ -126,7 +128,7 @@ mod tests {
             "text_archive_id": "15"
         }
         "#;
-        
+
         let header: MapHeaderJson = serde_json::from_str(json).unwrap();
         assert_eq!(header.id, Some("MAP_HEADER_SANDGEM_TOWN".to_string()));
         assert_eq!(header.music_day_id, Some("42".into()));
@@ -156,9 +158,9 @@ mod tests {
     #[test]
     #[ignore]
     fn integration_dspre_map_header_jubilife() {
-        use std::path::Path;
-        use crate::provider::{Arm9Provider, DataProvider};
         use crate::GameFamily;
+        use crate::provider::{Arm9Provider, DataProvider};
+        use std::path::Path;
 
         let dspre_path = Path::new("/home/kalaay/Desktop/pt_DSPRE_contents");
         let headers_path = Path::new("/home/kalaay/dev/pokeplatinum/build/generated");
@@ -175,13 +177,19 @@ mod tests {
 
         let arm9_path = dspre_path.join("arm9.bin");
         let provider = Arm9Provider::new(&arm9_path, 0xE601C, 559, GameFamily::Platinum);
-        
+
         let bin_header = provider.get_map_header(3).unwrap();
         let json_header = MapHeaderJson::from_binary(&bin_header, &symbols);
 
         assert_eq!(json_header.music_day_id, Some("SEQ_CITY01_D".into()));
         assert_eq!(json_header.music_night_id, Some("SEQ_CITY01_N".into()));
-        assert_eq!(json_header.weather_id, Some("OVERWORLD_WEATHER_CLEAR".into()));
-        assert_eq!(json_header.camera_angle_id, Some("CAMERA_TYPE_DEFAULT".into()));
+        assert_eq!(
+            json_header.weather_id,
+            Some("OVERWORLD_WEATHER_CLEAR".into())
+        );
+        assert_eq!(
+            json_header.camera_angle_id,
+            Some("CAMERA_TYPE_DEFAULT".into())
+        );
     }
 }

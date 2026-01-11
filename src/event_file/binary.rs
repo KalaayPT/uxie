@@ -1,7 +1,7 @@
 //! Binary event file structures matching pokeplatinum and DSPRE
 
-use std::io::{self, Read, Seek, Write};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{self, Read, Seek, Write};
 
 /// Binary background/spawnable event (20 bytes)
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +24,14 @@ impl BgEventBinary {
         let player_facing_dir = reader.read_u16::<LittleEndian>()?;
         let mut padding = [0u8; 2];
         reader.read_exact(&mut padding)?;
-        Ok(Self { script, event_type, x, z, y, player_facing_dir })
+        Ok(Self {
+            script,
+            event_type,
+            x,
+            z,
+            y,
+            player_facing_dir,
+        })
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -67,13 +74,29 @@ impl ObjectEventBinary {
         let script = reader.read_u16::<LittleEndian>()?;
         let dir = reader.read_i16::<LittleEndian>()?;
         let mut data = [0u16; 3];
-        for i in 0..3 { data[i] = reader.read_u16::<LittleEndian>()?; }
+        for i in 0..3 {
+            data[i] = reader.read_u16::<LittleEndian>()?;
+        }
         let movement_range_x = reader.read_i16::<LittleEndian>()?;
         let movement_range_z = reader.read_i16::<LittleEndian>()?;
         let x = reader.read_u16::<LittleEndian>()?;
         let z = reader.read_u16::<LittleEndian>()?;
         let y = reader.read_i32::<LittleEndian>()?;
-        Ok(Self { local_id, graphics_id, movement_type, trainer_type, hidden_flag, script, dir, data, movement_range_x, movement_range_z, x, z, y })
+        Ok(Self {
+            local_id,
+            graphics_id,
+            movement_type,
+            trainer_type,
+            hidden_flag,
+            script,
+            dir,
+            data,
+            movement_range_x,
+            movement_range_z,
+            x,
+            z,
+            y,
+        })
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -84,7 +107,9 @@ impl ObjectEventBinary {
         writer.write_u16::<LittleEndian>(self.hidden_flag)?;
         writer.write_u16::<LittleEndian>(self.script)?;
         writer.write_i16::<LittleEndian>(self.dir)?;
-        for val in &self.data { writer.write_u16::<LittleEndian>(*val)?; }
+        for val in &self.data {
+            writer.write_u16::<LittleEndian>(*val)?;
+        }
         writer.write_i16::<LittleEndian>(self.movement_range_x)?;
         writer.write_i16::<LittleEndian>(self.movement_range_z)?;
         writer.write_u16::<LittleEndian>(self.x)?;
@@ -111,7 +136,12 @@ impl WarpEventBinary {
         let dest_warp_id = reader.read_u16::<LittleEndian>()?;
         let mut unused = [0u8; 4];
         reader.read_exact(&mut unused)?;
-        Ok(Self { x, z, dest_header_id, dest_warp_id })
+        Ok(Self {
+            x,
+            z,
+            dest_header_id,
+            dest_warp_id,
+        })
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -147,7 +177,16 @@ impl CoordEventBinary {
         let y = reader.read_u16::<LittleEndian>()?;
         let value = reader.read_u16::<LittleEndian>()?;
         let var = reader.read_u16::<LittleEndian>()?;
-        Ok(Self { script, x, z, width, length, y, value, var })
+        Ok(Self {
+            script,
+            x,
+            z,
+            width,
+            length,
+            y,
+            value,
+            var,
+        })
     }
 
     pub fn write<W: Write>(&self, writer: &mut W) -> io::Result<()> {
@@ -176,35 +215,56 @@ impl BinaryEventFile {
     pub fn from_binary<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
         let bg_count = reader.read_u32::<LittleEndian>()?;
         let mut bg_events = Vec::with_capacity(bg_count as usize);
-        for _ in 0..bg_count { bg_events.push(BgEventBinary::read(reader)?); }
+        for _ in 0..bg_count {
+            bg_events.push(BgEventBinary::read(reader)?);
+        }
 
         let object_count = reader.read_u32::<LittleEndian>()?;
         let mut object_events = Vec::with_capacity(object_count as usize);
-        for _ in 0..object_count { object_events.push(ObjectEventBinary::read(reader)?); }
+        for _ in 0..object_count {
+            object_events.push(ObjectEventBinary::read(reader)?);
+        }
 
         let warp_count = reader.read_u32::<LittleEndian>()?;
         let mut warp_events = Vec::with_capacity(warp_count as usize);
-        for _ in 0..warp_count { warp_events.push(WarpEventBinary::read(reader)?); }
+        for _ in 0..warp_count {
+            warp_events.push(WarpEventBinary::read(reader)?);
+        }
 
         let coord_count = reader.read_u32::<LittleEndian>()?;
         let mut coord_events = Vec::with_capacity(coord_count as usize);
-        for _ in 0..coord_count { coord_events.push(CoordEventBinary::read(reader)?); }
+        for _ in 0..coord_count {
+            coord_events.push(CoordEventBinary::read(reader)?);
+        }
 
-        Ok(Self { bg_events, object_events, warp_events, coord_events })
+        Ok(Self {
+            bg_events,
+            object_events,
+            warp_events,
+            coord_events,
+        })
     }
 
     pub fn to_binary<W: Write>(&self, writer: &mut W) -> io::Result<()> {
         writer.write_u32::<LittleEndian>(self.bg_events.len() as u32)?;
-        for event in &self.bg_events { event.write(writer)?; }
+        for event in &self.bg_events {
+            event.write(writer)?;
+        }
 
         writer.write_u32::<LittleEndian>(self.object_events.len() as u32)?;
-        for event in &self.object_events { event.write(writer)?; }
+        for event in &self.object_events {
+            event.write(writer)?;
+        }
 
         writer.write_u32::<LittleEndian>(self.warp_events.len() as u32)?;
-        for event in &self.warp_events { event.write(writer)?; }
+        for event in &self.warp_events {
+            event.write(writer)?;
+        }
 
         writer.write_u32::<LittleEndian>(self.coord_events.len() as u32)?;
-        for event in &self.coord_events { event.write(writer)?; }
+        for event in &self.coord_events {
+            event.write(writer)?;
+        }
 
         Ok(())
     }

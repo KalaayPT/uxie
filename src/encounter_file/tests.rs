@@ -1,21 +1,28 @@
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
-    use crate::game::GameFamily;
-    use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
     use crate::c_parser::SymbolTable;
+    use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
     use crate::encounter_file::json::JsonEncounterFile;
+    use crate::game::GameFamily;
+    use std::io::Cursor;
 
     #[test]
     fn test_encounter_binary_roundtrip_dppt() {
         let mut grass = Vec::new();
         for i in 0..12 {
-            grass.push(EncounterEntry { level: i as u8, species: i as u32 + 1 });
+            grass.push(EncounterEntry {
+                level: i as u8,
+                species: i as u32 + 1,
+            });
         }
-        
+
         let mut water = Vec::new();
         for i in 0..5 {
-            water.push(WaterEncounterEntry { min_level: i as u8, max_level: i as u8 + 5, species: i as u32 + 100 });
+            water.push(WaterEncounterEntry {
+                min_level: i as u8,
+                max_level: i as u8 + 5,
+                species: i as u32 + 100,
+            });
         }
 
         let file = BinaryEncounterFile {

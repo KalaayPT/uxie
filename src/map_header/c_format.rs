@@ -1,6 +1,7 @@
+use super::types::*;
+use crate::c_parser::SymbolTable;
 use regex::Regex;
 use std::collections::HashMap;
-use super::types::*;
 
 #[derive(Debug, Clone)]
 pub struct ParsedMapHeader {
@@ -11,19 +12,15 @@ pub struct ParsedMapHeader {
 
 pub fn parse_map_headers_from_c(source: &str) -> Vec<ParsedMapHeader> {
     let mut headers = Vec::new();
-    
-    let header_pattern = Regex::new(
-        r"\[([A-Z_][A-Z0-9_]*)\]\s*=\s*\{([^}]+)\}"
-    ).unwrap();
-    
-    let field_pattern = Regex::new(
-        r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^,}]+)"
-    ).unwrap();
+
+    let header_pattern = Regex::new(r"\[([A-Z_][A-Z0-9_]*)\]\s*=\s*\{([^}]+)\}").unwrap();
+
+    let field_pattern = Regex::new(r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^,}]+)").unwrap();
 
     for cap in header_pattern.captures_iter(source) {
         let name = cap[1].to_string();
         let body = &cap[2];
-        
+
         let mut fields = HashMap::new();
         for field_cap in field_pattern.captures_iter(body) {
             let field_name = field_cap[1].trim().to_string();
@@ -41,69 +38,95 @@ pub fn parse_map_headers_from_c(source: &str) -> Vec<ParsedMapHeader> {
     headers
 }
 
-pub fn parsed_to_pt_header(parsed: &ParsedMapHeader) -> MapHeaderPt {
+pub fn parsed_to_pt_header(parsed: &ParsedMapHeader, symbols: &SymbolTable) -> MapHeaderPt {
     let mut h = MapHeaderPt::default();
-    
+
+    let resolve = |v: &str| -> i64 {
+        symbols
+            .resolve_constant(v)
+            .unwrap_or_else(|| parse_int_or_hex(v))
+    };
+
     if let Some(v) = parsed.fields.get("areaDataArchiveID") {
-        h.area_data_id = parse_int_or_hex(v) as u8;
+        h.area_data_id = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("unk_01") {
-        h.unknown1 = parse_int_or_hex(v) as u8;
+        h.unknown1 = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("mapMatrixID") {
-        h.matrix_id = parse_int_or_hex(v) as u16;
+        h.matrix_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("scriptsArchiveID") {
-        h.script_file_id = parse_int_or_hex(v) as u16;
+        h.script_file_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("initScriptsArchiveID") {
-        h.level_script_id = parse_int_or_hex(v) as u16;
+        h.level_script_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("msgArchiveID") {
-        h.text_archive_id = parse_int_or_hex(v) as u16;
+        h.text_archive_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("dayMusicID") {
-        h.music_day_id = parse_int_or_hex(v) as u16;
+        h.music_day_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("nightMusicID") {
-        h.music_night_id = parse_int_or_hex(v) as u16;
+        h.music_night_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("wildEncountersArchiveID") {
-        h.wild_pokemon = parse_int_or_hex(v) as u16;
+        h.wild_pokemon = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("eventsArchiveID") {
-        h.event_file_id = parse_int_or_hex(v) as u16;
+        h.event_file_id = resolve(v) as u16;
     }
     if let Some(v) = parsed.fields.get("mapLabelTextID") {
-        h.location_name = parse_int_or_hex(v) as u8;
+        h.location_name = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("mapLabelWindowID") {
-        h.area_icon = parse_int_or_hex(v) as u8;
+        h.area_icon = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("weather") {
-        h.weather_id = parse_int_or_hex(v) as u8;
+        h.weather_id = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("cameraType") {
-        h.camera_angle_id = parse_int_or_hex(v) as u8;
+        h.camera_angle_id = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("mapType") {
-        h.location_specifier = parse_int_or_hex(v) as u8;
+        h.location_specifier = resolve(v) as u8;
     }
     if let Some(v) = parsed.fields.get("battleBG") {
-        h.battle_background = parse_int_or_hex(v) as u8;
+        h.battle_background = resolve(v) as u8;
     }
-    
+
     let mut flags: u8 = 0;
-    if parsed.fields.get("isBikeAllowed").map(|v| v == "TRUE").unwrap_or(false) {
+    if parsed
+        .fields
+        .get("isBikeAllowed")
+        .map(|v| v == "TRUE")
+        .unwrap_or(false)
+    {
         flags |= 0b0001;
     }
-    if parsed.fields.get("isRunningAllowed").map(|v| v == "TRUE").unwrap_or(false) {
+    if parsed
+        .fields
+        .get("isRunningAllowed")
+        .map(|v| v == "TRUE")
+        .unwrap_or(false)
+    {
         flags |= 0b0010;
     }
-    if parsed.fields.get("isEscapeRopeAllowed").map(|v| v == "TRUE").unwrap_or(false) {
+    if parsed
+        .fields
+        .get("isEscapeRopeAllowed")
+        .map(|v| v == "TRUE")
+        .unwrap_or(false)
+    {
         flags |= 0b0100;
     }
-    if parsed.fields.get("isFlyAllowed").map(|v| v == "TRUE").unwrap_or(false) {
+    if parsed
+        .fields
+        .get("isFlyAllowed")
+        .map(|v| v == "TRUE")
+        .unwrap_or(false)
+    {
         flags |= 0b1000;
     }
     h.flags = flags;
@@ -142,6 +165,9 @@ mod tests {
         let headers = parse_map_headers_from_c(source);
         assert_eq!(headers.len(), 1);
         assert_eq!(headers[0].name, "MAP_HEADER_JUBILIFE_CITY");
-        assert_eq!(headers[0].fields.get("areaDataArchiveID"), Some(&"0x6".to_string()));
+        assert_eq!(
+            headers[0].fields.get("areaDataArchiveID"),
+            Some(&"0x6".to_string())
+        );
     }
 }

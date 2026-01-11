@@ -142,7 +142,8 @@ impl JsonEventFile {
                 x: (bg.x % 32) as i32,
                 z: (bg.z % 32) as i32,
                 y: bg.y,
-                player_facing_dir: symbols.resolve_name(bg.player_facing_dir as i64, "BG_EVENT_DIR_"),
+                player_facing_dir: symbols
+                    .resolve_name(bg.player_facing_dir as i64, "BG_EVENT_DIR_"),
             });
         }
 
@@ -150,13 +151,18 @@ impl JsonEventFile {
         for obj in &bin.object_events {
             object_events.push(ObjectEventJson {
                 id: format!("OBJ_{}", obj.local_id),
-                graphics_id: symbols.resolve_name(obj.graphics_id as i64, "OBJ_EVENT_GFX_")
+                graphics_id: symbols
+                    .resolve_name(obj.graphics_id as i64, "OBJ_EVENT_GFX_")
                     .unwrap_or_else(|| obj.graphics_id.to_string()),
-                movement_type: symbols.resolve_name(obj.movement_type as i64, "MOVEMENT_TYPE_")
+                movement_type: symbols
+                    .resolve_name(obj.movement_type as i64, "MOVEMENT_TYPE_")
                     .unwrap_or_else(|| obj.movement_type.to_string()),
-                trainer_type: symbols.resolve_name(obj.trainer_type as i64, "TRAINER_TYPE_")
+                trainer_type: symbols
+                    .resolve_name(obj.trainer_type as i64, "TRAINER_TYPE_")
                     .unwrap_or_else(|| obj.trainer_type.to_string()),
-                hidden_flag: if obj.hidden_flag == 0 { Some("0".into()) } else {
+                hidden_flag: if obj.hidden_flag == 0 {
+                    Some("0".into())
+                } else {
                     symbols.resolve_name(obj.hidden_flag as i64, "FLAG_")
                 },
                 script: obj.script,
@@ -176,7 +182,8 @@ impl JsonEventFile {
             warp_events.push(WarpEventJson {
                 x: (warp.x % 32) as u16,
                 z: (warp.z % 32) as u16,
-                dest_header_id: symbols.resolve_name(warp.dest_header_id as i64, "MAP_HEADER_")
+                dest_header_id: symbols
+                    .resolve_name(warp.dest_header_id as i64, "MAP_HEADER_")
                     .unwrap_or_else(|| warp.dest_header_id.to_string()),
                 dest_warp_id: warp.dest_warp_id,
             });
