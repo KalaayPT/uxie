@@ -71,49 +71,6 @@ impl DataProvider for Arm9Provider {
     }
 }
 
-#[allow(dead_code)]
-pub struct DecompProvider {
-    decomp_root: PathBuf,
-    cached_headers: Option<Vec<(String, MapHeader)>>,
-}
-
-impl DecompProvider {
-    pub fn new(decomp_root: impl AsRef<Path>) -> Self {
-        Self {
-            decomp_root: decomp_root.as_ref().to_path_buf(),
-            cached_headers: None,
-        }
-    }
-
-    #[allow(dead_code)]
-    fn map_headers_path(&self) -> PathBuf {
-        self.decomp_root.join("include/data/map_headers.h")
-    }
-}
-
-impl DataProvider for DecompProvider {
-    fn get_map_header(&self, _id: u16) -> io::Result<MapHeader> {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "DecompProvider::get_map_header not yet implemented - use Arm9Provider for binary access",
-        ))
-    }
-
-    fn get_map_header_count(&self) -> io::Result<usize> {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "DecompProvider::get_map_header_count not yet implemented",
-        ))
-    }
-
-    fn get_text_archive_for_script(&self, _script_id: u16) -> io::Result<Option<u16>> {
-        Err(io::Error::new(
-            io::ErrorKind::Other,
-            "DecompProvider::get_text_archive_for_script not yet implemented",
-        ))
-    }
-}
-
 pub fn find_headers_using_script(headers: &[MapHeader], script_id: u16) -> Vec<usize> {
     headers.iter()
         .enumerate()

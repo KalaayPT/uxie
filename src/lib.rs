@@ -11,13 +11,16 @@
 
 pub mod c_parser;
 pub mod ds_rom;
+pub mod event_file;
 pub mod game;
 pub mod map_header;
 pub mod provider;
 pub mod rom_header;
 
 pub use game::{Game, GameFamily};
-pub use map_header::{MapHeader, MapHeaderPt, MapHeaderDP, MapHeaderHGSS};
-pub use provider::{DataProvider, Arm9Provider, DecompProvider};
+pub use map_header::{MapHeader, MapHeaderPt, MapHeaderDP, MapHeaderHGSS, MapHeaderJson};
+pub use provider::{DataProvider, Arm9Provider};
 pub use rom_header::RomHeader;
-pub use ds_rom::{DsRomProject, DsRomArm9Config};
+pub use ds_rom::{DsRomProject, DsRomArm9Config, DspreProject};
+pub use event_file::{BinaryEventFile, JsonEventFile, BgEventBinary, ObjectEventBinary, WarpEventBinary, CoordEventBinary, BgEventJson, ObjectEventJson, WarpEventJson, CoordEventJson};
+pub use c_parser::SymbolTable;

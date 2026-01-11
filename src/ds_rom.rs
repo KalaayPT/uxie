@@ -1,8 +1,42 @@
 use std::path::{Path, PathBuf};
 use std::io;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use crate::game::{Game, GameFamily};
 use crate::rom_header::RomHeader;
+
+pub use crate::event_file::BinaryEventFile;
+
+fn from_yaml_file<T: DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> {
+    let content = std::fs::read_to_string(path)?;
+    serde_yaml::from_str(&content).map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, e.to_string())
+    })
+}
+
+#[derive(Debug, Clone)]
+pub struct DspreProject {
+    pub root: PathBuf,
+}
+
+impl DspreProject {
+    pub fn open(root: impl AsRef<Path>) -> io::Result<Self> {
+        let root = root.as_ref().to_path_buf();
+        if !root.join("unpacked").exists() {
+            return Err(io::Error::new(io::ErrorKind::NotFound, "Not a DSPRE project (missing 'unpacked' directory)"));
+        }
+        Ok(Self { root })
+    }
+
+    pub fn event_files_dir(&self) -> PathBuf {
+        self.root.join("unpacked").join("eventFiles")
+    }
+
+    pub fn load_event_file(&self, id: u32) -> io::Result<BinaryEventFile> {
+        let path = self.event_files_dir().join(format!("{:04}", id));
+        let mut file = std::fs::File::open(path)?;
+        BinaryEventFile::from_binary(&mut file)
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DsRomArm9Config {
@@ -28,10 +62,7 @@ pub struct DsRomArm9Config {
 
 impl DsRomArm9Config {
     pub fn from_yaml(path: impl AsRef<Path>) -> io::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        serde_yaml::from_str(&content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })
+        from_yaml_file(path)
     }
 
     pub fn sdk_version_string(&self) -> String {
@@ -58,10 +89,7 @@ pub struct DsRomArm7Config {
 
 impl DsRomArm7Config {
     pub fn from_yaml(path: impl AsRef<Path>) -> io::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        serde_yaml::from_str(&content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })
+        from_yaml_file(path)
     }
 }
 
@@ -74,10 +102,7 @@ pub struct DsRomTcmConfig {
 
 impl DsRomTcmConfig {
     pub fn from_yaml(path: impl AsRef<Path>) -> io::Result<Self> {
-        let content = std::fs::read_to_string(path)?;
-        serde_yaml::from_str(&content).map_err(|e| {
-            io::Error::new(io::ErrorKind::InvalidData, e.to_string())
-        })
+        from_yaml_file(path)
     }
 }
 

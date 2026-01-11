@@ -1,12 +1,13 @@
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use uxie::{
-    c_parser::{parse_defines, parse_enum},
-    ds_rom::DsRomProject,
-    game::GameFamily,
-    map_header::{MapHeader, MapHeaderDP, MapHeaderPt, MapHeaderHGSS},
-    provider::{Arm9Provider, DataProvider},
+    SymbolTable,
+    DsRomProject, DspreProject,
+    GameFamily,
+    MapHeader, MapHeaderJson,
+    DataProvider, Arm9Provider,
     RomHeader,
+    JsonEventFile,
 };
 
 #[derive(Parser)]
@@ -97,6 +98,32 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+
+    /// Load binary events from DSPRE project and resolve with C headers
+    DspreEvent {
+        /// Path to DSPRE project root
+        project: PathBuf,
+
+        /// Event file ID
+        id: u32,
+
+        /// Path to C headers directory for constant resolution
+        #[arg(short, long)]
+        headers: PathBuf,
+    },
+
+    /// Load binary map header from DSPRE project and resolve with C headers
+    DspreMapHeader {
+        /// Path to DSPRE project root
+        project: PathBuf,
+
+        /// Map header ID
+        id: u16,
+
+        /// Path to C headers directory for constant resolution
+        #[arg(short, long)]
+        headers: PathBuf,
+    },
 }
 
 fn parse_game_family(s: &str) -> Result<GameFamily, String> {
@@ -131,12 +158,42 @@ fn main() {
         }
         Commands::ScriptText { script_id, arm9, game } => cmd_script_text(script_id, &arm9, &game),
         Commands::DsRom { path, json } => cmd_ds_rom(&path, json),
+        Commands::DspreEvent { project, id, headers } => cmd_dspre_event(&project, id, &headers),
+        Commands::DspreMapHeader { project, id, headers } => cmd_dspre_map_header(&project, id, &headers),
     };
 
     if let Err(e) = result {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
+}
+
+fn cmd_dspre_event(project_path: &PathBuf, id: u32, headers_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let project = DspreProject::open(project_path)?;
+    let mut symbols = SymbolTable::new();
+    symbols.load_headers_from_dir(headers_path)?;
+
+    let bin_event = project.load_event_file(id)?;
+    let json_event = JsonEventFile::from_binary(&bin_event, &symbols);
+
+    println!("{}", serde_json::to_string_pretty(&json_event)?);
+    Ok(())
+}
+
+fn cmd_dspre_map_header(project_path: &PathBuf, id: u16, headers_path: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
+    let _project = DspreProject::open(project_path)?;
+    let mut symbols = SymbolTable::new();
+    symbols.load_headers_from_dir(headers_path)?;
+
+    let arm9_path = project_path.join("arm9.bin");
+    let (offset, count) = get_header_table_config(GameFamily::Platinum);
+    let provider = Arm9Provider::new(&arm9_path, offset, count, GameFamily::Platinum);
+    
+    let bin_header = provider.get_map_header(id)?;
+    let json_header = MapHeaderJson::from_binary(&bin_header, &symbols);
+
+    println!("{}", serde_json::to_string_pretty(&json_header)?);
+    Ok(())
 }
 
 fn cmd_rom_header(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -218,81 +275,73 @@ fn cmd_map_header(
     if json {
         println!("{}", serde_json::to_string_pretty(&header)?);
     } else {
-        match header {
-            MapHeader::DP(h) => print_map_header_dp(&h, id),
-            MapHeader::Pt(h) => print_map_header_pt(&h, id),
-            MapHeader::HGSS(h) => print_map_header_hgss(&h, id),
-        }
+        print_map_header(&header, id);
     }
 
     Ok(())
 }
 
-fn print_map_header_dp(h: &MapHeaderDP, id: u16) {
-    println!("Map Header {} (Diamond/Pearl)", id);
-    println!("=============================");
-    println!("Area Data ID:    {}", h.area_data_id);
-    println!("Matrix ID:       {}", h.matrix_id);
-    println!("Script File ID:  {}", h.script_file_id);
-    println!("Level Script ID: {}", h.level_script_id);
-    println!("Text Archive ID: {}", h.text_archive_id);
-    println!("Music Day:       {}", h.music_day_id);
-    println!("Music Night:     {}", h.music_night_id);
-    println!("Wild Pokemon:    {}", h.wild_pokemon);
-    println!("Event File ID:   {}", h.event_file_id);
-    println!("Location Name:   {}", h.location_name);
-    println!("Weather:         {}", h.weather_id);
-    println!("Camera:          {}", h.camera_angle_id);
-    println!("Battle BG:       {}", h.battle_background);
-    println!("Flags:           0x{:02X}", h.flags);
-}
-
-fn print_map_header_pt(h: &MapHeaderPt, id: u16) {
-    println!("Map Header {} (Platinum)", id);
-    println!("=========================");
-    println!("Area Data ID:    {}", h.area_data_id);
-    println!("Matrix ID:       {}", h.matrix_id);
-    println!("Script File ID:  {}", h.script_file_id);
-    println!("Level Script ID: {}", h.level_script_id);
-    println!("Text Archive ID: {}", h.text_archive_id);
-    println!("Music Day:       {}", h.music_day_id);
-    println!("Music Night:     {}", h.music_night_id);
-    println!("Wild Pokemon:    {}", h.wild_pokemon);
-    println!("Event File ID:   {}", h.event_file_id);
-    println!("Location Name:   {}", h.location_name);
-    println!("Area Icon:       {}", h.area_icon);
-    println!("Weather:         {}", h.weather_id);
-    println!("Camera:          {}", h.camera_angle_id);
-    println!("Battle BG:       {}", h.battle_background);
-    println!("Flags:           0x{:02X}", h.flags);
-}
-
-fn print_map_header_hgss(h: &MapHeaderHGSS, id: u16) {
-    println!("Map Header {} (HeartGold/SoulSilver)", id);
-    println!("====================================");
-    println!("Area Data ID:    {}", h.area_data_id);
-    println!("Matrix ID:       {}", h.matrix_id);
-    println!("Script File ID:  {}", h.script_file_id);
-    println!("Level Script ID: {}", h.level_script_id);
-    println!("Text Archive ID: {}", h.text_archive_id);
-    println!("Music Day:       {}", h.music_day_id);
-    println!("Music Night:     {}", h.music_night_id);
-    println!("Wild Pokemon:    {}", h.wild_pokemon);
-    println!("Event File ID:   {}", h.event_file_id);
-    println!("Location Name:   {}", h.location_name);
-    println!("Area Icon:       {}", h.area_icon);
-    println!("Weather:         {}", h.weather_id);
-    println!("Camera:          {}", h.camera_angle_id);
-    println!("Worldmap:        ({}, {})", h.worldmap_x, h.worldmap_y);
-    println!("Kanto:           {}", h.kanto_flag);
-    println!("Battle BG:       {}", h.battle_background);
-    println!("Flags:           0x{:02X}", h.flags);
+fn print_map_header(header: &MapHeader, id: u16) {
+    let (game_name, divider_len) = match header {
+        MapHeader::DP(_) => ("Diamond/Pearl", 29),
+        MapHeader::Pt(_) => ("Platinum", 25),
+        MapHeader::HGSS(_) => ("HeartGold/SoulSilver", 36),
+    };
+    
+    println!("Map Header {} ({})", id, game_name);
+    println!("{}", "=".repeat(divider_len));
+    
+    println!("Area Data ID:    {}", header.area_data_id());
+    println!("Matrix ID:       {}", header.matrix_id());
+    println!("Script File ID:  {}", header.script_file_id());
+    println!("Level Script ID: {}", header.level_script_id());
+    println!("Text Archive ID: {}", header.text_archive_id());
+    
+    match header {
+        MapHeader::DP(h) => {
+            println!("Music Day:       {}", h.music_day_id);
+            println!("Music Night:     {}", h.music_night_id);
+            println!("Wild Pokemon:    {}", h.wild_pokemon);
+            println!("Event File ID:   {}", h.event_file_id);
+            println!("Location Name:   {}", h.location_name);
+            println!("Weather:         {}", h.weather_id);
+            println!("Camera:          {}", h.camera_angle_id);
+            println!("Battle BG:       {}", h.battle_background);
+            println!("Flags:           0x{:02X}", h.flags);
+        }
+        MapHeader::Pt(h) => {
+            println!("Music Day:       {}", h.music_day_id);
+            println!("Music Night:     {}", h.music_night_id);
+            println!("Wild Pokemon:    {}", h.wild_pokemon);
+            println!("Event File ID:   {}", h.event_file_id);
+            println!("Location Name:   {}", h.location_name);
+            println!("Area Icon:       {}", h.area_icon);
+            println!("Weather:         {}", h.weather_id);
+            println!("Camera:          {}", h.camera_angle_id);
+            println!("Battle BG:       {}", h.battle_background);
+            println!("Flags:           0x{:02X}", h.flags);
+        }
+        MapHeader::HGSS(h) => {
+            println!("Music Day:       {}", h.music_day_id);
+            println!("Music Night:     {}", h.music_night_id);
+            println!("Wild Pokemon:    {}", h.wild_pokemon);
+            println!("Event File ID:   {}", h.event_file_id);
+            println!("Location Name:   {}", h.location_name);
+            println!("Area Icon:       {}", h.area_icon);
+            println!("Weather:         {}", h.weather_id);
+            println!("Camera:          {}", h.camera_angle_id);
+            println!("Worldmap:        ({}, {})", h.worldmap_x, h.worldmap_y);
+            println!("Kanto:           {}", h.kanto_flag);
+            println!("Battle BG:       {}", h.battle_background);
+            println!("Flags:           0x{:02X}", h.flags);
+        }
+    }
 }
 
 fn cmd_parse_enum(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
     
-    match parse_enum(&content) {
+    match uxie::c_parser::parse_enum(&content) {
         Some(e) => {
             if json {
                 #[derive(serde::Serialize)]
@@ -350,7 +399,7 @@ fn cmd_parse_defines(
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
-    let mut defs = parse_defines(&content);
+    let mut defs = uxie::c_parser::parse_and_resolve_defines(&content);
 
     if let Some(prefix) = prefix {
         defs.retain(|d| d.name.starts_with(prefix));
@@ -370,7 +419,11 @@ fn cmd_parse_defines(
     } else {
         defs.sort_by(|a, b| a.name.cmp(&b.name));
         for d in &defs {
-            println!("#define {} {}", d.name, d.value);
+            if let Some(resolved) = d.resolved {
+                println!("#define {} {} (= {})", d.name, d.value, resolved);
+            } else {
+                println!("#define {} {}", d.name, d.value);
+            }
         }
     }
 
@@ -385,7 +438,7 @@ fn cmd_script_text(
     let family = parse_game_family(game_str)?;
     let (offset, count) = get_header_table_config(family);
 
-    let provider = Arm9Provider::new(arm9_path, offset, count, family);
+    let provider = uxie::provider::Arm9Provider::new(arm9_path, offset, count, family);
 
     match provider.get_text_archive_for_script(script_id)? {
         Some(text_id) => println!("Script {} uses text archive {}", script_id, text_id),

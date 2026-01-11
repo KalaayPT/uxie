@@ -10,6 +10,7 @@ ROM data from NdsTool extractions, ds-rom projects, and decompilation sources.
 <!--toc:start-->
 - [Background](#background)
   - [Etymology](#etymology)
+- [Features](#features)
 - [Install](#install)
   - [Build from Source](#build-from-source)
   - [As a Library](#as-a-library)
@@ -20,6 +21,7 @@ ROM data from NdsTool extractions, ds-rom projects, and decompilation sources.
   - [ds-rom](#ds-rom)
   - [parse-enum](#parse-enum)
   - [parse-defines](#parse-defines)
+- [Integration](#integration)
 - [Library Usage](#library-usage)
 - [Supported Games](#supported-games)
 - [License](#license)
@@ -28,9 +30,9 @@ ROM data from NdsTool extractions, ds-rom projects, and decompilation sources.
 ## Background
 
 Working with Pokemon Gen 4 ROMs involves multiple data sources: binary files
-extracted via NdsTool, YAML-based ds-rom projects, and C source files from
-decompilation projects like pokeplatinum/pokeheartgold. Each source has
-different formats and conventions.
+extracted via NdsTool, YAML-based ds-rom projects, and modern JSON/C source
+structures from decompilation projects like pokeplatinum/pokeheartgold. Each
+source has different formats and conventions.
 
 `uxie` provides a unified interface for reading ROM data regardless of source.
 Its `RomHeader::open()` function auto-detects the format and returns a
@@ -42,6 +44,14 @@ parsing C enums and defines, and querying relationships between game data.
 `uxie` takes its name from [Uxie][uxie-bulbapedia], the legendary Pokemon known
 as the "Being of Knowledge." Just as Uxie embodies wisdom in the Pokemon world,
 this library aims to provide knowledge about ROM data structures.
+
+## Features
+
+- **Unified ROM Access**: Auto-detects and reads data from NdsTool extractions, `ds-rom` projects, and decompilation sources.
+- **Complex Expression Resolution**: Evaluates C expressions in `#define` and `enum` blocks, including bitwise OR (`|`), left shifts (`<<`), and nested parentheses.
+- **Symbolic Resolution**: Automatically resolves cross-references between constants (e.g., `(A | B)` where A and B are other defines).
+- **Map Header Parsing**: Unified access to area data, music, scripts, and worldmap coordinates across all Gen 4 games.
+- **Format Agnostic**: Seamlessly bridge legacy binary formats and modern JSON/YAML source data for both input and output.
 
 ## Install
 
@@ -164,18 +174,50 @@ uxie parse-enum /path/to/header.h --json
 
 ### parse-defines
 
-Parse `#define` constants from header files:
+Parse `#define` constants from header files with expression evaluation:
 
 ```shell
-# Parse all defines
-uxie parse-defines /path/to/header.h
+# Parse and resolve complex expressions
+uxie parse-defines constants.h
 
-# Filter by prefix
-uxie parse-defines /path/to/header.h -p MAP_
-
-# Output as JSON
-uxie parse-defines /path/to/header.h --json
+# Filter by prefix (e.g., pokeplatinum constants)
+uxie parse-defines constants.h -p MAP_
 ```
+
+Example output:
+```text
+#define TRAINER          (1 << 0) (= 1)
+#define DOUBLES          (1 << 1) (= 2)
+#define TRAINER_DOUBLES  (DOUBLES | TRAINER) (= 3)
+```
+
+JSON output includes a `resolved` field for easy integration:
+```shell
+uxie parse-defines constants.h --json
+```
+
+```json
+[
+  {
+    "name": "TRAINER_DOUBLES",
+    "value": "(DOUBLES | TRAINER)",
+    "resolved": 3
+  }
+]
+```
+
+## Integration
+
+`uxie` is designed to bridge the gap between different toolchains in the Gen 4
+romhacking ecosystem:
+
+- **Decompilation Projects**: Fully compatible with the JSON formats used by
+  `pokeplatinum` and `pokeheartgold`. Provides a seamless bridge between raw
+  binary and modern source-controlled data.
+- **DSPRE / Binary Tools**: Ensures 1:1 binary round-tripping for map headers
+  and event files, maintaining compatibility with standard ROM editing tools.
+- **ds-rom**: Native support for `ds-rom` project structures, providing a
+  modern Rust interface for legacy configurations.
 
 ## Library Usage
 
@@ -241,7 +283,7 @@ let files_dir = project.files_dir();
 ### Parsing C Headers
 
 ```rust
-use uxie::c_parser::{parse_enum, parse_defines};
+use uxie::c_parser::{parse_enum, parse_and_resolve_defines};
 
 let content = std::fs::read_to_string("header.h")?;
 
@@ -252,10 +294,14 @@ if let Some(e) = parse_enum(&content) {
     }
 }
 
-// Parse defines
-let defines = parse_defines(&content);
+// Parse and resolve defines
+let defines = parse_and_resolve_defines(&content);
 for d in &defines {
-    println!("#define {} {}", d.name, d.value);
+    if let Some(resolved) = d.resolved {
+        println!("#define {} {} (= {})", d.name, d.value, resolved);
+    } else {
+        println!("#define {} {}", d.name, d.value);
+    }
 }
 ```
 
