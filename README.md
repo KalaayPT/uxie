@@ -12,8 +12,9 @@ ROM data from DSPRE projects and decompilation sources.
   - [Etymology](#etymology)
 - [Features](#features)
 - [Install](#install)
+  - [CLI (Command Line Interface)](#cli-command-line-interface)
+  - [Library Usage](#library-usage)
   - [Build from Source](#build-from-source)
-  - [As a Library](#as-a-library)
 - [CLI Usage](#cli-usage)
   - [Common Flags](#common-flags)
   - [header](#header)
@@ -22,7 +23,7 @@ ROM data from DSPRE projects and decompilation sources.
   - [symbols](#symbols)
   - [resolve-script](#resolve-script)
 - [Integration](#integration)
-- [Library Usage](#library-usage)
+- [Library Usage](#library-usage-1)
   - [High-Level Workspace](#high-level-workspace)
   - [Reading ROM Headers](#reading-rom-headers)
   - [Reading Map Headers](#reading-map-headers)
@@ -63,7 +64,40 @@ as the "Being of Knowledge."
 
 ## Install
 
+### CLI (Command Line Interface)
+
+The easiest way to install the `uxie` CLI is via `cargo`:
+
+```shell
+cargo install uxie
+```
+
+Verify installation:
+
+```shell
+uxie --version
+```
+
+### Library Usage
+
+Add `uxie` to your project's dependencies. Using `cargo add`:
+
+```shell
+cargo add uxie
+```
+
+Or manually add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+uxie = "0.1.0"
+```
+
+For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).
+
 ### Build from Source
+
+To build from the latest source code:
 
 ```shell
 git clone https://github.com/KalaayPT/uxie.git
@@ -75,15 +109,6 @@ The binary will be at `target/release/uxie`. Verify installation:
 
 ```shell
 ./target/release/uxie --version
-```
-
-### As a Library
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-uxie = { git = "https://github.com/KalaayPT/uxie.git", branch = "mother" }
 ```
 
 ## CLI Usage
