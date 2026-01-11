@@ -90,7 +90,7 @@ Or manually add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-uxie = "0.1.0"
+uxie = "0.1.2"
 ```
 
 For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).

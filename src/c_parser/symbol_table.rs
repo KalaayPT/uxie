@@ -5,7 +5,7 @@ pub use crate::c_parser::defines::parse_defines;
 pub use crate::c_parser::defines::parse_value;
 pub use crate::c_parser::enums::parse_enum;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     pub defines: HashMap<String, i64>,
     pub enums: HashMap<String, Vec<(String, Option<i64>)>>,
@@ -14,11 +14,7 @@ pub struct SymbolTable {
 
 impl SymbolTable {
     pub fn new() -> Self {
-        Self {
-            defines: HashMap::new(),
-            enums: HashMap::new(),
-            loaded_includes: Vec::new(),
-        }
+        Self::default()
     }
 
     pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -173,6 +169,29 @@ impl SymbolTable {
         Ok(())
     }
 
+    pub fn load_text_bank_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
+        let content = std::fs::read_to_string(path)?;
+        let json: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let messages = json
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "No 'messages' array")
+            })?;
+
+        let mut count = 0;
+        for (index, msg) in messages.iter().enumerate() {
+            if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
+                self.defines.insert(id.to_string(), index as i64);
+                count += 1;
+            }
+        }
+
+        Ok(count)
+    }
+
     pub fn load_headers_from_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<usize> {
         let mut count = 0;
         let entries = std::fs::read_dir(dir)?;
@@ -189,6 +208,13 @@ impl SymbolTable {
             } else if ext_str.eq_ignore_ascii_case("txt") {
                 self.load_list_file(&path)?;
                 count += 1;
+            } else if ext_str.eq_ignore_ascii_case("py") {
+                self.load_python_enum(&path)?;
+                count += 1;
+            } else if ext_str.eq_ignore_ascii_case("json") {
+                if let Ok(c) = self.load_text_bank_json(&path) {
+                    count += c;
+                }
             } else if path.is_dir() {
                 if path.file_name().and_then(|s| s.to_str()) == Some(".git") {
                     continue;
@@ -215,12 +241,51 @@ impl SymbolTable {
 
         let content = String::from_utf8_lossy(&output.stdout);
         let is_txt = url.ends_with(".txt");
+        let is_py = url.ends_with(".py");
 
         if is_txt {
             self.load_list_file_str(&content)
+        } else if is_py {
+            self.load_python_enum_str(&content)
         } else {
             self.load_header_str(&content)
         }
+    }
+
+    pub fn load_python_enum(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let content = std::fs::read_to_string(path)?;
+        self.load_python_enum_str(&content)
+    }
+
+    pub fn load_python_enum_str(&mut self, content: &str) -> std::io::Result<()> {
+        let pattern = regex::Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$").unwrap();
+        let mut pending_defines: Vec<crate::c_parser::defines::CDefine> = self
+            .defines
+            .iter()
+            .map(|(n, v)| crate::c_parser::defines::CDefine {
+                name: n.clone(),
+                value: v.to_string(),
+                resolved: Some(*v),
+            })
+            .collect();
+
+        for line in content.lines() {
+            let line = line.trim();
+            if let Some(caps) = pattern.captures(line) {
+                let name = caps[1].to_string();
+                let expr = caps[2].trim().to_string();
+
+                if let Some(val) = crate::c_parser::parse_value(&expr, &pending_defines) {
+                    self.defines.insert(name.clone(), val);
+                    pending_defines.push(crate::c_parser::defines::CDefine {
+                        name,
+                        value: expr,
+                        resolved: Some(val),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 
