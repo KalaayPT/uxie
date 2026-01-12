@@ -4,6 +4,7 @@ use uxie::{
     BinaryEncounterFile, DspreProject, GameFamily, JsonEncounterFile, MapHeader, MapHeaderJson,
     RomHeader, SymbolTable, Workspace,
 };
+use std::collections::HashMap;
 
 #[derive(Parser)]
 #[command(name = "uxie")]
@@ -262,14 +263,15 @@ fn cmd_parse_header(
         #[derive(serde::Serialize)]
         struct HeaderOutput {
             defines: Option<Vec<uxie::c_parser::defines::CDefine>>,
-            enums: Option<std::collections::HashMap<String, Vec<(String, Option<i64>)>>>,
+            enums: Option<HashMap<String, Vec<(String, Option<i64>)>>>,
         }
+
 
         let defines = if !only_enums {
             if is_txt {
                 Some(
                     symbols
-                        .defines
+                        .get_all_defines()
                         .iter()
                         .map(|(n, v)| uxie::c_parser::defines::CDefine {
                             name: n.clone(),
@@ -288,7 +290,7 @@ fn cmd_parse_header(
         let output = HeaderOutput {
             defines,
             enums: if !only_defines {
-                Some(symbols.enums.clone())
+                Some(symbols.get_enums_std())
             } else {
                 None
             },
@@ -297,8 +299,8 @@ fn cmd_parse_header(
     } else {
         if !only_enums {
             if is_txt {
-                let mut defs: Vec<_> = symbols.defines.iter().collect();
-                defs.sort_by_key(|(n, _)| *n);
+                let mut defs: Vec<_> = symbols.get_all_defines().into_iter().collect();
+                defs.sort_by_key(|(n, _)| n.clone());
                 if !defs.is_empty() {
                     println!("Symbols (from .txt):");
                     for (name, value) in defs {
@@ -319,9 +321,10 @@ fn cmd_parse_header(
                 }
             }
         }
-        if !only_defines && !symbols.enums.is_empty() {
+        let enums = symbols.get_enums_std();
+        if !only_defines && !enums.is_empty() {
             println!("\nEnums:");
-            for (name, variants) in &symbols.enums {
+            for (name, variants) in &enums {
                 println!("  enum {} {{", name);
                 for (v_name, v_val) in variants {
                     println!("    {} = {:?},", v_name, v_val);

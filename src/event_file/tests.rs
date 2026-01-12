@@ -66,18 +66,18 @@ mod tests {
     #[test]
     fn test_json_resolution() {
         let mut symbols = SymbolTable::new();
-        symbols
-            .defines
-            .insert("MAP_HEADER_JUBILIFE_CITY".into(), 10);
-        symbols.defines.insert("VAR_STORY_PROGRESS".into(), 0x4000);
-        symbols.defines.insert("OBJ_EVENT_GFX_PLAYER".into(), 1);
-        symbols.defines.insert("BG_EVENT_DIR_NORTH".into(), 1);
+        symbols.insert_define("MAP_HEADER_JUBILIFE_CITY".into(), 10);
+        symbols.insert_define("VAR_STORY_PROGRESS".into(), 0x4000);
+        symbols.insert_define("OBJ_EVENT_GFX_PLAYER".into(), 1);
+        symbols.insert_define("BG_EVENT_DIR_NORTH".into(), 1);
+
 
         let json = r#"{
             "bg_events": [{
                 "script": 1,
-                "type": 0,
+                "type": "0",
                 "x": 10,
+
                 "z": 10,
                 "y": 0,
                 "player_facing_dir": "BG_EVENT_DIR_NORTH"

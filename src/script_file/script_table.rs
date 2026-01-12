@@ -1,18 +1,16 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
+use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ScriptTable {
-    pub names: Vec<String>,
-    pub name_to_id: HashMap<String, usize>,
+    pub(crate) names: Vec<String>,
+    pub(crate) name_to_id: FxHashMap<String, usize>,
 }
 
 impl ScriptTable {
     pub fn new() -> Self {
-        Self {
-            names: Vec::new(),
-            name_to_id: HashMap::new(),
-        }
+        Self::default()
     }
 
     pub fn load_order_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -23,7 +21,7 @@ impl ScriptTable {
     pub fn load_order_str(&mut self, content: &str) -> std::io::Result<()> {
         for line in content.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with("#") {
+            if line.is_empty() || line.starts_with('#') {
                 continue;
             }
             let name = line.to_string();
@@ -39,5 +37,17 @@ impl ScriptTable {
 
     pub fn get_id(&self, name: &str) -> Option<usize> {
         self.name_to_id.get(name).copied()
+    }
+
+    pub fn get_all_names(&self) -> &Vec<String> {
+        &self.names
+    }
+
+    pub fn get_name_to_id_std(&self) -> HashMap<String, usize> {
+        let mut res = HashMap::with_capacity(self.name_to_id.len());
+        for (k, v) in &self.name_to_id {
+            res.insert(k.clone(), *v);
+        }
+        res
     }
 }

@@ -52,36 +52,42 @@ impl CEnum {
     }
 }
 
-pub fn parse_enum(source: &str) -> Option<CEnum> {
-    let caps = RE_ENUM.captures(source)?;
-    let name = caps.get(1).map(|m| m.as_str().to_string());
-    let body = &caps[2];
+pub fn parse_enums(source: &str) -> Vec<CEnum> {
+    let mut enums = Vec::new();
+    for caps in RE_ENUM.captures_iter(source) {
+        let name = caps.get(1).map(|m| m.as_str().to_string());
+        let body = &caps[2];
 
-    let mut variants = Vec::new();
-    for line in body.lines() {
-        let line = line.trim().trim_end_matches(',');
-        if line.is_empty() || line.starts_with("//") {
-            continue;
-        }
+        let mut variants = Vec::new();
+        for line in body.lines() {
+            let line = line.trim().trim_end_matches(',');
+            if line.is_empty() || line.starts_with("//") {
+                continue;
+            }
 
-        if let Some(var_caps) = RE_VARIANT.captures(line) {
-            let var_name = var_caps[1].to_string();
-            let value = var_caps.get(2).and_then(|m| {
-                let v = m.as_str().trim();
-                if v.starts_with("0x") || v.starts_with("0X") {
-                    i64::from_str_radix(&v[2..], 16).ok()
-                } else {
-                    v.parse().ok()
-                }
-            });
-            variants.push(CEnumVariant {
-                name: var_name,
-                value,
-            });
+            if let Some(var_caps) = RE_VARIANT.captures(line) {
+                let var_name = var_caps[1].to_string();
+                let value = var_caps.get(2).and_then(|m| {
+                    let v = m.as_str().trim();
+                    if v.starts_with("0x") || v.starts_with("0X") {
+                        i64::from_str_radix(&v[2..], 16).ok()
+                    } else {
+                        v.parse().ok()
+                    }
+                });
+                variants.push(CEnumVariant {
+                    name: var_name,
+                    value,
+                });
+            }
         }
+        enums.push(CEnum { name, variants });
     }
+    enums
+}
 
-    Some(CEnum { name, variants })
+pub fn parse_enum(source: &str) -> Option<CEnum> {
+    parse_enums(source).into_iter().next()
 }
 
 

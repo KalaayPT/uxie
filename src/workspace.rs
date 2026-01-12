@@ -4,8 +4,9 @@ use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::ScriptTable;
 use crate::text_bank::TextBankTable;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
+
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
@@ -22,8 +23,9 @@ pub struct Workspace {
     pub symbols: SymbolTable,
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
-    script_to_text_cache: HashMap<u16, u16>,
+    script_to_text_cache: FxHashMap<u16, u16>,
     location_names: Option<Vec<String>>,
+
     internal_names: Option<Vec<String>>,
 }
 
@@ -169,7 +171,8 @@ impl Workspace {
             symbols: SymbolTable::new(),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
-            script_to_text_cache: HashMap::new(),
+            script_to_text_cache: FxHashMap::default(),
+
             location_names: None,
             internal_names: None,
         })
@@ -231,7 +234,8 @@ impl Workspace {
             symbols,
             scripts,
             text_banks,
-            script_to_text_cache: HashMap::new(),
+            script_to_text_cache: FxHashMap::default(),
+
             location_names: None,
             internal_names: None,
         })
@@ -252,7 +256,8 @@ impl Workspace {
             symbols,
             scripts,
             text_banks,
-            script_to_text_cache: HashMap::new(),
+            script_to_text_cache: FxHashMap::default(),
+
             location_names: None,
             internal_names: None,
         }
@@ -283,7 +288,8 @@ impl Workspace {
             symbols,
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
-            script_to_text_cache: HashMap::new(),
+            script_to_text_cache: FxHashMap::default(),
+
             location_names: None,
             internal_names: None,
         })
@@ -330,48 +336,43 @@ impl Workspace {
 
     pub fn resolve_script_symbols(&self, script: &str) -> String {
         let mut result = String::with_capacity(script.len());
-        let mut current_token = String::new();
+        let mut start_idx = 0;
 
-        for c in script.chars() {
-            if c.is_alphanumeric() || c == '_' {
-                current_token.push(c);
-            } else {
-                if !current_token.is_empty() {
-                    if let Some(val) = self.resolve_constant(&current_token) {
-                        result.push_str(&val.to_string());
-                    } else if let Ok(val) = current_token.parse::<i64>() {
-                        let matches = self.resolve_names(val, &[]);
-                        if !matches.is_empty() {
-                            result.push_str(&matches[0]);
-                        } else {
-                            result.push_str(&current_token);
-                        }
-                    } else {
-                        result.push_str(&current_token);
-                    }
-                    current_token.clear();
+        for (i, c) in script.char_indices() {
+            let is_token_char = c.is_alphanumeric() || c == '_';
+            
+            if !is_token_char {
+                if i > start_idx {
+                    let token = &script[start_idx..i];
+                    self.append_resolved_token(&mut result, token);
                 }
                 result.push(c);
+                start_idx = i + c.len_utf8();
             }
         }
 
-        if !current_token.is_empty() {
-            if let Some(val) = self.resolve_constant(&current_token) {
-                result.push_str(&val.to_string());
-            } else if let Ok(val) = current_token.parse::<i64>() {
-                let matches = self.resolve_names(val, &[]);
-                if !matches.is_empty() {
-                    result.push_str(&matches[0]);
-                } else {
-                    result.push_str(&current_token);
-                }
-            } else {
-                result.push_str(&current_token);
-            }
+        if start_idx < script.len() {
+            let token = &script[start_idx..];
+            self.append_resolved_token(&mut result, token);
         }
 
         result
     }
+
+    fn append_resolved_token(&self, result: &mut String, token: &str) {
+        if let Some(val) = self.resolve_constant(token) {
+            result.push_str(&val.to_string());
+        } else if let Ok(val) = token.parse::<i64>() {
+            if let Some(name) = self.resolve_name(val, "") {
+                result.push_str(&name);
+            } else {
+                result.push_str(token);
+            }
+        } else {
+            result.push_str(token);
+        }
+    }
+
 }
 
 #[cfg(test)]

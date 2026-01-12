@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
+use dashmap::DashMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CDefine {
@@ -38,164 +39,317 @@ pub fn parse_defines(source: &str) -> Vec<CDefine> {
     defines
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Token {
+    Number(i64),
+    Ident(String),
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    And,
+    Or,
+    Xor,
+    Tilde,
+    Not,
+    LShift,
+    RShift,
+    LParen,
+    RParen,
+    Comma,
+    Eof,
+}
+
+struct Tokenizer<'a> {
+    input: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Tokenizer<'a> {
+    fn new(input: &'a str) -> Self {
+        Self { input: input.as_bytes(), pos: 0 }
+    }
+
+    fn next_token(&mut self) -> Token {
+        self.skip_whitespace();
+        if self.pos >= self.input.len() {
+            return Token::Eof;
+        }
+
+        let b = self.input[self.pos];
+        match b {
+            b'0'..=b'9' => self.read_number(),
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.read_ident(),
+            b'+' => { self.pos += 1; Token::Plus }
+            b'-' => { self.pos += 1; Token::Minus }
+            b'*' => { self.pos += 1; Token::Star }
+            b'/' => { self.pos += 1; Token::Slash }
+            b'%' => { self.pos += 1; Token::Percent }
+            b'&' => { self.pos += 1; Token::And }
+            b'|' => { self.pos += 1; Token::Or }
+            b'^' => { self.pos += 1; Token::Xor }
+            b'~' => { self.pos += 1; Token::Tilde }
+            b'!' => { self.pos += 1; Token::Not }
+            b'<' => {
+                if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'<' {
+                    self.pos += 2;
+                    Token::LShift
+                } else {
+                    self.pos += 1;
+                    Token::Eof
+                }
+            }
+            b'>' => {
+                if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'>' {
+                    self.pos += 2;
+                    Token::RShift
+                } else {
+                    self.pos += 1;
+                    Token::Eof
+                }
+            }
+            b'(' => { self.pos += 1; Token::LParen }
+            b')' => { self.pos += 1; Token::RParen }
+            b',' => { self.pos += 1; Token::Comma }
+            _ => { self.pos += 1; Token::Eof }
+        }
+    }
+
+    fn skip_whitespace(&mut self) {
+        while self.pos < self.input.len() && self.input[self.pos].is_ascii_whitespace() {
+            self.pos += 1;
+        }
+    }
+
+    fn read_number(&mut self) -> Token {
+        let start = self.pos;
+        if self.pos + 2 < self.input.len() && self.input[self.pos] == b'0' && (self.input[self.pos + 1] == b'x' || self.input[self.pos + 1] == b'X') {
+            self.pos += 2;
+            let hex_start = self.pos;
+            while self.pos < self.input.len() && self.input[self.pos].is_ascii_hexdigit() {
+                self.pos += 1;
+            }
+            let hex_str = std::str::from_utf8(&self.input[hex_start..self.pos]).unwrap_or("0");
+            return Token::Number(i64::from_str_radix(hex_str, 16).unwrap_or(0));
+        }
+
+        while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
+            self.pos += 1;
+        }
+        let num_str = std::str::from_utf8(&self.input[start..self.pos]).unwrap_or("0");
+        Token::Number(num_str.parse().unwrap_or(0))
+    }
+
+    fn read_ident(&mut self) -> Token {
+        let start = self.pos;
+        while self.pos < self.input.len() && (self.input[self.pos].is_ascii_alphanumeric() || self.input[self.pos] == b'_') {
+            self.pos += 1;
+        }
+        let ident = std::str::from_utf8(&self.input[start..self.pos]).unwrap_or("");
+        Token::Ident(ident.to_string())
+    }
+}
+
+pub fn eval_expr_with_context(
+    expr: &str, 
+    expressions: &FxHashMap<String, String>, 
+    resolved: &FxHashMap<String, i64>,
+    cache: &DashMap<String, i64>
+) -> Option<i64> {
+    let mut visiting = FxHashSet::default();
+    eval_expr_recursive(expr, expressions, resolved, cache, &mut visiting, 0)
+}
+
+fn eval_expr_recursive(
+    expr: &str, 
+    expressions: &FxHashMap<String, String>, 
+    resolved: &FxHashMap<String, i64>,
+    cache: &DashMap<String, i64>,
+    visiting: &mut FxHashSet<String>,
+    depth: usize
+) -> Option<i64> {
+    const MAX_DEPTH: usize = 128;
+    if depth > MAX_DEPTH { return None; }
+
+    let expr = expr.trim();
+    if expr.is_empty() { return None; }
+    if let Some(&val) = resolved.get(expr) { return Some(val); }
+    if let Some(cached) = cache.get(expr) { return Some(*cached); }
+    
+    if let Some(val) = try_parse_numeric(expr) {
+        return Some(val);
+    }
+
+    if !visiting.insert(expr.to_string()) { return None; }
+
+    let mut tokenizer = Tokenizer::new(expr);
+    let mut tokens = Vec::with_capacity(8);
+    let mut tok = tokenizer.next_token();
+    while tok != Token::Eof {
+        tokens.push(tok);
+        tok = tokenizer.next_token();
+    }
+
+    let result = if tokens.is_empty() {
+        None
+    } else {
+        let mut pos = 0;
+        parse_expr(&tokens, &mut pos, 0, expressions, resolved, cache, visiting, depth)
+    };
+
+    visiting.remove(expr);
+
+    if let Some(val) = result { 
+        cache.insert(expr.to_string(), val); 
+    }
+    result
+}
+
+fn try_parse_numeric(s: &str) -> Option<i64> {
+    if s.starts_with("0x") || s.starts_with("0X") {
+        i64::from_str_radix(&s[2..], 16).ok()
+    } else {
+        s.parse().ok()
+    }
+}
+
+fn get_precedence(tok: &Token) -> u8 {
+    match tok {
+        Token::Or => 1,
+        Token::Xor => 2,
+        Token::And => 3,
+        Token::LShift | Token::RShift => 4,
+        Token::Plus | Token::Minus => 5,
+        Token::Star | Token::Slash | Token::Percent => 6,
+        _ => 0,
+    }
+}
+
+fn parse_expr(
+    tokens: &[Token],
+    pos: &mut usize,
+    min_prec: u8,
+    expressions: &FxHashMap<String, String>,
+    resolved: &FxHashMap<String, i64>,
+    cache: &DashMap<String, i64>,
+    visiting: &mut FxHashSet<String>,
+    depth: usize
+) -> Option<i64> {
+    let mut left = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+
+    while *pos < tokens.len() {
+        let prec = get_precedence(&tokens[*pos]);
+        if prec < min_prec || prec == 0 {
+            break;
+        }
+
+        let op = tokens[*pos].clone();
+        *pos += 1;
+        let right = parse_expr(tokens, pos, prec + 1, expressions, resolved, cache, visiting, depth)?;
+
+        left = match op {
+            Token::Plus => left + right,
+            Token::Minus => left - right,
+            Token::Star => left * right,
+            Token::Slash => if right == 0 { return None; } else { left / right },
+            Token::Percent => if right == 0 { return None; } else { left % right },
+            Token::And => left & right,
+            Token::Or => left | right,
+            Token::Xor => left ^ right,
+            Token::LShift => left << right,
+            Token::RShift => left >> right,
+            _ => left,
+        };
+    }
+
+    Some(left)
+}
+
+fn parse_primary(
+    tokens: &[Token],
+    pos: &mut usize,
+    expressions: &FxHashMap<String, String>,
+    resolved: &FxHashMap<String, i64>,
+    cache: &DashMap<String, i64>,
+    visiting: &mut FxHashSet<String>,
+    depth: usize
+) -> Option<i64> {
+    if *pos >= tokens.len() { return None; }
+
+    match &tokens[*pos] {
+        Token::Number(n) => {
+            *pos += 1;
+            Some(*n)
+        }
+        Token::Ident(id) => {
+            if id == "RGB" && *pos + 1 < tokens.len() && tokens[*pos + 1] == Token::LParen {
+                *pos += 2;
+                let r = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+                if *pos < tokens.len() && tokens[*pos] == Token::Comma { *pos += 1; }
+                let g = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+                if *pos < tokens.len() && tokens[*pos] == Token::Comma { *pos += 1; }
+                let b = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+                if *pos < tokens.len() && tokens[*pos] == Token::RParen { *pos += 1; }
+                return Some((b << 10) | (g << 5) | r);
+            }
+
+            let id_clone = id.clone();
+            *pos += 1;
+            if let Some(&val) = resolved.get(&id_clone) { return Some(val); }
+            if let Some(cached) = cache.get(&id_clone) { return Some(*cached); }
+            if let Some(expr) = expressions.get(&id_clone) {
+                return eval_expr_recursive(expr, expressions, resolved, cache, visiting, depth + 1);
+            }
+            None
+        }
+        Token::LParen => {
+            *pos += 1;
+            let val = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+            if *pos < tokens.len() && tokens[*pos] == Token::RParen {
+                *pos += 1;
+            }
+            Some(val)
+        }
+        Token::Plus => {
+            *pos += 1;
+            parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)
+        }
+        Token::Minus => {
+            *pos += 1;
+            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+            Some(-val)
+        }
+        Token::Tilde => {
+            *pos += 1;
+            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+            Some(!val)
+        }
+        Token::Not => {
+            *pos += 1;
+            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+            Some(if val == 0 { 1 } else { 0 })
+        }
+        _ => None,
+    }
+}
+
 pub fn parse_and_resolve_defines(source: &str) -> Vec<CDefine> {
     let mut defines = parse_defines(source);
-    let exprs: HashMap<String, String> = defines.iter().map(|d| (d.name.clone(), d.value.clone())).collect();
-    let mut cache = HashMap::new();
-    let res = HashMap::new();
+    let exprs: FxHashMap<String, String> = defines.iter().map(|d| (d.name.clone(), d.value.clone())).collect();
+    let cache = DashMap::new();
+    let res = FxHashMap::default();
     for i in 0..defines.len() {
-        defines[i].resolved = eval_expr_with_context(&defines[i].value, &exprs, &res, &mut cache);
+        defines[i].resolved = eval_expr_with_context(&defines[i].value, &exprs, &res, &cache);
     }
     defines
 }
 
 pub fn parse_value(value: &str, defines: &[CDefine]) -> Option<i64> {
-    let exprs: HashMap<String, String> = defines.iter().map(|d| (d.name.clone(), d.value.clone())).collect();
-    let mut cache = HashMap::new();
-    let res = HashMap::new();
-    eval_expr_with_context(value.trim(), &exprs, &res, &mut cache)
-}
-
-pub fn eval_expr_with_context(
-    expr: &str, 
-    expressions: &HashMap<String, String>, 
-    resolved: &HashMap<String, i64>,
-    cache: &mut HashMap<String, i64>
-) -> Option<i64> {
-    let expr = expr.trim();
-    if expr.is_empty() { return None; }
-    if let Some(&val) = resolved.get(expr) { return Some(val); }
-    if let Some(&cached) = cache.get(expr) { return Some(cached); }
-    let result = eval_expr_internal(expr, expressions, resolved, cache);
-    if let Some(val) = result { cache.insert(expr.to_string(), val); }
-    result
-}
-
-fn eval_expr_internal(
-    expr: &str, 
-    expressions: &HashMap<String, String>, 
-    resolved: &HashMap<String, i64>,
-    cache: &mut HashMap<String, i64>
-) -> Option<i64> {
-    let expr = expr.trim();
-    if expr.starts_with('(') && expr.ends_with(')') {
-        let inner = &expr[1..expr.len() - 1];
-        if is_balanced(inner) { return eval_expr_with_context(inner, expressions, resolved, cache); }
-    }
-    if let Some(result) = try_eval_call(expr, expressions, resolved, cache) { return Some(result); }
-    if let Some(result) = try_eval_or(expr, expressions, resolved, cache) { return Some(result); }
-    if let Some(result) = try_eval_xor(expr, expressions, resolved, cache) { return Some(result); }
-    if let Some(result) = try_eval_bitwise(expr, expressions, resolved, cache) { return Some(result); }
-    if let Some(result) = try_eval_add_sub(expr, expressions, resolved, cache) { return Some(result); }
-    if let Some(result) = try_eval_shift(expr, expressions, resolved, cache) { return Some(result); }
-    if expr.starts_with("0x") || expr.starts_with("0X") { return i64::from_str_radix(&expr[2..], 16).ok(); }
-    if let Ok(n) = expr.parse::<i64>() { return Some(n); }
-    if let Some(other) = expressions.get(expr) { return eval_expr_with_context(other, expressions, resolved, cache); }
-    None
-}
-
-fn is_balanced(s: &str) -> bool {
-    let mut d = 0i32;
-    for c in s.chars() {
-        if c == '(' { d += 1; }
-        else if c == ')' { d -= 1; if d < 0 { return false; } }
-    }
-    d == 0
-}
-
-fn try_eval_or(e: &str, exprs: &HashMap<String, String>, res: &HashMap<String, i64>, cache: &mut HashMap<String, i64>) -> Option<i64> {
-    let parts = split_on(e, '|');
-    if parts.len() < 2 { return None; }
-    let mut val = 0i64;
-    for p in parts { val |= eval_expr_with_context(p, exprs, res, cache)?; }
-    Some(val)
-}
-
-fn try_eval_xor(e: &str, exprs: &HashMap<String, String>, res: &HashMap<String, i64>, cache: &mut HashMap<String, i64>) -> Option<i64> {
-    let parts = split_on(e, '^');
-    if parts.len() < 2 { return None; }
-    let mut val = 0i64;
-    for (i, p) in parts.iter().enumerate() {
-        let v = eval_expr_with_context(p, exprs, res, cache)?;
-        if i == 0 { val = v; } else { val ^= v; }
-    }
-    Some(val)
-}
-
-fn try_eval_shift(e: &str, exprs: &HashMap<String, String>, res: &HashMap<String, i64>, cache: &mut HashMap<String, i64>) -> Option<i64> {
-    let b = e.as_bytes();
-    let mut d = 0;
-    for i in (0..b.len().saturating_sub(1)).rev() {
-        if b[i] == b')' { d += 1; }
-        else if b[i] == b'(' { d -= 1; }
-        else if d == 0 && i > 0 {
-            if b[i] == b'>' && b[i-1] == b'>' {
-                return Some(eval_expr_with_context(&e[..i-1], exprs, res, cache)? >> eval_expr_with_context(&e[i+1..], exprs, res, cache)?);
-            } else if b[i] == b'<' && b[i-1] == b'<' {
-                return Some(eval_expr_with_context(&e[..i-1], exprs, res, cache)? << eval_expr_with_context(&e[i+1..], exprs, res, cache)?);
-            }
-        }
-    }
-    None
-}
-
-fn try_eval_bitwise(e: &str, exprs: &HashMap<String, String>, res: &HashMap<String, i64>, cache: &mut HashMap<String, i64>) -> Option<i64> {
-    let b = e.as_bytes();
-    let mut d = 0;
-    for i in (0..b.len()).rev() {
-        if b[i] == b')' { d += 1; }
-        else if b[i] == b'(' { d -= 1; }
-        else if d == 0 && b[i] == b'&' {
-            return Some(eval_expr_with_context(&e[..i], exprs, res, cache)? & eval_expr_with_context(&e[i+1..], exprs, res, cache)?);
-        }
-    }
-    None
-}
-
-fn try_eval_add_sub(e: &str, exprs: &HashMap<String, String>, res: &HashMap<String, i64>, cache: &mut HashMap<String, i64>) -> Option<i64> {
-    let b = e.as_bytes();
-    let mut d = 0;
-    for i in (0..b.len()).rev() {
-        if b[i] == b')' { d += 1; }
-        else if b[i] == b'(' { d -= 1; }
-        else if d == 0 {
-            if b[i] == b'+' {
-                return Some(eval_expr_with_context(&e[..i], exprs, res, cache)? + eval_expr_with_context(&e[i+1..], exprs, res, cache)?);
-            } else if b[i] == b'-' && i > 0 && !b"|&^+-*/%<<>>".contains(&b[i-1]) {
-                return Some(eval_expr_with_context(&e[..i], exprs, res, cache)? - eval_expr_with_context(&e[i+1..], exprs, res, cache)?);
-            }
-        }
-    }
-    None
-}
-
-fn try_eval_call(e: &str, exprs: &HashMap<String, String>, res: &HashMap<String, i64>, cache: &mut HashMap<String, i64>) -> Option<i64> {
-    let e = e.trim();
-    if let Some(p) = e.find('(') {
-        if e.ends_with(')') {
-            let name = e[..p].trim();
-            let args = split_on(&e[p+1..e.len()-1], ',');
-            if name == "RGB" && args.len() == 3 {
-                let r = eval_expr_with_context(args[0], exprs, res, cache)?;
-                let g = eval_expr_with_context(args[1], exprs, res, cache)?;
-                let b = eval_expr_with_context(args[2], exprs, res, cache)?;
-                return Some((b << 10) | (g << 5) | r);
-            }
-        }
-    }
-    None
-}
-
-fn split_on(e: &str, op: char) -> Vec<&str> {
-    let mut p = Vec::new();
-    let (mut d, mut s) = (0, 0);
-    for (i, c) in e.char_indices() {
-        if c == '(' { d += 1; }
-        else if c == ')' { d -= 1; }
-        else if c == op && d == 0 { p.push(e[s..i].trim()); s = i + 1; }
-    }
-    p.push(e[s..].trim());
-    p
+    let exprs: FxHashMap<String, String> = defines.iter().map(|d| (d.name.clone(), d.value.clone())).collect();
+    let cache = DashMap::new();
+    let res = FxHashMap::default();
+    eval_expr_with_context(value.trim(), &exprs, &res, &cache)
 }
 
 #[cfg(test)]
@@ -229,31 +383,51 @@ mod tests {
 
     #[test]
     fn test_bitwise_precedence() {
-        let mut cache = HashMap::new();
-        let exprs = HashMap::new();
-        let res = HashMap::new();
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
         
-        assert_eq!(eval_expr_with_context("1 | 2 << 1", &exprs, &res, &mut cache), Some(5));
-        assert_eq!(eval_expr_with_context("1 & 2 << 1", &exprs, &res, &mut cache), Some(0));
-        assert_eq!(eval_expr_with_context("1 << 1 | 2", &exprs, &res, &mut cache), Some(2));
+        assert_eq!(eval_expr_with_context("1 | 2 << 1", &exprs, &res, &cache), Some(1 | (2 << 1)));
+        assert_eq!(eval_expr_with_context("1 & 2 << 1", &exprs, &res, &cache), Some(1 & (2 << 1)));
+        assert_eq!(eval_expr_with_context("1 << 1 | 2", &exprs, &res, &cache), Some((1 << 1) | 2));
     }
 
     #[test]
     fn test_rgb_macro() {
-        let mut cache = HashMap::new();
-        let exprs = HashMap::new();
-        let res = HashMap::new();
-        assert_eq!(eval_expr_with_context("RGB(31, 0, 0)", &exprs, &res, &mut cache), Some(31));
-        assert_eq!(eval_expr_with_context("RGB(0, 31, 0)", &exprs, &res, &mut cache), Some(31 << 5));
-        assert_eq!(eval_expr_with_context("RGB(0, 0, 31)", &exprs, &res, &mut cache), Some(31 << 10));
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+        assert_eq!(eval_expr_with_context("RGB(31, 0, 0)", &exprs, &res, &cache), Some(31));
+        assert_eq!(eval_expr_with_context("RGB(0, 31, 0)", &exprs, &res, &cache), Some(31 << 5));
+        assert_eq!(eval_expr_with_context("RGB(0, 0, 31)", &exprs, &res, &cache), Some(31 << 10));
     }
 
     #[test]
     fn test_nested_rgb() {
-        let mut cache = HashMap::new();
-        let mut exprs = HashMap::new();
+        let cache = DashMap::new();
+        let mut exprs = FxHashMap::default();
         exprs.insert("R".to_string(), "31".to_string());
-        let res = HashMap::new();
-        assert_eq!(eval_expr_with_context("RGB(R, 0, 0)", &exprs, &res, &mut cache), Some(31));
+        let res = FxHashMap::default();
+        assert_eq!(eval_expr_with_context("RGB(R, 0, 0)", &exprs, &res, &cache), Some(31));
+    }
+
+    #[test]
+    fn test_cycle_detection() {
+        let cache = DashMap::new();
+        let mut exprs = FxHashMap::default();
+        exprs.insert("A".to_string(), "B".to_string());
+        exprs.insert("B".to_string(), "A".to_string());
+        let res = FxHashMap::default();
+        assert_eq!(eval_expr_with_context("A", &exprs, &res, &cache), None);
+    }
+    
+    #[test]
+    fn test_complex_precedence() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+        assert_eq!(eval_expr_with_context("1 + 2 * 3", &exprs, &res, &cache), Some(7));
+        assert_eq!(eval_expr_with_context("(1 + 2) * 3", &exprs, &res, &cache), Some(9));
+        assert_eq!(eval_expr_with_context("1 << 2 + 3", &exprs, &res, &cache), Some(32));
     }
 }
