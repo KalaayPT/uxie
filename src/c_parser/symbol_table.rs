@@ -7,6 +7,7 @@ use std::collections::HashMap;
 pub use crate::c_parser::defines::parse_defines;
 pub use crate::c_parser::defines::parse_value;
 pub use crate::c_parser::enums::{parse_enum, parse_enums};
+pub use crate::c_parser::source_manager::SourceManager;
 
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
@@ -19,6 +20,7 @@ pub struct SymbolTable {
     pub(crate) loaded_includes: FxHashSet<String>,
     pub(crate) cache: DashMap<String, i64>,
     pub(crate) shortest_name_cache: DashMap<i64, String>,
+    pub(crate) source_manager: Option<SourceManager>,
 }
 
 static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -30,6 +32,13 @@ impl SymbolTable {
         Self::default()
     }
 
+    pub fn with_source_manager(sm: SourceManager) -> Self {
+        Self {
+            source_manager: Some(sm),
+            ..Default::default()
+        }
+    }
+
     pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let path = path.as_ref();
         let path_str = path.to_string_lossy().into_owned();
@@ -37,55 +46,121 @@ impl SymbolTable {
             return Ok(());
         }
 
-        let content = match std::fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return Ok(()),
-        };
-        self.load_header_str(&content)?;
+        if let Some(sm) = &self.source_manager {
+            let entry = sm.get_or_parse(path)?;
+            self.load_file_entry(&entry);
+        } else {
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => return Ok(()),
+            };
+            self.load_header_str(&content)?;
+        }
+        
         self.loaded_includes.insert(path_str);
         Ok(())
+    }
+
+    pub fn load_recursive(&mut self, path: impl AsRef<Path>, include_dirs: &[PathBuf]) -> std::io::Result<()> {
+        let path = path.as_ref();
+        let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
+        let mut visited = FxHashSet::default();
+        self.load_recursive_internal(path, include_dirs, &sm, &mut visited)
+    }
+
+    fn load_recursive_internal(&mut self, path: &Path, include_dirs: &[PathBuf], sm: &SourceManager, visited: &mut FxHashSet<PathBuf>) -> std::io::Result<()> {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if !visited.insert(canonical.clone()) {
+            return Ok(());
+        }
+
+        let entry = sm.get_or_parse(path)?;
+        self.load_file_entry(&entry);
+        self.loaded_includes.insert(path.to_string_lossy().into_owned());
+
+        let parent_dir = path.parent().unwrap_or(Path::new("."));
+
+        for inc in &entry.includes {
+            if inc.is_system { continue; }
+            
+            let mut found_path = None;
+            let rel = parent_dir.join(&inc.path);
+            if rel.exists() {
+                found_path = Some(rel);
+            } else {
+                for dir in include_dirs {
+                    let p = dir.join(&inc.path);
+                    if p.exists() {
+                        found_path = Some(p);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(p) = found_path {
+                self.load_recursive_internal(&p, include_dirs, sm, visited)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn load_file_entry(&mut self, entry: &crate::c_parser::source_manager::FileEntry) {
+        for def in &entry.defines {
+            self.process_define(def.name.clone(), def.value.clone());
+        }
+        for e in &entry.enums {
+            self.process_enum(e.clone());
+        }
+    }
+
+    fn process_define(&mut self, name: String, value: String) {
+        let val_trimmed = value.trim();
+        if val_trimmed.starts_with("0x") || val_trimmed.starts_with("0X") {
+            if let Ok(val) = i64::from_str_radix(&val_trimmed[2..], 16) {
+                self.defines.insert(name.clone(), val);
+                self.defines_by_value.entry(val).or_default().push(name.clone());
+                self.pending_defines.insert(name, value);
+                return;
+            }
+        }
+        if let Ok(val) = val_trimmed.parse::<i64>() {
+            self.defines.insert(name.clone(), val);
+            self.defines_by_value.entry(val).or_default().push(name.clone());
+            self.pending_defines.insert(name, value);
+            return;
+        }
+        self.pending_defines.insert(name, value);
+    }
+
+    fn process_enum(&mut self, e: crate::c_parser::enums::CEnum) {
+        let mut current = 0i64;
+        let mut variants = Vec::new();
+        for v in &e.variants {
+            if let Some(val) = v.value { current = val; }
+            self.defines.insert(v.name.clone(), current);
+            self.variant_to_value.insert(v.name.clone(), current);
+            self.defines_by_value.entry(current).or_default().push(v.name.clone());
+            variants.push((v.name.clone(), Some(current)));
+            current += 1;
+        }
+        if let Some(name) = &e.name {
+            self.enums.insert(name.clone(), variants.clone());
+            for (v_name, v_val) in variants {
+                if let Some(val) = v_val {
+                    self.enum_by_value.entry(val).or_default().push(v_name);
+                }
+            }
+        }
     }
 
     pub fn load_header_str(&mut self, content: &str) -> std::io::Result<()> {
         let defines = parse_defines(content);
         for def in defines {
-            let val_trimmed = def.value.trim();
-            if val_trimmed.starts_with("0x") || val_trimmed.starts_with("0X") {
-                if let Ok(val) = i64::from_str_radix(&val_trimmed[2..], 16) {
-                    self.defines.insert(def.name.clone(), val);
-                    self.defines_by_value.entry(val).or_default().push(def.name.clone());
-                    self.pending_defines.insert(def.name, def.value);
-                    continue;
-                }
-            }
-            if let Ok(val) = val_trimmed.parse::<i64>() {
-                self.defines.insert(def.name.clone(), val);
-                self.defines_by_value.entry(val).or_default().push(def.name.clone());
-                self.pending_defines.insert(def.name, def.value);
-                continue;
-            }
-            self.pending_defines.insert(def.name, def.value);
+            self.process_define(def.name, def.value);
         }
-        
         for e in parse_enums(content) {
-            let mut current = 0i64;
-            let mut variants = Vec::new();
-            for v in &e.variants {
-                if let Some(val) = v.value { current = val; }
-                self.defines.insert(v.name.clone(), current);
-                self.variant_to_value.insert(v.name.clone(), current);
-                self.defines_by_value.entry(current).or_default().push(v.name.clone());
-                variants.push((v.name.clone(), Some(current)));
-                current += 1;
-            }
-            if let Some(name) = &e.name {
-                self.enums.insert(name.clone(), variants.clone());
-                for (v_name, v_val) in variants {
-                    if let Some(val) = v_val {
-                        self.enum_by_value.entry(val).or_default().push(v_name);
-                    }
-                }
-            }
+            self.process_enum(e);
         }
         Ok(())
     }
@@ -112,6 +187,16 @@ impl SymbolTable {
             &self.defines,
             &self.cache
         )
+    }
+
+    pub fn collect_for_file(path: impl AsRef<Path>, include_dirs: &[PathBuf], sm: SourceManager) -> std::io::Result<Self> {
+        let mut table = Self::with_source_manager(sm);
+        table.load_recursive(path, include_dirs)?;
+        Ok(table)
+    }
+
+    pub fn get_source_manager(&self) -> SourceManager {
+        self.source_manager.clone().unwrap_or_else(SourceManager::new)
     }
 
     pub fn resolve_name(&self, value: i64, prefix: &str) -> Option<String> {
@@ -227,8 +312,10 @@ impl SymbolTable {
         self.collect_header_files(dir.as_ref(), &mut files)?;
         let count = files.len();
         
+        let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
+
         let results: Vec<SymbolTable> = files.into_par_iter().map(|path| {
-            let mut table = SymbolTable::new();
+            let mut table = SymbolTable::with_source_manager(sm.clone());
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
             match ext.to_lowercase().as_str() {
                 "h" | "hpp" => { let _ = table.load_header(&path); }
@@ -318,7 +405,6 @@ impl SymbolTable {
     }
 
     pub fn get_all_defines(&self) -> HashMap<String, i64> {
-
         let mut res = HashMap::with_capacity(self.defines.len() + self.cache.len());
         for (k, v) in &self.defines {
             res.insert(k.clone(), *v);

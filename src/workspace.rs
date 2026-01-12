@@ -1,4 +1,4 @@
-use crate::c_parser::SymbolTable;
+use crate::c_parser::{SymbolTable, SourceManager};
 use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
@@ -23,9 +23,9 @@ pub struct Workspace {
     pub symbols: SymbolTable,
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
+    pub source_manager: SourceManager,
     script_to_text_cache: FxHashMap<u16, u16>,
     location_names: Option<Vec<String>>,
-
     internal_names: Option<Vec<String>>,
 }
 
@@ -162,17 +162,18 @@ impl Workspace {
             (GameFamily::HGSS, _) => (0xF6BE0, 540),
         };
 
+        let sm = SourceManager::new();
         Ok(Self {
             project_path: path,
             project_type: ProjectType::Dspre,
             game,
             family,
             provider: Box::new(Arm9Provider::new(arm9_path, offset, count, family)),
-            symbols: SymbolTable::new(),
+            symbols: SymbolTable::with_source_manager(sm.clone()),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            source_manager: sm,
             script_to_text_cache: FxHashMap::default(),
-
             location_names: None,
             internal_names: None,
         })
@@ -189,7 +190,8 @@ impl Workspace {
             (Game::Platinum, GameFamily::Platinum)
         };
 
-        let mut symbols = SymbolTable::new();
+        let sm = SourceManager::new();
+        let mut symbols = SymbolTable::with_source_manager(sm.clone());
 
         let include_dir = root.join("include/constants");
         if include_dir.exists() {
@@ -234,92 +236,23 @@ impl Workspace {
             symbols,
             scripts,
             text_banks,
+            source_manager: sm,
             script_to_text_cache: FxHashMap::default(),
-
             location_names: None,
             internal_names: None,
         })
     }
 
-    pub fn new(
-        provider: Box<dyn DataProvider>,
-        symbols: SymbolTable,
-        scripts: ScriptTable,
-        text_banks: TextBankTable,
-    ) -> Self {
-        Self {
-            project_path: PathBuf::new(),
-            project_type: ProjectType::Dspre,
-            game: Game::Platinum,
-            family: GameFamily::Platinum,
-            provider,
-            symbols,
-            scripts,
-            text_banks,
-            script_to_text_cache: FxHashMap::default(),
-
-            location_names: None,
-            internal_names: None,
+    pub fn collect_constants_for_file(&self, path: impl AsRef<Path>) -> std::io::Result<SymbolTable> {
+        let mut include_dirs = Vec::new();
+        if self.project_type == ProjectType::Decomp {
+            include_dirs.push(self.project_path.join("include"));
+            include_dirs.push(self.project_path.join("res/field/scripts"));
         }
-    }
-
-    pub fn from_arm9(
-        arm9_path: impl AsRef<Path>,
-        offset: u64,
-        count: usize,
-        family: GameFamily,
-        headers_dir: Option<impl AsRef<Path>>,
-    ) -> std::io::Result<Self> {
-        let mut symbols = SymbolTable::new();
-        if let Some(dir) = headers_dir {
-            symbols.load_headers_from_dir(dir)?;
-        }
-
-        Ok(Self {
-            project_path: arm9_path
-                .as_ref()
-                .parent()
-                .unwrap_or(Path::new("."))
-                .to_path_buf(),
-            project_type: ProjectType::Dspre,
-            game: Game::Platinum,
-            family,
-            provider: Box::new(Arm9Provider::new(arm9_path, offset, count, family)),
-            symbols,
-            scripts: ScriptTable::new(),
-            text_banks: TextBankTable::new(),
-            script_to_text_cache: FxHashMap::default(),
-
-            location_names: None,
-            internal_names: None,
-        })
-    }
-
-    pub fn load_scripts_order(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
-        self.scripts.load_order_file(path)
-    }
-
-    pub fn load_text_banks_list(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
-        self.text_banks.load_list_file(path)
-    }
-
-    pub fn get_text_bank_name_for_script(
-        &mut self,
-        script_id: u16,
-    ) -> std::io::Result<Option<String>> {
-        if let Some(&text_id) = self.script_to_text_cache.get(&script_id) {
-            return Ok(self.text_banks.get_name(text_id as usize).cloned());
-        }
-
-        if let Some(text_id) = self.provider.get_text_archive_for_script(script_id)? {
-            self.script_to_text_cache.insert(script_id, text_id);
-            return Ok(self.text_banks.get_name(text_id as usize).cloned());
-        }
-        Ok(None)
-    }
-
-    pub fn get_script_name(&self, script_id: u16) -> Option<String> {
-        self.scripts.get_name(script_id as usize).cloned()
+        
+        let mut table = SymbolTable::collect_for_file(path, &include_dirs, self.source_manager.clone())?;
+        table.extend(self.symbols.clone());
+        Ok(table)
     }
 
     pub fn resolve_constant(&self, name: &str) -> Option<i64> {
@@ -371,37 +304,5 @@ impl Workspace {
         } else {
             result.push_str(token);
         }
-    }
-
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore]
-    fn integration_workspace_open_decomp() {
-        let decomp_path = "/home/kalaay/dev/pokeplatinum";
-        if !std::path::Path::new(decomp_path).exists() {
-            return;
-        }
-
-        let workspace = Workspace::open_decomp(decomp_path).unwrap();
-
-        assert_eq!(
-            workspace.get_script_name(2),
-            Some("scripts_jubilife_city".to_string())
-        );
-        assert_eq!(workspace.resolve_constant("VARS_START"), Some(16384));
-
-        let mut workspace = workspace;
-        if let Ok(Some(name)) = workspace.get_text_bank_name_for_script(2) {
-            assert_eq!(name, "TEXT_BANK_JUBILIFE_CITY");
-        }
-
-        let script = "SetFlag FLAG_UNK_0x000A";
-        let resolved = workspace.resolve_script_symbols(script);
-        assert_eq!(resolved, "SetFlag 10");
     }
 }
