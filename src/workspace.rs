@@ -195,15 +195,22 @@ impl Workspace {
 
         let generated_dir = root.join("generated");
         if generated_dir.exists() {
-            symbols.load_headers_from_dir(generated_dir.clone())?;
+            symbols.load_headers_from_dir(generated_dir)?;
         }
 
-        let build_dir = root.join("build");
-        if build_dir.exists() {
-            symbols.load_headers_from_dir(build_dir)?;
+        let build_generated_dir = root.join("build/generated");
+        if build_generated_dir.exists() {
+            symbols.load_headers_from_dir(build_generated_dir)?;
         }
+
+        let text_dir = root.join("res/text");
+        if text_dir.exists() {
+            symbols.load_headers_from_dir(text_dir)?;
+        }
+
 
         let mut scripts = ScriptTable::new();
+
         let scripts_order = root.join("res/field/scripts/scripts.order");
         if scripts_order.exists() {
             scripts.load_order_file(scripts_order)?;

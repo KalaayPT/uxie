@@ -1,6 +1,16 @@
 use regex::Regex;
+use std::sync::LazyLock;
+
+static RE_ENUM: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]+)\}").unwrap()
+});
+
+static RE_VARIANT: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*([^,\n]+))?").unwrap()
+});
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+
 pub struct CEnumVariant {
     pub name: String,
     pub value: Option<i64>,
@@ -43,11 +53,7 @@ impl CEnum {
 }
 
 pub fn parse_enum(source: &str) -> Option<CEnum> {
-    let enum_pattern = Regex::new(r"enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]+)\}").unwrap();
-
-    let variant_pattern = Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*([^,\n]+))?").unwrap();
-
-    let caps = enum_pattern.captures(source)?;
+    let caps = RE_ENUM.captures(source)?;
     let name = caps.get(1).map(|m| m.as_str().to_string());
     let body = &caps[2];
 
@@ -58,7 +64,7 @@ pub fn parse_enum(source: &str) -> Option<CEnum> {
             continue;
         }
 
-        if let Some(var_caps) = variant_pattern.captures(line) {
+        if let Some(var_caps) = RE_VARIANT.captures(line) {
             let var_name = var_caps[1].to_string();
             let value = var_caps.get(2).and_then(|m| {
                 let v = m.as_str().trim();
@@ -77,6 +83,7 @@ pub fn parse_enum(source: &str) -> Option<CEnum> {
 
     Some(CEnum { name, variants })
 }
+
 
 #[cfg(test)]
 mod tests {
