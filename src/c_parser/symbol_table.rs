@@ -68,6 +68,43 @@ impl SymbolTable {
         self.load_recursive_internal(path, include_dirs, &sm, &mut visited)
     }
 
+    pub fn load_recursive_str(&mut self, content: &str, root_dir: impl AsRef<Path>, include_dirs: &[PathBuf]) -> std::io::Result<()> {
+        let root_dir = root_dir.as_ref();
+        let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
+        
+        let defines = parse_defines(content);
+        for def in defines {
+            self.process_define(def.name, def.value);
+        }
+        for e in parse_enums(content) {
+            self.process_enum(e);
+        }
+        
+        let includes = crate::c_parser::includes::parse_includes(content);
+        for inc in includes {
+            if inc.is_system { continue; }
+            let mut found_path = None;
+            let rel = root_dir.join(&inc.path);
+            if rel.exists() {
+                found_path = Some(rel);
+            } else {
+                for dir in include_dirs {
+                    let p = dir.join(&inc.path);
+                    if p.exists() {
+                        found_path = Some(p);
+                        break;
+                    }
+                }
+            }
+
+            if let Some(p) = found_path {
+                let mut visited = FxHashSet::default();
+                self.load_recursive_internal(&p, include_dirs, &sm, &mut visited)?;
+            }
+        }
+        Ok(())
+    }
+
     fn load_recursive_internal(&mut self, path: &Path, include_dirs: &[PathBuf], sm: &SourceManager, visited: &mut FxHashSet<PathBuf>) -> std::io::Result<()> {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         if !visited.insert(canonical.clone()) {

@@ -1,4 +1,4 @@
-use crate::c_parser::{SymbolTable, SourceManager};
+use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
@@ -6,7 +6,6 @@ use crate::script_file::ScriptTable;
 use crate::text_bank::TextBankTable;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
-
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
@@ -213,7 +212,6 @@ impl Workspace {
             symbols.load_headers_from_dir(text_dir)?;
         }
 
-
         let mut scripts = ScriptTable::new();
 
         let scripts_order = root.join("res/field/scripts/scripts.order");
@@ -243,14 +241,18 @@ impl Workspace {
         })
     }
 
-    pub fn collect_constants_for_file(&self, path: impl AsRef<Path>) -> std::io::Result<SymbolTable> {
+    pub fn collect_constants_for_file(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<SymbolTable> {
         let mut include_dirs = Vec::new();
         if self.project_type == ProjectType::Decomp {
             include_dirs.push(self.project_path.join("include"));
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
-        
-        let mut table = SymbolTable::collect_for_file(path, &include_dirs, self.source_manager.clone())?;
+
+        let mut table =
+            SymbolTable::collect_for_file(path, &include_dirs, self.source_manager.clone())?;
         table.extend(self.symbols.clone());
         Ok(table)
     }
@@ -273,7 +275,7 @@ impl Workspace {
 
         for (i, c) in script.char_indices() {
             let is_token_char = c.is_alphanumeric() || c == '_';
-            
+
             if !is_token_char {
                 if i > start_idx {
                     let token = &script[start_idx..i];
