@@ -5,6 +5,7 @@ use uxie::{
     RomHeader, SymbolTable, Workspace,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "uxie")]
@@ -166,7 +167,9 @@ fn cmd_map(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(path)?;
     if let Some(d) = decomp {
-        load_symbols_from_decomp(&mut ws.symbols, &d)?;
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
     }
 
     let header = ws.provider.get_map_header(id)?;
@@ -188,7 +191,9 @@ fn cmd_event(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(project_path)?;
     if let Some(d) = decomp {
-        load_symbols_from_decomp(&mut ws.symbols, &d)?;
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
     }
 
     let dspre = DspreProject::open(project_path)?;
@@ -207,7 +212,9 @@ fn cmd_encounter(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(project_path)?;
     if let Some(d) = decomp {
-        load_symbols_from_decomp(&mut ws.symbols, &d)?;
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
     }
 
     let narc_path = match ws.family {

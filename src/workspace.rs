@@ -6,6 +6,7 @@ use crate::script_file::ScriptTable;
 use crate::text_bank::TextBankTable;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
@@ -19,7 +20,7 @@ pub struct Workspace {
     pub game: Game,
     pub family: GameFamily,
     pub provider: Box<dyn DataProvider>,
-    pub symbols: SymbolTable,
+    pub symbols: Arc<SymbolTable>,
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
     pub source_manager: SourceManager,
@@ -168,7 +169,7 @@ impl Workspace {
             game,
             family,
             provider: Box::new(Arm9Provider::new(arm9_path, offset, count, family)),
-            symbols: SymbolTable::with_source_manager(sm.clone()),
+            symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             source_manager: sm,
@@ -225,12 +226,14 @@ impl Workspace {
             text_banks.load_list_file(text_banks_list)?;
         }
 
+        let symbols = Arc::new(symbols);
+
         Ok(Self {
             project_path: root.clone(),
             project_type: ProjectType::Decomp,
             game,
             family,
-            provider: Box::new(crate::provider::DecompProvider::new(root, symbols.clone())),
+            provider: Box::new(crate::provider::DecompProvider::new(root, (*symbols).clone())),
             symbols,
             scripts,
             text_banks,
@@ -241,9 +244,22 @@ impl Workspace {
         })
     }
 
-    pub fn collect_constants_for_file(
+    pub fn collect_constants_for_file(&self, path: impl AsRef<Path>) -> std::io::Result<SymbolTable> {
+        let mut include_dirs = Vec::new();
+        if self.project_type == ProjectType::Decomp {
+            include_dirs.push(self.project_path.join("include"));
+            include_dirs.push(self.project_path.join("res/field/scripts"));
+        }
+
+        let mut table = SymbolTable::with_parent(Arc::clone(&self.symbols));
+        table.load_recursive(path, &include_dirs)?;
+        Ok(table)
+    }
+
+    pub fn collect_constants_for_source(
         &self,
-        path: impl AsRef<Path>,
+        source: &str,
+        current_file_dir: impl AsRef<Path>,
     ) -> std::io::Result<SymbolTable> {
         let mut include_dirs = Vec::new();
         if self.project_type == ProjectType::Decomp {
@@ -251,9 +267,8 @@ impl Workspace {
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
 
-        let mut table =
-            SymbolTable::collect_for_file(path, &include_dirs, self.source_manager.clone())?;
-        table.extend(self.symbols.clone());
+        let mut table = SymbolTable::with_parent(Arc::clone(&self.symbols));
+        table.load_recursive_str(source, current_file_dir, &include_dirs)?;
         Ok(table)
     }
 

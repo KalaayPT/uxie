@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 pub use crate::c_parser::defines::parse_defines;
 pub use crate::c_parser::defines::parse_value;
@@ -18,9 +19,10 @@ pub struct SymbolTable {
     pub(crate) defines_by_value: FxHashMap<i64, Vec<String>>,
     pub(crate) enum_by_value: FxHashMap<i64, Vec<String>>,
     pub(crate) loaded_includes: FxHashSet<String>,
-    pub(crate) cache: DashMap<String, i64>,
-    pub(crate) shortest_name_cache: DashMap<i64, String>,
+    pub(crate) cache: Arc<DashMap<String, i64>>,
+    pub(crate) shortest_name_cache: Arc<DashMap<i64, String>>,
     pub(crate) source_manager: Option<SourceManager>,
+    pub(crate) parent: Option<Arc<SymbolTable>>,
 }
 
 static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -35,6 +37,16 @@ impl SymbolTable {
     pub fn with_source_manager(sm: SourceManager) -> Self {
         Self {
             source_manager: Some(sm),
+            ..Default::default()
+        }
+    }
+
+    pub fn with_parent(parent: Arc<SymbolTable>) -> Self {
+        Self {
+            cache: Arc::clone(&parent.cache),
+            shortest_name_cache: Arc::clone(&parent.shortest_name_cache),
+            source_manager: parent.source_manager.clone(),
+            parent: Some(parent),
             ..Default::default()
         }
     }
@@ -72,8 +84,7 @@ impl SymbolTable {
         let root_dir = root_dir.as_ref();
         let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
         
-        let defines = parse_defines(content);
-        for def in defines {
+        for def in parse_defines(content) {
             self.process_define(def.name, def.value);
         }
         for e in parse_enums(content) {
@@ -192,8 +203,7 @@ impl SymbolTable {
     }
 
     pub fn load_header_str(&mut self, content: &str) -> std::io::Result<()> {
-        let defines = parse_defines(content);
-        for def in defines {
+        for def in parse_defines(content) {
             self.process_define(def.name, def.value);
         }
         for e in parse_enums(content) {
@@ -202,12 +212,27 @@ impl SymbolTable {
         Ok(())
     }
 
+    fn lookup_defines(&self, name: &str) -> Option<i64> {
+        self.defines.get(name).copied()
+            .or_else(|| self.parent.as_ref()?.lookup_defines(name))
+    }
+
+    fn lookup_variant(&self, name: &str) -> Option<i64> {
+        self.variant_to_value.get(name).copied()
+            .or_else(|| self.parent.as_ref()?.lookup_variant(name))
+    }
+
+    fn lookup_pending(&self, name: &str) -> Option<&String> {
+        self.pending_defines.get(name)
+            .or_else(|| self.parent.as_ref()?.lookup_pending(name))
+    }
+
     pub fn resolve_constant(&self, name: &str) -> Option<i64> {
-        if let Some(&val) = self.defines.get(name) { return Some(val); }
-        if let Some(&val) = self.variant_to_value.get(name) { return Some(val); }
+        if let Some(val) = self.lookup_defines(name) { return Some(val); }
+        if let Some(val) = self.lookup_variant(name) { return Some(val); }
         if let Some(val) = self.cache.get(name) { return Some(*val); }
         
-        let expr = self.pending_defines.get(name)?;
+        let expr = self.lookup_pending(name)?;
         let val = crate::c_parser::defines::eval_expr_with_context(
             expr, 
             &self.pending_defines, 
@@ -243,51 +268,72 @@ impl SymbolTable {
             }
         }
 
-        let mut best: Option<&String> = None;
+        let mut best: Option<String> = None;
 
-        if let Some(names) = self.defines_by_value.get(&value) {
-            if let Some(name) = names.iter().filter(|n| n.starts_with(prefix)).min_by_key(|n| n.len()) {
-                best = Some(name);
-            }
-        }
-
-        if let Some(names) = self.enum_by_value.get(&value) {
-            if let Some(name) = names.iter().filter(|n| n.starts_with(prefix)).min_by_key(|n| n.len()) {
-                if best.is_none() || name.len() < best.unwrap().len() {
-                    best = Some(name);
+        let mut check_table = |table: &SymbolTable| {
+            if let Some(names) = table.defines_by_value.get(&value) {
+                if let Some(name) = names.iter().filter(|n| n.starts_with(prefix)).min_by_key(|n| n.len()) {
+                    if best.is_none() || name.len() < best.as_ref().unwrap().len() {
+                        best = Some(name.clone());
+                    }
                 }
             }
+            if let Some(names) = table.enum_by_value.get(&value) {
+                if let Some(name) = names.iter().filter(|n| n.starts_with(prefix)).min_by_key(|n| n.len()) {
+                    if best.is_none() || name.len() < best.as_ref().unwrap().len() {
+                        best = Some(name.clone());
+                    }
+                }
+            }
+        };
+
+        check_table(self);
+        let mut current = self.parent.as_ref();
+        while let Some(p) = current {
+            check_table(p);
+            current = p.parent.as_ref();
         }
 
         if let Some(name) = best {
-            let name_clone = name.clone();
             if prefix.is_empty() {
-                self.shortest_name_cache.insert(value, name_clone.clone());
+                self.shortest_name_cache.insert(value, name.clone());
             }
-            return Some(name_clone);
+            return Some(name);
         }
 
         None
     }
 
     pub fn resolve_names(&self, value: i64, prefixes: &[&str]) -> Vec<String> {
-        let mut matches = Vec::new();
-        if let Some(names) = self.defines_by_value.get(&value) {
-            for name in names {
-                if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
-                    matches.push(name.clone());
+        let mut matches = FxHashSet::default();
+        
+        let mut collect_from = |table: &SymbolTable| {
+            if let Some(names) = table.defines_by_value.get(&value) {
+                for name in names {
+                    if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
+                        matches.insert(name.clone());
+                    }
                 }
             }
-        }
-        if let Some(names) = self.enum_by_value.get(&value) {
-            for name in names {
-                if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
-                    matches.push(name.clone());
+            if let Some(names) = table.enum_by_value.get(&value) {
+                for name in names {
+                    if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
+                        matches.insert(name.clone());
+                    }
                 }
             }
+        };
+
+        collect_from(self);
+        let mut current = self.parent.as_ref();
+        while let Some(p) = current {
+            collect_from(p);
+            current = p.parent.as_ref();
         }
-        matches.sort_by_key(|n| n.len());
-        matches
+
+        let mut res: Vec<_> = matches.into_iter().collect();
+        res.sort_by_key(|n| n.len());
+        res
     }
 
     pub fn load_list_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -443,9 +489,23 @@ impl SymbolTable {
 
     pub fn get_all_defines(&self) -> HashMap<String, i64> {
         let mut res = HashMap::with_capacity(self.defines.len() + self.cache.len());
-        for (k, v) in &self.defines {
-            res.insert(k.clone(), *v);
+        
+        let mut collect_from = |table: &SymbolTable| {
+            for (k, v) in &table.defines {
+                res.insert(k.clone(), *v);
+            }
+            for (k, v) in &table.variant_to_value {
+                res.insert(k.clone(), *v);
+            }
+        };
+
+        collect_from(self);
+        let mut current = self.parent.as_ref();
+        while let Some(p) = current {
+            collect_from(p);
+            current = p.parent.as_ref();
         }
+
         for entry in self.cache.iter() {
             res.insert(entry.key().clone(), *entry.value());
         }
@@ -454,9 +514,20 @@ impl SymbolTable {
 
     pub fn get_enums_std(&self) -> HashMap<String, Vec<(String, Option<i64>)>> {
         let mut res = HashMap::with_capacity(self.enums.len());
-        for (k, v) in &self.enums {
-            res.insert(k.clone(), v.clone());
+        
+        let mut collect_from = |table: &SymbolTable| {
+            for (k, v) in &table.enums {
+                res.insert(k.clone(), v.clone());
+            }
+        };
+
+        collect_from(self);
+        let mut current = self.parent.as_ref();
+        while let Some(p) = current {
+            collect_from(p);
+            current = p.parent.as_ref();
         }
+
         res
     }
 
@@ -468,11 +539,11 @@ impl SymbolTable {
         self.defines_by_value.extend(other.defines_by_value);
         self.enum_by_value.extend(other.enum_by_value);
         self.loaded_includes.extend(other.loaded_includes);
-        for entry in other.cache.into_iter() {
-            self.cache.insert(entry.0, entry.1);
+        for entry in other.cache.iter() {
+            self.cache.insert(entry.key().clone(), *entry.value());
         }
-        for entry in other.shortest_name_cache.into_iter() {
-            self.shortest_name_cache.insert(entry.0, entry.1);
+        for entry in other.shortest_name_cache.iter() {
+            self.shortest_name_cache.insert(*entry.key(), entry.value().clone());
         }
     }
 }
