@@ -133,7 +133,9 @@ impl Workspace {
 
     pub fn get_script_file_for_map(&self, map_id: u16) -> Option<String> {
         let header = self.provider.get_map_header(map_id).ok()?;
-        self.scripts.get_name(header.script_file_id() as usize).cloned()
+        self.scripts
+            .get_name(header.script_file_id() as usize)
+            .cloned()
     }
 
     pub fn get_symbols_for_map(&self, map_id: u16) -> Vec<String> {
@@ -142,7 +144,8 @@ impl Workspace {
     }
 
     pub fn resolve_script_id_to_name(&self, script_id: u16) -> Option<String> {
-        self.symbols.resolve_name(script_id as i64, "CommonScript_")
+        self.symbols
+            .resolve_name(script_id as i64, "CommonScript_")
             .or_else(|| self.symbols.resolve_name(script_id as i64, ""))
     }
 
@@ -220,6 +223,7 @@ impl Workspace {
             text_banks.load_list_file(text_banks_list)?;
         }
 
+        symbols.resolve_all();
         let symbols = Arc::new(symbols);
 
         Ok(Self {
@@ -227,7 +231,10 @@ impl Workspace {
             project_type: ProjectType::Decomp,
             game,
             family,
-            provider: Box::new(crate::provider::DecompProvider::new(root, (*symbols).clone())),
+            provider: Box::new(crate::provider::DecompProvider::new(
+                root,
+                (*symbols).clone(),
+            )),
             symbols,
             scripts,
             text_banks,
@@ -238,8 +245,6 @@ impl Workspace {
     }
 
     fn load_project_symbols_broad(root: &Path, symbols: &mut SymbolTable) -> std::io::Result<()> {
-        use crate::c_parser::SymbolTag;
-
         // 1. Load all constants from include/constants
         let include_constants = root.join("include/constants");
         if include_constants.exists() {
@@ -249,43 +254,22 @@ impl Workspace {
         // 2. Load generated constants (prefer build/generated/*.py, fallback to generated/*.txt)
         let build_generated = root.join("build/generated");
         let generated = root.join("generated");
-        
+
         if build_generated.exists() {
             symbols.load_headers_from_dir(&build_generated)?;
         } else if generated.exists() {
             symbols.load_headers_from_dir(&generated)?;
         }
 
-        // 3. Special handling for map events/scripts to apply tags
-        // ... (existing code for field_events) ...
+        // Special handling for map events/scripts to apply tags
         let field_events = root.join("res/field/events");
         if field_events.exists() {
-            for entry in std::fs::read_dir(field_events)? {
-                let entry = entry?;
-                let path = entry.path();
-                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
-                    if filename.starts_with("events_map_") && filename.ends_with(".h") {
-                        if let Ok(id_str) = &filename[11..filename.len()-2].parse::<u16>() {
-                            symbols.load_file_with_tag(&path, SymbolTag::Map(*id_str))?;
-                        }
-                    }
-                }
-            }
+            symbols.load_headers_from_dir(&field_events)?;
         }
 
-        // 4. Parse CommonScript table from scripts_common.s if it exists
-        // ... (existing code for scripts_common) ...
-
-        // 5. Load text bank constants from res/text (JSON only, avoid recursion into bank/ or pl_msg.narc.p/)
         let text_dir = root.join("res/text");
         if text_dir.exists() {
-            for entry in std::fs::read_dir(text_dir)? {
-                let entry = entry?;
-                let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "json") {
-                    symbols.load_text_bank_json(&path)?;
-                }
-            }
+            symbols.load_headers_from_dir(&text_dir)?;
         }
 
         // 6. Load extra generated headers from build/ if they exist
@@ -302,14 +286,17 @@ impl Workspace {
         Ok(())
     }
 
-    pub fn collect_constants_for_file(&self, path: impl AsRef<Path>) -> std::io::Result<SymbolTable> {
+    pub fn collect_constants_for_file(
+        &self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<SymbolTable> {
         let mut include_dirs = Vec::new();
         if self.project_type == ProjectType::Decomp {
             include_dirs.push(self.project_path.join("include"));
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
 
-        let mut table = (*self.symbols).clone();
+        let mut table = SymbolTable::with_parent(self.symbols.clone());
         table.load_recursive(path, &include_dirs)?;
         Ok(table)
     }
@@ -325,7 +312,7 @@ impl Workspace {
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
 
-        let mut table = (*self.symbols).clone();
+        let mut table = SymbolTable::with_parent(self.symbols.clone());
         table.load_recursive_str(source, current_file_dir, &include_dirs)?;
         Ok(table)
     }

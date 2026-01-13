@@ -158,7 +158,18 @@ pub fn eval_expr_with_context(
     cache: &DashMap<String, i64>
 ) -> Option<i64> {
     let mut visiting = FxHashSet::default();
-    eval_expr_recursive(expr, expressions, resolved, cache, &mut visiting, 0)
+    eval_expr_recursive(expr, expressions, resolved, cache, &mut visiting, 0, &|_| None)
+}
+
+pub fn eval_expr_with_parent(
+    expr: &str,
+    expressions: &FxHashMap<String, String>,
+    resolved: &FxHashMap<String, i64>,
+    cache: &DashMap<String, i64>,
+    parent_resolver: &dyn Fn(&str) -> Option<i64>
+) -> Option<i64> {
+    let mut visiting = FxHashSet::default();
+    eval_expr_recursive(expr, expressions, resolved, cache, &mut visiting, 0, parent_resolver)
 }
 
 fn eval_expr_recursive(
@@ -167,7 +178,8 @@ fn eval_expr_recursive(
     resolved: &FxHashMap<String, i64>,
     cache: &DashMap<String, i64>,
     visiting: &mut FxHashSet<String>,
-    depth: usize
+    depth: usize,
+    parent_resolver: &dyn Fn(&str) -> Option<i64>
 ) -> Option<i64> {
     const MAX_DEPTH: usize = 128;
     if depth > MAX_DEPTH { return None; }
@@ -176,6 +188,7 @@ fn eval_expr_recursive(
     if expr.is_empty() { return None; }
     if let Some(&val) = resolved.get(expr) { return Some(val); }
     if let Some(cached) = cache.get(expr) { return Some(*cached); }
+    if let Some(val) = parent_resolver(expr) { return Some(val); }
     
     if let Some(val) = try_parse_numeric(expr) {
         return Some(val);
@@ -195,7 +208,7 @@ fn eval_expr_recursive(
         None
     } else {
         let mut pos = 0;
-        parse_expr(&tokens, &mut pos, 0, expressions, resolved, cache, visiting, depth)
+        parse_expr(&tokens, &mut pos, 0, expressions, resolved, cache, visiting, depth, parent_resolver)
     };
 
     visiting.remove(expr);
@@ -234,9 +247,10 @@ fn parse_expr(
     resolved: &FxHashMap<String, i64>,
     cache: &DashMap<String, i64>,
     visiting: &mut FxHashSet<String>,
-    depth: usize
+    depth: usize,
+    parent_resolver: &dyn Fn(&str) -> Option<i64>
 ) -> Option<i64> {
-    let mut left = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+    let mut left = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth, parent_resolver)?;
 
     while *pos < tokens.len() {
         let prec = get_precedence(&tokens[*pos]);
@@ -246,7 +260,7 @@ fn parse_expr(
 
         let op = tokens[*pos].clone();
         *pos += 1;
-        let right = parse_expr(tokens, pos, prec + 1, expressions, resolved, cache, visiting, depth)?;
+        let right = parse_expr(tokens, pos, prec + 1, expressions, resolved, cache, visiting, depth, parent_resolver)?;
 
         left = match op {
             Token::Plus => left + right,
@@ -273,7 +287,8 @@ fn parse_primary(
     resolved: &FxHashMap<String, i64>,
     cache: &DashMap<String, i64>,
     visiting: &mut FxHashSet<String>,
-    depth: usize
+    depth: usize,
+    parent_resolver: &dyn Fn(&str) -> Option<i64>
 ) -> Option<i64> {
     if *pos >= tokens.len() { return None; }
 
@@ -285,11 +300,11 @@ fn parse_primary(
         Token::Ident(id) => {
             if id == "RGB" && *pos + 1 < tokens.len() && tokens[*pos + 1] == Token::LParen {
                 *pos += 2;
-                let r = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+                let r = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth, parent_resolver)?;
                 if *pos < tokens.len() && tokens[*pos] == Token::Comma { *pos += 1; }
-                let g = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+                let g = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth, parent_resolver)?;
                 if *pos < tokens.len() && tokens[*pos] == Token::Comma { *pos += 1; }
-                let b = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+                let b = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth, parent_resolver)?;
                 if *pos < tokens.len() && tokens[*pos] == Token::RParen { *pos += 1; }
                 return Some((b << 10) | (g << 5) | r);
             }
@@ -298,14 +313,15 @@ fn parse_primary(
             *pos += 1;
             if let Some(&val) = resolved.get(&id_clone) { return Some(val); }
             if let Some(cached) = cache.get(&id_clone) { return Some(*cached); }
+            if let Some(val) = parent_resolver(&id_clone) { return Some(val); }
             if let Some(expr) = expressions.get(&id_clone) {
-                return eval_expr_recursive(expr, expressions, resolved, cache, visiting, depth + 1);
+                return eval_expr_recursive(expr, expressions, resolved, cache, visiting, depth + 1, parent_resolver);
             }
             None
         }
         Token::LParen => {
             *pos += 1;
-            let val = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth)?;
+            let val = parse_expr(tokens, pos, 0, expressions, resolved, cache, visiting, depth, parent_resolver)?;
             if *pos < tokens.len() && tokens[*pos] == Token::RParen {
                 *pos += 1;
             }
@@ -313,21 +329,21 @@ fn parse_primary(
         }
         Token::Plus => {
             *pos += 1;
-            parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)
+            parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth, parent_resolver)
         }
         Token::Minus => {
             *pos += 1;
-            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth, parent_resolver)?;
             Some(-val)
         }
         Token::Tilde => {
             *pos += 1;
-            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth, parent_resolver)?;
             Some(!val)
         }
         Token::Not => {
             *pos += 1;
-            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth)?;
+            let val = parse_primary(tokens, pos, expressions, resolved, cache, visiting, depth, parent_resolver)?;
             Some(if val == 0 { 1 } else { 0 })
         }
         _ => None,

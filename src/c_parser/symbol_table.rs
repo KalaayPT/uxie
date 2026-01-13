@@ -20,6 +20,7 @@ pub enum SymbolTag {
 
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
+    pub(crate) parent: Option<Arc<SymbolTable>>,
     pub(crate) symbols: FxHashMap<String, i64>,
     pub(crate) pending: FxHashMap<String, String>,
     pub(crate) value_to_names: FxHashMap<i64, Vec<String>>,
@@ -37,14 +38,43 @@ static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::
 
 impl SymbolTable {
     pub fn new() -> Self {
-        Self::default()
+        let mut table = Self::default();
+        table.symbols.insert("TRUE".to_string(), 1);
+        table.symbols.insert("FALSE".to_string(), 0);
+        table.value_to_names.entry(1).or_default().push("TRUE".to_string());
+        table.value_to_names.entry(0).or_default().push("FALSE".to_string());
+        table
     }
 
     pub fn with_source_manager(sm: SourceManager) -> Self {
+        let mut table = Self::new();
+        table.source_manager = Some(sm);
+        table
+    }
+
+    pub fn with_parent(parent: Arc<SymbolTable>) -> Self {
+        let sm = parent.source_manager.clone();
+        let eval_cache = parent.eval_cache.clone();
+        let shortest_name_cache = parent.shortest_name_cache.clone();
         Self {
-            source_manager: Some(sm),
+            parent: Some(parent),
+            source_manager: sm,
+            eval_cache,
+            shortest_name_cache,
             ..Default::default()
         }
+    }
+
+    pub(crate) fn with_source_manager_and_caches(
+        sm: SourceManager,
+        eval_cache: Arc<DashMap<String, i64>>,
+        shortest_name_cache: Arc<DashMap<i64, String>>,
+    ) -> Self {
+        let mut table = Self::new();
+        table.source_manager = Some(sm);
+        table.eval_cache = eval_cache;
+        table.shortest_name_cache = shortest_name_cache;
+        table
     }
 
     pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -119,7 +149,7 @@ impl SymbolTable {
     }
 
     fn load_recursive_internal(&mut self, path: &Path, include_dirs: &[PathBuf], sm: &SourceManager, visited: &mut FxHashSet<PathBuf>, tag: SymbolTag) -> std::io::Result<()> {
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = sm.canonicalize(path);
         if !visited.insert(canonical.clone()) {
             return Ok(());
         }
@@ -183,6 +213,12 @@ impl SymbolTable {
             self.pending.insert(name, value);
             return;
         }
+        if let Some(&val) = self.symbols.get(val_trimmed) {
+            self.symbols.insert(name.clone(), val);
+            self.value_to_names.entry(val).or_default().push(name.clone());
+            self.pending.insert(name, value);
+            return;
+        }
         self.pending.insert(name, value);
     }
 
@@ -216,23 +252,66 @@ impl SymbolTable {
         if let Some(val) = self.symbols.get(name) { return Some(*val); }
         if let Some(val) = self.eval_cache.get(name) { return Some(*val); }
         
+        if let Some(parent) = &self.parent {
+            if let Some(val) = parent.resolve_constant(name) {
+                return Some(val);
+            }
+        }
+
         let expr = self.pending.get(name)?;
-        let val = crate::c_parser::defines::eval_expr_with_context(
-            expr, 
-            &self.pending, 
-            &self.symbols,
-            &self.eval_cache
-        )?;
+        let val = if let Some(parent) = &self.parent {
+            crate::c_parser::defines::eval_expr_with_parent(
+                expr, 
+                &self.pending, 
+                &self.symbols,
+                &self.eval_cache,
+                &|n| parent.resolve_constant(n)
+            )?
+        } else {
+            crate::c_parser::defines::eval_expr_with_context(
+                expr, 
+                &self.pending, 
+                &self.symbols,
+                &self.eval_cache
+            )?
+        };
+        
+        self.eval_cache.insert(name.to_string(), val);
         Some(val)
     }
 
     pub fn evaluate_expression(&self, expr: &str) -> Option<i64> {
-        crate::c_parser::defines::eval_expr_with_context(
-            expr,
-            &self.pending,
-            &self.symbols,
-            &self.eval_cache
-        )
+        if let Some(val) = self.resolve_constant(expr) {
+            return Some(val);
+        }
+
+        if let Some(parent) = &self.parent {
+            crate::c_parser::defines::eval_expr_with_parent(
+                expr,
+                &self.pending,
+                &self.symbols,
+                &self.eval_cache,
+                &|n| parent.resolve_constant(n)
+            )
+        } else {
+            crate::c_parser::defines::eval_expr_with_context(
+                expr,
+                &self.pending,
+                &self.symbols,
+                &self.eval_cache
+            )
+        }
+    }
+
+    pub fn resolve_all(&mut self) {
+        let keys: Vec<String> = self.pending.keys().cloned().collect();
+        for name in keys {
+            if let Some(val) = self.resolve_constant(&name) {
+                self.symbols.insert(name.clone(), val);
+                self.value_to_names.entry(val).or_default().push(name);
+            }
+        }
+        self.pending.clear();
     }
 
     pub fn collect_for_file(path: impl AsRef<Path>, include_dirs: &[PathBuf], sm: SourceManager) -> std::io::Result<Self> {
@@ -334,7 +413,13 @@ impl SymbolTable {
                 self.symbol_to_tags.entry(name).or_default().insert(tag.clone());
                 current_index += 1;
             } else {
-                let name = line.to_string();
+                // Strip inline comments (e.g., "CONSTANT  # comment")
+                let name = if let Some(comment_pos) = line.find('#') {
+                    line[..comment_pos].trim()
+                } else {
+                    line
+                }.to_string();
+                if name.is_empty() { continue; }
                 self.symbols.insert(name.clone(), current_index);
                 self.value_to_names.entry(current_index).or_default().push(name.clone());
                 self.pending.insert(name.clone(), current_index.to_string());
@@ -350,9 +435,9 @@ impl SymbolTable {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
         let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        let messages = json.get("messages").and_then(|v| v.as_array());
         let mut count = 0;
-        if let Some(messages) = messages {
+        
+        if let Some(messages) = json.get("messages").and_then(|v| v.as_array()) {
             for (index, msg) in messages.iter().enumerate() {
                 if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
                     let val = index as i64;
@@ -363,6 +448,19 @@ impl SymbolTable {
                 }
             }
         }
+        
+        if let Some(events) = json.get("object_events").and_then(|v| v.as_array()) {
+            for (index, event) in events.iter().enumerate() {
+                if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
+                    let val = index as i64;
+                    self.symbols.insert(id.to_string(), val);
+                    self.value_to_names.entry(val).or_default().push(id.to_string());
+                    self.symbol_to_file.insert(id.to_string(), path.to_path_buf());
+                    count += 1;
+                }
+            }
+        }
+        
         Ok(count)
     }
 
@@ -372,9 +470,11 @@ impl SymbolTable {
         let count = files.len();
         
         let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
+        let eval_cache = self.eval_cache.clone();
+        let shortest_cache = self.shortest_name_cache.clone();
 
         let results: Vec<SymbolTable> = files.into_par_iter().map(|path| {
-            let mut table = SymbolTable::with_source_manager(sm.clone());
+            let mut table = SymbolTable::with_source_manager_and_caches(sm.clone(), eval_cache.clone(), shortest_cache.clone());
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
             match ext.to_lowercase().as_str() {
                 "h" | "hpp" => { let _ = table.load_header(&path); }
@@ -467,7 +567,11 @@ impl SymbolTable {
     }
 
     pub fn get_all_defines(&self) -> HashMap<String, i64> {
-        let mut res = HashMap::with_capacity(self.symbols.len() + self.eval_cache.len());
+        let mut res = if let Some(parent) = &self.parent {
+            parent.get_all_defines()
+        } else {
+            HashMap::with_capacity(self.symbols.len() + self.eval_cache.len())
+        };
         
         for (k, v) in &self.symbols {
             res.insert(k.clone(), *v);
@@ -491,11 +595,15 @@ impl SymbolTable {
         self.symbol_to_file.extend(other.symbol_to_file);
         self.symbol_to_tags.extend(other.symbol_to_tags);
         self.loaded_files.extend(other.loaded_files);
-        for entry in other.eval_cache.iter() {
-            self.eval_cache.insert(entry.key().clone(), *entry.value());
+        if !Arc::ptr_eq(&self.eval_cache, &other.eval_cache) {
+            for entry in other.eval_cache.iter() {
+                self.eval_cache.insert(entry.key().clone(), *entry.value());
+            }
         }
-        for entry in other.shortest_name_cache.iter() {
-            self.shortest_name_cache.insert(*entry.key(), entry.value().clone());
+        if !Arc::ptr_eq(&self.shortest_name_cache, &other.shortest_name_cache) {
+            for entry in other.shortest_name_cache.iter() {
+                self.shortest_name_cache.insert(*entry.key(), entry.value().clone());
+            }
         }
     }
 

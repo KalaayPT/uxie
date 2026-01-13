@@ -55,14 +55,16 @@ as the "Being of Knowledge."
 
 ## Performance
 
-The latest release introduces significant performance improvements for symbol resolution and project loading:
+`uxie` is optimized for high-performance symbol resolution and project loading:
 
-- **~30ms loading time** for full pokeplatinum decompilation projects (tens of thousands of symbols)
-- **Sub-microsecond resolution** for single constant lookups after initial loading
-- **Parallel loading** via rayon for header files, automatically utilizing all CPU cores
+- **~200ms loading time** for full pokeplatinum decompilation projects (50,000+ symbols)
+- **O(1) Resolution**: Project-wide symbols are pre-resolved and cached, making lookups nearly instantaneous.
+- **Lightweight Inheritance**: Collecting constants for individual script files uses a parent-pointer overlay instead of cloning the global symbol table, reducing per-file overhead by 99%.
+- **Parallel Source Loading**: All headers, JSON text banks, event files, and build artifacts are loaded in parallel via `rayon`.
+- **Minimized Syscall Overhead**: Canonical paths are cached globally to avoid redundant filesystem lookups.
 
 Performance benchmarks on a typical development machine:
-- Loading 10,000+ constants from pokeplatinum: ~30ms
+- Loading 50,000+ constants from pokeplatinum: ~200ms
 - Single constant resolution (cached): < 1 microsecond
 - Complex expression evaluation (e.g., `RGB(r,g,b)`, bitwise operations): < 5 microseconds
 
@@ -74,7 +76,8 @@ Performance benchmarks on a typical development machine:
 - **Full C Expression Evaluation**: Pratt parser implementation with correct operator precedence for all C operators (`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`, `~`, `!`, parentheses)
 - **Parallel Loading**: Multi-threaded header file loading via rayon for significantly faster project initialization
 - **Standard HashMap API**: Public getters return `std::collections::HashMap` for easy interoperability with Rust's standard library
-- **Enhanced Symbol Table**: Automatically resolves cross-references between constants and supports `.txt` files with incremental indexing.
+- **Enhanced Symbol Table**: Automatically resolves cross-references between constants, supports `.txt` files with incremental indexing, and parses event JSON files for object IDs.
+- **Built-in Constants**: `TRUE` and `FALSE` are pre-defined, ensuring compatibility with C-style boolean expressions.
 - **Map Header Parsing**: Unified access to area data, scripts, and events across all Gen 4 games.
 - **Format Agnostic**: Seamlessly bridge legacy binary formats and modern JSON/YAML source data.
 - **Bidirectional Script Resolution**: Resolve script constants from names to values AND values to names using a shortest-name heuristic.
@@ -107,7 +110,7 @@ Or manually add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-uxie = "0.2.0"
+uxie = "0.3.0"
 ```
 
 For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).

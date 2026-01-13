@@ -258,12 +258,12 @@ fn cmd_parse_header(
     let content = std::fs::read_to_string(path)?;
     let mut symbols = SymbolTable::new();
 
-    let is_txt = path.extension().and_then(|s| s.to_str()) == Some("txt");
+    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
-    if is_txt {
-        symbols.load_list_file_str(&content)?;
-    } else {
-        symbols.load_header_str(&content)?;
+    match ext {
+        "txt" => symbols.load_list_file_str(&content)?,
+        "json" => { symbols.load_text_bank_json(path)?; },
+        _ => symbols.load_header_str(&content)?,
     }
 
     if json {

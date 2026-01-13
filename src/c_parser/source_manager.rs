@@ -15,6 +15,7 @@ pub struct FileEntry {
 #[derive(Debug, Default, Clone)]
 pub struct SourceManager {
     files: Arc<DashMap<PathBuf, Arc<FileEntry>>>,
+    canonical_cache: Arc<DashMap<PathBuf, PathBuf>>,
 }
 
 impl SourceManager {
@@ -24,7 +25,13 @@ impl SourceManager {
 
     pub fn get_or_parse(&self, path: impl AsRef<Path>) -> std::io::Result<Arc<FileEntry>> {
         let path = path.as_ref();
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = if let Some(cached) = self.canonical_cache.get(path) {
+            cached.clone()
+        } else {
+            let res = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            self.canonical_cache.insert(path.to_path_buf(), res.clone());
+            res
+        };
         
         if let Some(entry) = self.files.get(&canonical) {
             return Ok(Arc::clone(&entry));
@@ -41,8 +48,15 @@ impl SourceManager {
         Ok(entry)
     }
 
-    pub fn clear(&self) {
-        self.files.clear();
+    pub fn canonicalize(&self, path: impl AsRef<Path>) -> PathBuf {
+        let path = path.as_ref();
+        if let Some(cached) = self.canonical_cache.get(path) {
+            cached.clone()
+        } else {
+            let res = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+            self.canonical_cache.insert(path.to_path_buf(), res.clone());
+            res
+        }
     }
     
     pub fn len(&self) -> usize {
