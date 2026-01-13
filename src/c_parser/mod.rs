@@ -8,6 +8,6 @@ mod tests;
 
 pub use defines::{CDefine, parse_and_resolve_defines, parse_defines, parse_value};
 pub use enums::{CEnum, CEnumVariant, parse_enum};
-pub use symbol_table::SymbolTable;
+pub use symbol_table::{SymbolTable, SymbolTag};
 pub use source_manager::SourceManager;
 

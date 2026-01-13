@@ -275,21 +275,17 @@ fn cmd_parse_header(
 
 
         let defines = if !only_enums {
-            if is_txt {
-                Some(
-                    symbols
-                        .get_all_defines()
-                        .iter()
-                        .map(|(n, v)| uxie::c_parser::defines::CDefine {
-                            name: n.clone(),
-                            value: v.to_string(),
-                            resolved: Some(*v),
-                        })
-                        .collect(),
-                )
-            } else {
-                Some(uxie::c_parser::defines::parse_and_resolve_defines(&content))
-            }
+            Some(
+                symbols
+                    .get_all_defines()
+                    .iter()
+                    .map(|(n, v)| uxie::c_parser::defines::CDefine {
+                        name: n.clone(),
+                        value: v.to_string(),
+                        resolved: Some(*v),
+                    })
+                    .collect(),
+            )
         } else {
             None
         };
@@ -297,7 +293,16 @@ fn cmd_parse_header(
         let output = HeaderOutput {
             defines,
             enums: if !only_defines {
-                Some(symbols.get_enums_std())
+                // Return all symbols as a single "default" enum if requested
+                let mut map = HashMap::new();
+                let mut all_syms: Vec<_> = symbols
+                    .get_all_defines()
+                    .into_iter()
+                    .map(|(n, v)| (n, Some(v)))
+                    .collect();
+                all_syms.sort_by_key(|(n, _)| n.clone());
+                map.insert("Symbols".to_string(), all_syms);
+                Some(map)
             } else {
                 None
             },
@@ -305,25 +310,23 @@ fn cmd_parse_header(
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         if !only_enums {
-            if is_txt {
-                let mut defs: Vec<_> = symbols.get_all_defines().into_iter().collect();
-                defs.sort_by_key(|(n, _)| n.clone());
-                if !defs.is_empty() {
-                    println!("Symbols (from .txt):");
-                    for (name, value) in defs {
-                        println!("  {} = {}", name, value);
-                    }
-                }
-            } else {
-                let defs = uxie::c_parser::defines::parse_and_resolve_defines(&content);
-                if !defs.is_empty() {
-                    println!("Defines:");
-                    for d in defs {
-                        if let Some(resolved) = d.resolved {
-                            println!("  #define {} {} (= {})", d.name, d.value, resolved);
-                        } else {
-                            println!("  #define {} {}", d.name, d.value);
-                        }
+            let mut defs: Vec<_> = symbols
+                .get_all_defines()
+                .into_iter()
+                .map(|(n, v)| uxie::c_parser::defines::CDefine {
+                    name: n,
+                    value: v.to_string(),
+                    resolved: Some(v),
+                })
+                .collect();
+            defs.sort_by_key(|d| d.name.clone());
+            if !defs.is_empty() {
+                println!("Symbols:");
+                for d in defs {
+                    if let Some(resolved) = d.resolved {
+                        println!("  {} = {}", d.name, resolved);
+                    } else {
+                        println!("  {}", d.name);
                     }
                 }
             }

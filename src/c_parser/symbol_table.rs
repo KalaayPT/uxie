@@ -10,19 +10,25 @@ pub use crate::c_parser::defines::parse_value;
 pub use crate::c_parser::enums::{parse_enum, parse_enums};
 pub use crate::c_parser::source_manager::SourceManager;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SymbolTag {
+    Global,
+    Map(u16),
+    CommonScript(u16),
+    TextBank(u16),
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
-    pub(crate) defines: FxHashMap<String, i64>,
-    pub(crate) pending_defines: FxHashMap<String, String>,
-    pub(crate) enums: FxHashMap<String, Vec<(String, Option<i64>)>>,
-    pub(crate) variant_to_value: FxHashMap<String, i64>,
-    pub(crate) defines_by_value: FxHashMap<i64, Vec<String>>,
-    pub(crate) enum_by_value: FxHashMap<i64, Vec<String>>,
-    pub(crate) loaded_includes: FxHashSet<String>,
-    pub(crate) cache: Arc<DashMap<String, i64>>,
+    pub(crate) symbols: FxHashMap<String, i64>,
+    pub(crate) pending: FxHashMap<String, String>,
+    pub(crate) value_to_names: FxHashMap<i64, Vec<String>>,
+    pub(crate) symbol_to_file: FxHashMap<String, PathBuf>,
+    pub(crate) symbol_to_tags: FxHashMap<String, FxHashSet<SymbolTag>>,
+    pub(crate) loaded_files: FxHashSet<PathBuf>,
+    pub(crate) eval_cache: Arc<DashMap<String, i64>>,
     pub(crate) shortest_name_cache: Arc<DashMap<i64, String>>,
     pub(crate) source_manager: Option<SourceManager>,
-    pub(crate) parent: Option<Arc<SymbolTable>>,
 }
 
 static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -41,35 +47,29 @@ impl SymbolTable {
         }
     }
 
-    pub fn with_parent(parent: Arc<SymbolTable>) -> Self {
-        Self {
-            cache: Arc::clone(&parent.cache),
-            shortest_name_cache: Arc::clone(&parent.shortest_name_cache),
-            source_manager: parent.source_manager.clone(),
-            parent: Some(parent),
-            ..Default::default()
-        }
+    pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        self.load_file_with_tag(path, SymbolTag::Global)
     }
 
-    pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+    pub fn load_file_with_tag(&mut self, path: impl AsRef<Path>, tag: SymbolTag) -> std::io::Result<()> {
         let path = path.as_ref();
-        let path_str = path.to_string_lossy().into_owned();
-        if self.loaded_includes.contains(&path_str) {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        if self.loaded_files.contains(&canonical) {
             return Ok(());
         }
 
         if let Some(sm) = &self.source_manager {
             let entry = sm.get_or_parse(path)?;
-            self.load_file_entry(&entry);
+            self.load_file_entry(&entry, &canonical, tag);
         } else {
             let content = match std::fs::read_to_string(path) {
                 Ok(c) => c,
                 Err(_) => return Ok(()),
             };
-            self.load_header_str(&content)?;
+            self.load_header_str_with_tag(&content, &canonical, tag)?;
         }
         
-        self.loaded_includes.insert(path_str);
+        self.loaded_files.insert(canonical);
         Ok(())
     }
 
@@ -77,18 +77,20 @@ impl SymbolTable {
         let path = path.as_ref();
         let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
         let mut visited = FxHashSet::default();
-        self.load_recursive_internal(path, include_dirs, &sm, &mut visited)
+        self.load_recursive_internal(path, include_dirs, &sm, &mut visited, SymbolTag::Global)
     }
 
     pub fn load_recursive_str(&mut self, content: &str, root_dir: impl AsRef<Path>, include_dirs: &[PathBuf]) -> std::io::Result<()> {
         let root_dir = root_dir.as_ref();
         let sm = self.source_manager.get_or_insert_with(SourceManager::new).clone();
         
+        let dummy_path = root_dir.join("inline_source.h");
+
         for def in parse_defines(content) {
-            self.process_define(def.name, def.value);
+            self.process_define(def.name, def.value, &dummy_path, SymbolTag::Global);
         }
         for e in parse_enums(content) {
-            self.process_enum(e);
+            self.process_enum(e, &dummy_path, SymbolTag::Global);
         }
         
         let includes = crate::c_parser::includes::parse_includes(content);
@@ -110,21 +112,21 @@ impl SymbolTable {
 
             if let Some(p) = found_path {
                 let mut visited = FxHashSet::default();
-                self.load_recursive_internal(&p, include_dirs, &sm, &mut visited)?;
+                self.load_recursive_internal(&p, include_dirs, &sm, &mut visited, SymbolTag::Global)?;
             }
         }
         Ok(())
     }
 
-    fn load_recursive_internal(&mut self, path: &Path, include_dirs: &[PathBuf], sm: &SourceManager, visited: &mut FxHashSet<PathBuf>) -> std::io::Result<()> {
+    fn load_recursive_internal(&mut self, path: &Path, include_dirs: &[PathBuf], sm: &SourceManager, visited: &mut FxHashSet<PathBuf>, tag: SymbolTag) -> std::io::Result<()> {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         if !visited.insert(canonical.clone()) {
             return Ok(());
         }
 
         let entry = sm.get_or_parse(path)?;
-        self.load_file_entry(&entry);
-        self.loaded_includes.insert(path.to_string_lossy().into_owned());
+        self.load_file_entry(&entry, &canonical, tag.clone());
+        self.loaded_files.insert(canonical.clone());
 
         let parent_dir = path.parent().unwrap_or(Path::new("."));
 
@@ -146,98 +148,80 @@ impl SymbolTable {
             }
 
             if let Some(p) = found_path {
-                self.load_recursive_internal(&p, include_dirs, sm, visited)?;
+                self.load_recursive_internal(&p, include_dirs, sm, visited, tag.clone())?;
             }
         }
 
         Ok(())
     }
 
-    fn load_file_entry(&mut self, entry: &crate::c_parser::source_manager::FileEntry) {
+    fn load_file_entry(&mut self, entry: &crate::c_parser::source_manager::FileEntry, path: &Path, tag: SymbolTag) {
         for def in &entry.defines {
-            self.process_define(def.name.clone(), def.value.clone());
+            self.process_define(def.name.clone(), def.value.clone(), path, tag.clone());
         }
         for e in &entry.enums {
-            self.process_enum(e.clone());
+            self.process_enum(e.clone(), path, tag.clone());
         }
     }
 
-    fn process_define(&mut self, name: String, value: String) {
+    fn process_define(&mut self, name: String, value: String, path: &Path, tag: SymbolTag) {
+        self.symbol_to_file.insert(name.clone(), path.to_path_buf());
+        self.symbol_to_tags.entry(name.clone()).or_default().insert(tag);
+
         let val_trimmed = value.trim();
         if val_trimmed.starts_with("0x") || val_trimmed.starts_with("0X") {
             if let Ok(val) = i64::from_str_radix(&val_trimmed[2..], 16) {
-                self.defines.insert(name.clone(), val);
-                self.defines_by_value.entry(val).or_default().push(name.clone());
-                self.pending_defines.insert(name, value);
+                self.symbols.insert(name.clone(), val);
+                self.value_to_names.entry(val).or_default().push(name.clone());
+                self.pending.insert(name, value);
                 return;
             }
         }
         if let Ok(val) = val_trimmed.parse::<i64>() {
-            self.defines.insert(name.clone(), val);
-            self.defines_by_value.entry(val).or_default().push(name.clone());
-            self.pending_defines.insert(name, value);
+            self.symbols.insert(name.clone(), val);
+            self.value_to_names.entry(val).or_default().push(name.clone());
+            self.pending.insert(name, value);
             return;
         }
-        self.pending_defines.insert(name, value);
+        self.pending.insert(name, value);
     }
 
-    fn process_enum(&mut self, e: crate::c_parser::enums::CEnum) {
+    fn process_enum(&mut self, e: crate::c_parser::enums::CEnum, path: &Path, tag: SymbolTag) {
         let mut current = 0i64;
-        let mut variants = Vec::new();
         for v in &e.variants {
             if let Some(val) = v.value { current = val; }
-            self.defines.insert(v.name.clone(), current);
-            self.variant_to_value.insert(v.name.clone(), current);
-            self.defines_by_value.entry(current).or_default().push(v.name.clone());
-            variants.push((v.name.clone(), Some(current)));
+            self.symbols.insert(v.name.clone(), current);
+            self.value_to_names.entry(current).or_default().push(v.name.clone());
+            self.symbol_to_file.insert(v.name.clone(), path.to_path_buf());
+            self.symbol_to_tags.entry(v.name.clone()).or_default().insert(tag.clone());
             current += 1;
-        }
-        if let Some(name) = &e.name {
-            self.enums.insert(name.clone(), variants.clone());
-            for (v_name, v_val) in variants {
-                if let Some(val) = v_val {
-                    self.enum_by_value.entry(val).or_default().push(v_name);
-                }
-            }
         }
     }
 
     pub fn load_header_str(&mut self, content: &str) -> std::io::Result<()> {
+        self.load_header_str_with_tag(content, Path::new("inline.h"), SymbolTag::Global)
+    }
+
+    pub fn load_header_str_with_tag(&mut self, content: &str, path: &Path, tag: SymbolTag) -> std::io::Result<()> {
         for def in parse_defines(content) {
-            self.process_define(def.name, def.value);
+            self.process_define(def.name, def.value, path, tag.clone());
         }
         for e in parse_enums(content) {
-            self.process_enum(e);
+            self.process_enum(e, path, tag.clone());
         }
         Ok(())
     }
 
-    fn lookup_defines(&self, name: &str) -> Option<i64> {
-        self.defines.get(name).copied()
-            .or_else(|| self.parent.as_ref()?.lookup_defines(name))
-    }
-
-    fn lookup_variant(&self, name: &str) -> Option<i64> {
-        self.variant_to_value.get(name).copied()
-            .or_else(|| self.parent.as_ref()?.lookup_variant(name))
-    }
-
-    fn lookup_pending(&self, name: &str) -> Option<&String> {
-        self.pending_defines.get(name)
-            .or_else(|| self.parent.as_ref()?.lookup_pending(name))
-    }
-
     pub fn resolve_constant(&self, name: &str) -> Option<i64> {
-        if let Some(val) = self.lookup_defines(name) { return Some(val); }
-        if let Some(val) = self.lookup_variant(name) { return Some(val); }
-        if let Some(val) = self.cache.get(name) { return Some(*val); }
+        if let Some(val) = self.symbols.get(name) { return Some(*val); }
+        if let Some(val) = self.eval_cache.get(name) { return Some(*val); }
         
-        let expr = self.lookup_pending(name)?;
+        let expr = self.pending.get(name)?;
         let val = crate::c_parser::defines::eval_expr_with_context(
             expr, 
-            &self.pending_defines, 
-            &self.defines,
-            &self.cache
+            &self.pending, 
+            &self.symbols,
+            &self.eval_cache
         )?;
         Some(val)
     }
@@ -245,9 +229,9 @@ impl SymbolTable {
     pub fn evaluate_expression(&self, expr: &str) -> Option<i64> {
         crate::c_parser::defines::eval_expr_with_context(
             expr,
-            &self.pending_defines,
-            &self.defines,
-            &self.cache
+            &self.pending,
+            &self.symbols,
+            &self.eval_cache
         )
     }
 
@@ -262,73 +246,50 @@ impl SymbolTable {
     }
 
     pub fn resolve_name(&self, value: i64, prefix: &str) -> Option<String> {
+        self.resolve_name_with_tag(value, prefix, &SymbolTag::Global)
+    }
+
+    pub fn resolve_name_with_tag(&self, value: i64, prefix: &str, tag: &SymbolTag) -> Option<String> {
         if prefix.is_empty() {
             if let Some(cached) = self.shortest_name_cache.get(&value) {
                 return Some(cached.clone());
             }
         }
 
-        let mut best: Option<String> = None;
-
-        let mut check_table = |table: &SymbolTable| {
-            if let Some(names) = table.defines_by_value.get(&value) {
-                if let Some(name) = names.iter().filter(|n| n.starts_with(prefix)).min_by_key(|n| n.len()) {
-                    if best.is_none() || name.len() < best.as_ref().unwrap().len() {
-                        best = Some(name.clone());
-                    }
+        if let Some(names) = self.value_to_names.get(&value) {
+            // Priority 1: Matches tag and prefix
+            if let Some(name) = names.iter()
+                .filter(|n| n.starts_with(prefix))
+                .filter(|n| self.symbol_to_tags.get(*n).map_or(false, |tags| tags.contains(tag)))
+                .min_by_key(|n| n.len()) {
+                if prefix.is_empty() {
+                    self.shortest_name_cache.insert(value, name.clone());
                 }
+                return Some(name.clone());
             }
-            if let Some(names) = table.enum_by_value.get(&value) {
-                if let Some(name) = names.iter().filter(|n| n.starts_with(prefix)).min_by_key(|n| n.len()) {
-                    if best.is_none() || name.len() < best.as_ref().unwrap().len() {
-                        best = Some(name.clone());
-                    }
+            
+            // Priority 2: Matches prefix (Global/Fallback)
+            if let Some(name) = names.iter()
+                .filter(|n| n.starts_with(prefix))
+                .min_by_key(|n| n.len()) {
+                if prefix.is_empty() {
+                    self.shortest_name_cache.insert(value, name.clone());
                 }
+                return Some(name.clone());
             }
-        };
-
-        check_table(self);
-        let mut current = self.parent.as_ref();
-        while let Some(p) = current {
-            check_table(p);
-            current = p.parent.as_ref();
         }
-
-        if let Some(name) = best {
-            if prefix.is_empty() {
-                self.shortest_name_cache.insert(value, name.clone());
-            }
-            return Some(name);
-        }
-
         None
     }
 
     pub fn resolve_names(&self, value: i64, prefixes: &[&str]) -> Vec<String> {
         let mut matches = FxHashSet::default();
         
-        let mut collect_from = |table: &SymbolTable| {
-            if let Some(names) = table.defines_by_value.get(&value) {
-                for name in names {
-                    if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
-                        matches.insert(name.clone());
-                    }
+        if let Some(names) = self.value_to_names.get(&value) {
+            for name in names {
+                if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
+                    matches.insert(name.clone());
                 }
             }
-            if let Some(names) = table.enum_by_value.get(&value) {
-                for name in names {
-                    if prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p)) {
-                        matches.insert(name.clone());
-                    }
-                }
-            }
-        };
-
-        collect_from(self);
-        let mut current = self.parent.as_ref();
-        while let Some(p) = current {
-            collect_from(p);
-            current = p.parent.as_ref();
         }
 
         let mut res: Vec<_> = matches.into_iter().collect();
@@ -337,11 +298,20 @@ impl SymbolTable {
     }
 
     pub fn load_list_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        self.load_list_file_with_tag(path, SymbolTag::Global)
+    }
+
+    pub fn load_list_file_with_tag(&mut self, path: impl AsRef<Path>, tag: SymbolTag) -> std::io::Result<()> {
+        let path = path.as_ref();
         let content = std::fs::read_to_string(path).unwrap_or_default();
-        self.load_list_file_str(&content)
+        self.load_list_file_str_with_tag(&content, path, tag)
     }
 
     pub fn load_list_file_str(&mut self, content: &str) -> std::io::Result<()> {
+        self.load_list_file_str_with_tag(content, Path::new("inline.txt"), SymbolTag::Global)
+    }
+
+    pub fn load_list_file_str_with_tag(&mut self, content: &str, path: &Path, tag: SymbolTag) -> std::io::Result<()> {
         let mut current_index = 0i64;
         for line in content.lines() {
             let line = line.trim();
@@ -351,21 +321,25 @@ impl SymbolTable {
                 let expr = line[pos + 1..].trim().to_string();
                 if let Some(val) = crate::c_parser::defines::eval_expr_with_context(
                     &expr, 
-                    &self.pending_defines, 
-                    &self.defines,
-                    &self.cache
+                    &self.pending, 
+                    &self.symbols,
+                    &self.eval_cache
                 ) {
                     current_index = val;
                 }
-                self.defines.insert(name.clone(), current_index);
-                self.defines_by_value.entry(current_index).or_default().push(name.clone());
-                self.pending_defines.insert(name, current_index.to_string());
+                self.symbols.insert(name.clone(), current_index);
+                self.value_to_names.entry(current_index).or_default().push(name.clone());
+                self.pending.insert(name.clone(), current_index.to_string());
+                self.symbol_to_file.insert(name.clone(), path.to_path_buf());
+                self.symbol_to_tags.entry(name).or_default().insert(tag.clone());
                 current_index += 1;
             } else {
                 let name = line.to_string();
-                self.defines.insert(name.clone(), current_index);
-                self.defines_by_value.entry(current_index).or_default().push(name.clone());
-                self.pending_defines.insert(name, current_index.to_string());
+                self.symbols.insert(name.clone(), current_index);
+                self.value_to_names.entry(current_index).or_default().push(name.clone());
+                self.pending.insert(name.clone(), current_index.to_string());
+                self.symbol_to_file.insert(name.clone(), path.to_path_buf());
+                self.symbol_to_tags.entry(name).or_default().insert(tag.clone());
                 current_index += 1;
             }
         }
@@ -373,6 +347,7 @@ impl SymbolTable {
     }
 
     pub fn load_text_bank_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
+        let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
         let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let messages = json.get("messages").and_then(|v| v.as_array());
@@ -381,8 +356,9 @@ impl SymbolTable {
             for (index, msg) in messages.iter().enumerate() {
                 if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
                     let val = index as i64;
-                    self.defines.insert(id.to_string(), val);
-                    self.defines_by_value.entry(val).or_default().push(id.to_string());
+                    self.symbols.insert(id.to_string(), val);
+                    self.value_to_names.entry(val).or_default().push(id.to_string());
+                    self.symbol_to_file.insert(id.to_string(), path.to_path_buf());
                     count += 1;
                 }
             }
@@ -433,24 +409,27 @@ impl SymbolTable {
     }
 
     pub fn load_python_enum(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
-        self.load_python_enum_str(&content)
+        self.load_python_enum_str_with_tag(&content, path, SymbolTag::Global)
     }
 
-    pub fn load_python_enum_str(&mut self, content: &str) -> std::io::Result<()> {
+    pub fn load_python_enum_str_with_tag(&mut self, content: &str, path: &Path, tag: SymbolTag) -> std::io::Result<()> {
         for line in content.lines() {
             if let Some(caps) = RE_PYTHON_ENUM.captures(line.trim()) {
                 let name = caps[1].to_string();
                 let expr = caps[2].trim().to_string();
                 if let Some(val) = crate::c_parser::defines::eval_expr_with_context(
                     &expr, 
-                    &self.pending_defines, 
-                    &self.defines,
-                    &self.cache
+                    &self.pending, 
+                    &self.symbols,
+                    &self.eval_cache
                 ) {
-                    self.defines.insert(name.clone(), val);
-                    self.defines_by_value.entry(val).or_default().push(name.clone());
-                    self.pending_defines.insert(name, val.to_string());
+                    self.symbols.insert(name.clone(), val);
+                    self.value_to_names.entry(val).or_default().push(name.clone());
+                    self.pending.insert(name.clone(), val.to_string());
+                    self.symbol_to_file.insert(name.clone(), path.to_path_buf());
+                    self.symbol_to_tags.entry(name).or_default().insert(tag.clone());
                 }
             }
         }
@@ -463,87 +442,75 @@ impl SymbolTable {
             return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("Failed to fetch URL: {}", url)));
         }
         let content = String::from_utf8_lossy(&output.stdout);
+        let dummy_path = Path::new("url_source.h");
         if url.ends_with(".txt") {
-            self.load_list_file_str(&content)
+            self.load_list_file_str_with_tag(&content, dummy_path, SymbolTag::Global)
         } else if url.ends_with(".py") {
-            self.load_python_enum_str(&content)
+            self.load_python_enum_str_with_tag(&content, dummy_path, SymbolTag::Global)
         } else {
-            self.load_header_str(&content)
+            self.load_header_str_with_tag(&content, dummy_path, SymbolTag::Global)
         }
     }
 
     pub fn insert_define(&mut self, name: String, value: i64) {
-        self.defines.insert(name.clone(), value);
-        self.defines_by_value.entry(value).or_default().push(name);
+        self.symbols.insert(name.clone(), value);
+        self.value_to_names.entry(value).or_default().push(name);
     }
 
-    pub fn insert_enum(&mut self, name: String, variants: Vec<(String, Option<i64>)>) {
+    pub fn insert_enum(&mut self, _name: String, variants: Vec<(String, Option<i64>)>) {
         for (v_name, v_val) in &variants {
             if let Some(val) = v_val {
-                self.variant_to_value.insert(v_name.clone(), *val);
-                self.enum_by_value.entry(*val).or_default().push(v_name.clone());
+                self.symbols.insert(v_name.clone(), *val);
+                self.value_to_names.entry(*val).or_default().push(v_name.clone());
             }
         }
-        self.enums.insert(name, variants);
     }
 
     pub fn get_all_defines(&self) -> HashMap<String, i64> {
-        let mut res = HashMap::with_capacity(self.defines.len() + self.cache.len());
+        let mut res = HashMap::with_capacity(self.symbols.len() + self.eval_cache.len());
         
-        let mut collect_from = |table: &SymbolTable| {
-            for (k, v) in &table.defines {
-                res.insert(k.clone(), *v);
-            }
-            for (k, v) in &table.variant_to_value {
-                res.insert(k.clone(), *v);
-            }
-        };
-
-        collect_from(self);
-        let mut current = self.parent.as_ref();
-        while let Some(p) = current {
-            collect_from(p);
-            current = p.parent.as_ref();
+        for (k, v) in &self.symbols {
+            res.insert(k.clone(), *v);
         }
 
-        for entry in self.cache.iter() {
+        for entry in self.eval_cache.iter() {
             res.insert(entry.key().clone(), *entry.value());
         }
         res
     }
 
     pub fn get_enums_std(&self) -> HashMap<String, Vec<(String, Option<i64>)>> {
-        let mut res = HashMap::with_capacity(self.enums.len());
-        
-        let mut collect_from = |table: &SymbolTable| {
-            for (k, v) in &table.enums {
-                res.insert(k.clone(), v.clone());
-            }
-        };
-
-        collect_from(self);
-        let mut current = self.parent.as_ref();
-        while let Some(p) = current {
-            collect_from(p);
-            current = p.parent.as_ref();
-        }
-
-        res
+        // Enums are now merged into symbols, but we can return an empty map for legacy support
+        HashMap::new()
     }
 
     pub fn extend(&mut self, other: SymbolTable) {
-        self.defines.extend(other.defines);
-        self.pending_defines.extend(other.pending_defines);
-        self.enums.extend(other.enums);
-        self.variant_to_value.extend(other.variant_to_value);
-        self.defines_by_value.extend(other.defines_by_value);
-        self.enum_by_value.extend(other.enum_by_value);
-        self.loaded_includes.extend(other.loaded_includes);
-        for entry in other.cache.iter() {
-            self.cache.insert(entry.key().clone(), *entry.value());
+        self.symbols.extend(other.symbols);
+        self.pending.extend(other.pending);
+        self.value_to_names.extend(other.value_to_names);
+        self.symbol_to_file.extend(other.symbol_to_file);
+        self.symbol_to_tags.extend(other.symbol_to_tags);
+        self.loaded_files.extend(other.loaded_files);
+        for entry in other.eval_cache.iter() {
+            self.eval_cache.insert(entry.key().clone(), *entry.value());
         }
         for entry in other.shortest_name_cache.iter() {
             self.shortest_name_cache.insert(*entry.key(), entry.value().clone());
         }
+    }
+
+    pub fn get_symbols_by_tag(&self, tag: &SymbolTag) -> Vec<String> {
+        self.symbol_to_tags.iter()
+            .filter(|(_, tags)| tags.contains(tag))
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    pub fn get_symbols_by_file(&self, path: &Path) -> Vec<String> {
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        self.symbol_to_file.iter()
+            .filter(|(_, p)| **p == canonical)
+            .map(|(name, _)| name.clone())
+            .collect()
     }
 }

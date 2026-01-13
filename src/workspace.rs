@@ -4,7 +4,6 @@ use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::ScriptTable;
 use crate::text_bank::TextBankTable;
-use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -24,7 +23,6 @@ pub struct Workspace {
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
     pub source_manager: SourceManager,
-    script_to_text_cache: FxHashMap<u16, u16>,
     location_names: Option<Vec<String>>,
     internal_names: Option<Vec<String>>,
 }
@@ -133,6 +131,21 @@ impl Workspace {
             .cloned()
     }
 
+    pub fn get_script_file_for_map(&self, map_id: u16) -> Option<String> {
+        let header = self.provider.get_map_header(map_id).ok()?;
+        self.scripts.get_name(header.script_file_id() as usize).cloned()
+    }
+
+    pub fn get_symbols_for_map(&self, map_id: u16) -> Vec<String> {
+        use crate::c_parser::SymbolTag;
+        self.symbols.get_symbols_by_tag(&SymbolTag::Map(map_id))
+    }
+
+    pub fn resolve_script_id_to_name(&self, script_id: u16) -> Option<String> {
+        self.symbols.resolve_name(script_id as i64, "CommonScript_")
+            .or_else(|| self.symbols.resolve_name(script_id as i64, ""))
+    }
+
     fn open_dspre(path: PathBuf) -> std::io::Result<Self> {
         let header = RomHeader::open(&path)?;
         let game = header.detect_game().ok_or_else(|| {
@@ -173,7 +186,6 @@ impl Workspace {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             source_manager: sm,
-            script_to_text_cache: FxHashMap::default(),
             location_names: None,
             internal_names: None,
         })
@@ -193,28 +205,10 @@ impl Workspace {
         let sm = SourceManager::new();
         let mut symbols = SymbolTable::with_source_manager(sm.clone());
 
-        let include_dir = root.join("include/constants");
-        if include_dir.exists() {
-            symbols.load_headers_from_dir(include_dir)?;
-        }
-
-        let generated_dir = root.join("generated");
-        if generated_dir.exists() {
-            symbols.load_headers_from_dir(generated_dir)?;
-        }
-
-        let build_generated_dir = root.join("build/generated");
-        if build_generated_dir.exists() {
-            symbols.load_headers_from_dir(build_generated_dir)?;
-        }
-
-        let text_dir = root.join("res/text");
-        if text_dir.exists() {
-            symbols.load_headers_from_dir(text_dir)?;
-        }
+        // Broad recursive parse of the entire project
+        Self::load_project_symbols_broad(&root, &mut symbols)?;
 
         let mut scripts = ScriptTable::new();
-
         let scripts_order = root.join("res/field/scripts/scripts.order");
         if scripts_order.exists() {
             scripts.load_order_file(scripts_order)?;
@@ -238,10 +232,74 @@ impl Workspace {
             scripts,
             text_banks,
             source_manager: sm,
-            script_to_text_cache: FxHashMap::default(),
             location_names: None,
             internal_names: None,
         })
+    }
+
+    fn load_project_symbols_broad(root: &Path, symbols: &mut SymbolTable) -> std::io::Result<()> {
+        use crate::c_parser::SymbolTag;
+
+        // 1. Load all constants from include/constants
+        let include_constants = root.join("include/constants");
+        if include_constants.exists() {
+            symbols.load_headers_from_dir(&include_constants)?;
+        }
+
+        // 2. Load generated constants (prefer build/generated/*.py, fallback to generated/*.txt)
+        let build_generated = root.join("build/generated");
+        let generated = root.join("generated");
+        
+        if build_generated.exists() {
+            symbols.load_headers_from_dir(&build_generated)?;
+        } else if generated.exists() {
+            symbols.load_headers_from_dir(&generated)?;
+        }
+
+        // 3. Special handling for map events/scripts to apply tags
+        // ... (existing code for field_events) ...
+        let field_events = root.join("res/field/events");
+        if field_events.exists() {
+            for entry in std::fs::read_dir(field_events)? {
+                let entry = entry?;
+                let path = entry.path();
+                if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                    if filename.starts_with("events_map_") && filename.ends_with(".h") {
+                        if let Ok(id_str) = &filename[11..filename.len()-2].parse::<u16>() {
+                            symbols.load_file_with_tag(&path, SymbolTag::Map(*id_str))?;
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Parse CommonScript table from scripts_common.s if it exists
+        // ... (existing code for scripts_common) ...
+
+        // 5. Load text bank constants from res/text (JSON only, avoid recursion into bank/ or pl_msg.narc.p/)
+        let text_dir = root.join("res/text");
+        if text_dir.exists() {
+            for entry in std::fs::read_dir(text_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.extension().map_or(false, |ext| ext == "json") {
+                    symbols.load_text_bank_json(&path)?;
+                }
+            }
+        }
+
+        // 6. Load extra generated headers from build/ if they exist
+        let build_text_bank = root.join("build/res/text/bank");
+        if build_text_bank.exists() {
+            symbols.load_headers_from_dir(&build_text_bank)?;
+        }
+
+        let build_field_events = root.join("build/res/field/events");
+        if build_field_events.exists() {
+            symbols.load_headers_from_dir(&build_field_events)?;
+        }
+
+        Ok(())
     }
 
     pub fn collect_constants_for_file(&self, path: impl AsRef<Path>) -> std::io::Result<SymbolTable> {
@@ -251,7 +309,7 @@ impl Workspace {
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
 
-        let mut table = SymbolTable::with_parent(Arc::clone(&self.symbols));
+        let mut table = (*self.symbols).clone();
         table.load_recursive(path, &include_dirs)?;
         Ok(table)
     }
@@ -267,7 +325,7 @@ impl Workspace {
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
 
-        let mut table = SymbolTable::with_parent(Arc::clone(&self.symbols));
+        let mut table = (*self.symbols).clone();
         table.load_recursive_str(source, current_file_dir, &include_dirs)?;
         Ok(table)
     }

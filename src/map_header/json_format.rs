@@ -137,9 +137,10 @@ mod tests {
     #[test]
     fn test_map_header_resolution() {
         let mut symbols = SymbolTable::new();
-        symbols.defines.insert("MAPSEC_JUBILIFE_CITY".into(), 6);
-        symbols.defines.insert("SEQ_CITY01_D".into(), 1010);
-        symbols.defines.insert("CAMERA_TYPE_DEFAULT".into(), 0);
+        symbols.insert_define("MAPSEC_JUBILIFE_CITY".into(), 6);
+        symbols.insert_define("SEQ_CITY01_D".into(), 1010);
+        symbols.insert_define("CAMERA_TYPE_DEFAULT".into(), 0);
+
 
         let json = r#"{
             "location_name": "MAPSEC_JUBILIFE_CITY",

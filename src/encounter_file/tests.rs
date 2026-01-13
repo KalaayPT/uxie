@@ -64,8 +64,9 @@ mod tests {
     #[test]
     fn test_encounter_json_resolution() {
         let mut symbols = SymbolTable::new();
-        symbols.defines.insert("SPECIES_BULBASAUR".into(), 1);
-        symbols.defines.insert("SPECIES_IVYSAUR".into(), 2);
+        symbols.insert_define("SPECIES_BULBASAUR".into(), 1);
+        symbols.insert_define("SPECIES_IVYSAUR".into(), 2);
+
 
         let json = r#"{
             "land_rate": 30,
