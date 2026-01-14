@@ -34,3 +34,7 @@ rayon = "1.10.0"
 
 [dev-dependencies]
 tempfile = "3.14"
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]

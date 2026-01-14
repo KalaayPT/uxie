@@ -1,3 +1,10 @@
+//! Data provider abstraction for accessing ROM data from different sources
+//!
+//! This module defines the [`DataProvider`] trait and concrete implementations
+//! for different project types:
+//! - [`Arm9Provider`]: Reads from ARM9 binary files (DSPRE projects)
+//! - [`DecompProvider`]: Reads from decompilation source files
+
 use crate::game::GameFamily;
 use crate::map_header::{
     MAP_HEADER_SIZE, MapHeader, read_map_header_from_bytes, read_map_headers_from_arm9,
@@ -6,12 +13,40 @@ use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Trait for accessing ROM data regardless of source format
+///
+/// Implementations provide unified access to map headers and related data
+/// from different project types (DSPRE, decompilation, etc.).
 pub trait DataProvider {
+    /// Get a specific map header by ID
     fn get_map_header(&self, id: u16) -> io::Result<MapHeader>;
+    /// Get the total number of map headers
     fn get_map_header_count(&self) -> io::Result<usize>;
+    /// Get the text archive ID associated with a script file
     fn get_text_archive_for_script(&self, script_id: u16) -> io::Result<Option<u16>>;
 }
 
+/// Provider for reading map data from ARM9 binary files
+///
+/// Used primarily for DSPRE projects where map headers are stored
+/// in a binary table within the ARM9 executable.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use uxie::{Arm9Provider, GameFamily, DataProvider};
+///
+/// let provider = Arm9Provider::new(
+///     "path/to/arm9.bin",
+///     0xE601C,  // Platinum table offset
+///     559,      // Number of map headers
+///     GameFamily::Platinum,
+/// );
+///
+/// let header = provider.get_map_header(0)?;
+/// println!("Map 0 has {} script file", header.script_file_id());
+/// # Ok::<(), std::io::Error>(())
+/// ```
 pub struct Arm9Provider {
     arm9_path: PathBuf,
     header_table_offset: u64,
@@ -20,6 +55,14 @@ pub struct Arm9Provider {
 }
 
 impl Arm9Provider {
+    /// Create a new ARM9 provider
+    ///
+    /// # Arguments
+    ///
+    /// * `arm9_path` - Path to the arm9.bin file
+    /// * `header_table_offset` - Byte offset to the map header table in ARM9
+    /// * `header_count` - Number of map headers in the table
+    /// * `game_family` - Game family (DP, Platinum, or HGSS)
     pub fn new(
         arm9_path: impl AsRef<Path>,
         header_table_offset: u64,
@@ -34,6 +77,9 @@ impl Arm9Provider {
         }
     }
 
+    /// Create a provider for Platinum (US version)
+    ///
+    /// Convenience constructor with hardcoded offsets for Platinum US.
     pub fn platinum_us(arm9_path: impl AsRef<Path>) -> Self {
         Self::new(arm9_path, 0xE601C, 559, GameFamily::Platinum)
     }
@@ -87,12 +133,22 @@ impl DataProvider for Arm9Provider {
     }
 }
 
+/// Provider for reading map data from decompilation source files
+///
+/// Parses C header files and JSON data from pokeplatinum/pokeheartgold
+/// decompilation projects.
 pub struct DecompProvider {
     pub root: PathBuf,
     pub symbols: crate::c_parser::SymbolTable,
 }
 
 impl DecompProvider {
+    /// Create a new decompilation provider
+    ///
+    /// # Arguments
+    ///
+    /// * `root` - Root directory of the decompilation project
+    /// * `symbols` - Pre-loaded symbol table with project constants
     pub fn new(root: impl AsRef<Path>, symbols: crate::c_parser::SymbolTable) -> Self {
         Self {
             root: root.as_ref().to_path_buf(),
@@ -141,6 +197,9 @@ impl DataProvider for DecompProvider {
     }
 }
 
+/// Find all map headers that use a specific script file
+///
+/// Returns the indices of map headers that reference the given script ID.
 pub fn find_headers_using_script(headers: &[MapHeader], script_id: u16) -> Vec<usize> {
     headers
         .iter()
@@ -150,6 +209,9 @@ pub fn find_headers_using_script(headers: &[MapHeader], script_id: u16) -> Vec<u
         .collect()
 }
 
+/// Find all map headers that use a specific text archive
+///
+/// Returns the indices of map headers that reference the given text ID.
 pub fn find_headers_using_text(headers: &[MapHeader], text_id: u16) -> Vec<usize> {
     headers
         .iter()

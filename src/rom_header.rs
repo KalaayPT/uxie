@@ -1,3 +1,14 @@
+//! ROM header reading and parsing for Nintendo DS Pokemon Gen 4 games
+//!
+//! This module provides functionality to read and parse ROM headers from various sources:
+//! - Binary ROM files (NDS ROM dumps)
+//! - DSPRE project directories
+//! - ds-rom-tool YAML configurations
+//! - Decompilation project configurations
+//!
+//! The [`RomHeader`] struct automatically detects the source format and provides
+//! a unified interface for accessing header data.
+
 use crate::game::{Game, GameFamily};
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
@@ -5,16 +16,48 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
+/// ROM header size in bytes (standard NDS header size)
 pub const ROM_HEADER_SIZE: usize = 0x200;
 
+/// Source format of the ROM header
+///
+/// Indicates where the header data was loaded from, which affects
+/// which fields are available.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RomHeaderSource {
+    /// Loaded from a binary ROM file or header.bin (all fields available)
     #[default]
     NdsTool,
+    /// Loaded from ds-rom-tool YAML format (limited fields)
     DsRomTool,
+    /// Loaded from decompilation project config (limited fields)
     Decomp,
 }
 
+/// Nintendo DS ROM header
+///
+/// Contains metadata about a Pokemon Gen 4 ROM, including game identification,
+/// ARM9/ARM7 binary locations, and file system table offsets.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use uxie::RomHeader;
+///
+/// // Auto-detect format from any source
+/// let header = RomHeader::open("path/to/header.bin")?;
+///
+/// // Detect game version
+/// if let Some(game) = header.detect_game() {
+///     println!("Detected game: {:?}", game);
+/// }
+///
+/// // Get region
+/// if let Some(region) = header.region() {
+///     println!("Region: {}", region);
+/// }
+/// # Ok::<(), std::io::Error>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RomHeader {
     pub game_title: String,
@@ -56,6 +99,29 @@ pub struct RomHeader {
 }
 
 impl RomHeader {
+    /// Open and parse a ROM header from any supported source
+    ///
+    /// Automatically detects the format based on file extension and content:
+    /// - `.bin` files: Binary ROM header
+    /// - `.yaml`/`.yml` files: ds-rom-tool configuration
+    /// - Directories: Searches for `header.bin` or `config.yaml`
+    /// - Other files: Attempts binary parsing
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use uxie::RomHeader;
+    ///
+    /// // From binary file
+    /// let header = RomHeader::open("header.bin")?;
+    ///
+    /// // From DSPRE project directory
+    /// let header = RomHeader::open("path/to/dspre-project/")?;
+    ///
+    /// // From ds-rom-tool project
+    /// let header = RomHeader::open("path/to/project/config.yaml")?;
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     pub fn open(path: impl AsRef<Path>) -> io::Result<Self> {
         let path = path.as_ref();
 
@@ -98,6 +164,9 @@ impl RomHeader {
         }
     }
 
+    /// Read header from a binary file
+    ///
+    /// Parses the standard 512-byte NDS ROM header format.
     pub fn from_binary(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut file = File::open(path)?;
         Self::from_reader(&mut file, RomHeaderSource::NdsTool)
@@ -279,6 +348,21 @@ impl RomHeader {
         })
     }
 
+    /// Detect the specific game version from the game code
+    ///
+    /// Returns `None` if the game code doesn't match any known Gen 4 Pokemon game.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # use uxie::RomHeader;
+    /// let header = RomHeader::open("header.bin")?;
+    /// match header.detect_game() {
+    ///     Some(game) => println!("Game: {:?}", game),
+    ///     None => println!("Unknown game"),
+    /// }
+    /// # Ok::<(), std::io::Error>(())
+    /// ```
     pub fn detect_game(&self) -> Option<Game> {
         match self.game_code.as_str() {
             "ADAE" | "ADAJ" | "ADAP" | "ADAS" | "ADAK" => Some(Game::Diamond),
@@ -290,10 +374,25 @@ impl RomHeader {
         }
     }
 
+    /// Detect the game family (DP, Platinum, or HGSS)
+    ///
+    /// This is useful when you need to know the general game family without
+    /// caring about the specific version (e.g., Diamond vs Pearl).
     pub fn detect_game_family(&self) -> Option<GameFamily> {
         self.detect_game().map(|g| g.family())
     }
 
+    /// Get the region from the game code
+    ///
+    /// Returns the full region name based on the 4th character of the game code:
+    /// - 'E': USA
+    /// - 'J': Japan
+    /// - 'P': Europe
+    /// - 'S': Spain
+    /// - 'K': Korea
+    /// - 'F': France
+    /// - 'D': Germany
+    /// - 'I': Italy
     pub fn region(&self) -> Option<&'static str> {
         self.game_code.chars().nth(3).and_then(|c| match c {
             'E' => Some("USA"),

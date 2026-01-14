@@ -1,3 +1,9 @@
+//! DSPRE and ds-rom-tool project structures
+//!
+//! This module provides support for:
+//! - DSPRE project directories (legacy ROM hacking tool format)
+//! - ds-rom-tool projects (modern YAML-based ROM build system)
+
 use crate::game::{Game, GameFamily};
 use crate::rom_header::RomHeader;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};

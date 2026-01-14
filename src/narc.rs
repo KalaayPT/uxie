@@ -1,3 +1,8 @@
+//! Nintendo Archive (NARC) file format reader
+//!
+//! NARC is the archive format used extensively in Pokemon Gen 4 games
+//! for packing multiple files into a single archive.
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{self, Read, Seek, SeekFrom};
 

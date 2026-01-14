@@ -1,3 +1,8 @@
+//! High-level workspace API for managing ROM hacking projects
+//!
+//! The [`Workspace`] struct provides a unified interface for working with both
+//! DSPRE projects and decompilation sources (pokeplatinum/pokeheartgold).
+
 use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
