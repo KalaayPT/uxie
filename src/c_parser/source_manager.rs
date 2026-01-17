@@ -1,9 +1,9 @@
-use dashmap::DashMap;
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use crate::c_parser::defines::{CDefine, parse_defines};
 use crate::c_parser::enums::{CEnum, parse_enums};
 use crate::c_parser::includes::{CInclude, parse_includes};
+use dashmap::DashMap;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -32,7 +32,7 @@ impl SourceManager {
             self.canonical_cache.insert(path.to_path_buf(), res.clone());
             res
         };
-        
+
         if let Some(entry) = self.files.get(&canonical) {
             return Ok(Arc::clone(&entry));
         }
@@ -58,7 +58,7 @@ impl SourceManager {
             res
         }
     }
-    
+
     pub fn len(&self) -> usize {
         self.files.len()
     }
@@ -75,7 +75,7 @@ mod tests {
     fn test_recursive_loading_with_cache() {
         let dir = tempdir().unwrap();
         let sm = SourceManager::new();
-        
+
         let header_path = dir.path().join("consts.h");
         let mut header = std::fs::File::create(&header_path).unwrap();
         writeln!(header, "#define GLOBAL_CONST 100").unwrap();

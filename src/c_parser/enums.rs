@@ -1,13 +1,11 @@
 use regex::Regex;
 use std::sync::LazyLock;
 
-static RE_ENUM: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]+)\}").unwrap()
-});
+static RE_ENUM: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"enum\s*([A-Za-z_][A-Za-z0-9_]*)?\s*\{([^}]+)\}").unwrap());
 
-static RE_VARIANT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*([^,\n]+))?").unwrap()
-});
+static RE_VARIANT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)(?:\s*=\s*([^,\n]+))?").unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 
@@ -89,7 +87,6 @@ pub fn parse_enums(source: &str) -> Vec<CEnum> {
 pub fn parse_enum(source: &str) -> Option<CEnum> {
     parse_enums(source).into_iter().next()
 }
-
 
 #[cfg(test)]
 mod tests {

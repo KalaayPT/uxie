@@ -141,7 +141,6 @@ mod tests {
         symbols.insert_define("SEQ_CITY01_D".into(), 1010);
         symbols.insert_define("CAMERA_TYPE_DEFAULT".into(), 0);
 
-
         let json = r#"{
             "location_name": "MAPSEC_JUBILIFE_CITY",
             "music_day_id": "SEQ_CITY01_D",

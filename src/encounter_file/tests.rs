@@ -67,7 +67,6 @@ mod tests {
         symbols.insert_define("SPECIES_BULBASAUR".into(), 1);
         symbols.insert_define("SPECIES_IVYSAUR".into(), 2);
 
-
         let json = r#"{
             "land_rate": 30,
             "land_encounters": [{"level": 5, "species": "SPECIES_BULBASAUR"}],

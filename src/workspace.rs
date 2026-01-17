@@ -373,3 +373,235 @@ impl Workspace {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_project_type_equality() {
+        assert_eq!(ProjectType::Dspre, ProjectType::Dspre);
+        assert_eq!(ProjectType::Decomp, ProjectType::Decomp);
+        assert_ne!(ProjectType::Dspre, ProjectType::Decomp);
+    }
+
+    #[test]
+    fn test_resolve_script_symbols_with_constants() {
+        let sm = SourceManager::new();
+        let mut symbols = SymbolTable::with_source_manager(sm.clone());
+        symbols.insert_define("FLAG_START".to_string(), 100);
+        symbols.insert_define("VAR_TEMP".to_string(), 16384);
+
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+        };
+
+        let result = ws.resolve_script_symbols("SetFlag FLAG_START");
+        assert_eq!(result, "SetFlag 100");
+
+        let result = ws.resolve_script_symbols("GetVar VAR_TEMP + FLAG_START");
+        assert_eq!(result, "GetVar 16384 + 100");
+    }
+
+    #[test]
+    fn test_resolve_script_symbols_numeric_to_name() {
+        let sm = SourceManager::new();
+        let mut symbols = SymbolTable::with_source_manager(sm.clone());
+        symbols.insert_define("FLAG_TEST".to_string(), 42);
+
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+        };
+
+        let result = ws.resolve_script_symbols("SetFlag 42");
+        assert_eq!(result, "SetFlag FLAG_TEST");
+    }
+
+    #[test]
+    fn test_resolve_script_symbols_passthrough() {
+        let sm = SourceManager::new();
+        let symbols = SymbolTable::with_source_manager(sm.clone());
+
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+        };
+
+        let result = ws.resolve_script_symbols("UnknownCmd UNKNOWN_FLAG");
+        assert_eq!(result, "UnknownCmd UNKNOWN_FLAG");
+    }
+
+    #[test]
+    fn test_get_map_internal_name() {
+        let sm = SourceManager::new();
+        let symbols = SymbolTable::with_source_manager(sm.clone());
+
+        let mut ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: Some(vec!["D01R0101".to_string(), "D02R0102".to_string()]),
+        };
+
+        assert_eq!(ws.get_map_internal_name(0), Some("D01R0101".to_string()));
+        assert_eq!(ws.get_map_internal_name(1), Some("D02R0102".to_string()));
+        assert_eq!(ws.get_map_internal_name(99), None);
+
+        ws.internal_names = None;
+        assert_eq!(ws.get_map_internal_name(0), None);
+    }
+
+    #[test]
+    fn test_get_map_location_name() {
+        let sm = SourceManager::new();
+        let symbols = SymbolTable::with_source_manager(sm.clone());
+
+        let mut ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            source_manager: sm,
+            location_names: Some(vec![
+                "Twinleaf Town".to_string(),
+                "Sandgem Town".to_string(),
+            ]),
+            internal_names: None,
+        };
+
+        assert_eq!(
+            ws.get_map_location_name(0),
+            Some("Twinleaf Town".to_string())
+        );
+        assert_eq!(
+            ws.get_map_location_name(1),
+            Some("Sandgem Town".to_string())
+        );
+        assert_eq!(ws.get_map_location_name(99), None);
+
+        ws.location_names = None;
+        assert_eq!(ws.get_map_location_name(0), None);
+    }
+
+    #[test]
+    fn test_resolve_constant() {
+        let sm = SourceManager::new();
+        let mut symbols = SymbolTable::with_source_manager(sm.clone());
+        symbols.insert_define("TEST_CONST".to_string(), 12345);
+
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+        };
+
+        assert_eq!(ws.resolve_constant("TEST_CONST"), Some(12345));
+        assert_eq!(ws.resolve_constant("NONEXISTENT"), None);
+    }
+
+    #[test]
+    fn test_open_decomp_detection() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        let mut const_file = fs::File::create(root.join("include/constants/test.h")).unwrap();
+        writeln!(const_file, "#define TEST_VALUE 42").unwrap();
+
+        let ws = Workspace::open(root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.game, Game::Platinum);
+        assert_eq!(ws.family, GameFamily::Platinum);
+        assert_eq!(ws.resolve_constant("TEST_VALUE"), Some(42));
+    }
+
+    #[test]
+    fn test_open_decomp_with_scripts_order() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+
+        let mut order_file =
+            fs::File::create(root.join("res/field/scripts/scripts.order")).unwrap();
+        writeln!(order_file, "script_main").unwrap();
+        writeln!(order_file, "script_event").unwrap();
+
+        let ws = Workspace::open(root).unwrap();
+
+        assert_eq!(ws.scripts.get_name(0), Some(&"script_main".to_string()));
+        assert_eq!(ws.scripts.get_name(1), Some(&"script_event".to_string()));
+    }
+
+    struct MockProvider;
+
+    impl DataProvider for MockProvider {
+        fn get_map_header(&self, _id: u16) -> crate::error::Result<crate::map_header::MapHeader> {
+            Err(crate::error::UxieError::not_found("Map header", "mock"))
+        }
+
+        fn get_map_header_count(&self) -> crate::error::Result<usize> {
+            Ok(0)
+        }
+
+        fn get_text_archive_for_script(
+            &self,
+            _script_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(None)
+        }
+    }
+}

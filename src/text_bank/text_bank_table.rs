@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
-use std::path::Path;
 use std::collections::HashMap;
+use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
 pub struct TextBankTable {

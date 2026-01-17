@@ -1,11 +1,11 @@
 use clap::{Parser, Subcommand};
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use uxie::{
     BinaryEncounterFile, DspreProject, GameFamily, JsonEncounterFile, MapHeader, MapHeaderJson,
     RomHeader, SymbolTable, Workspace,
 };
-use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "uxie")]
@@ -262,7 +262,9 @@ fn cmd_parse_header(
 
     match ext {
         "txt" => symbols.load_list_file_str(&content)?,
-        "json" => { symbols.load_text_bank_json(path)?; },
+        "json" => {
+            symbols.load_text_bank_json(path)?;
+        }
         _ => symbols.load_header_str(&content)?,
     }
 
@@ -272,7 +274,6 @@ fn cmd_parse_header(
             defines: Option<Vec<uxie::c_parser::defines::CDefine>>,
             enums: Option<HashMap<String, Vec<(String, Option<i64>)>>>,
         }
-
 
         let defines = if !only_enums {
             Some(

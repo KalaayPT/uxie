@@ -134,6 +134,7 @@
 pub mod c_parser;
 pub mod ds_rom;
 pub mod encounter_file;
+pub mod error;
 pub mod event_file;
 pub mod game;
 pub mod map_header;
@@ -147,6 +148,7 @@ pub mod workspace;
 pub use c_parser::SymbolTable;
 pub use ds_rom::{DsRomArm9Config, DsRomToolProject, DspreProject};
 pub use encounter_file::{BinaryEncounterFile, JsonEncounterFile};
+pub use error::{Result, UxieError};
 pub use event_file::{
     BgEventBinary, BgEventJson, BinaryEventFile, CoordEventBinary, CoordEventJson, JsonEventFile,
     ObjectEventBinary, ObjectEventJson, WarpEventBinary, WarpEventJson,

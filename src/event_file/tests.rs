@@ -71,7 +71,6 @@ mod tests {
         symbols.insert_define("OBJ_EVENT_GFX_PLAYER".into(), 1);
         symbols.insert_define("BG_EVENT_DIR_NORTH".into(), 1);
 
-
         let json = r#"{
             "bg_events": [{
                 "script": 1,
