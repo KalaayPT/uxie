@@ -223,6 +223,20 @@ impl SymbolTable {
 
             if let Some(p) = found_path {
                 self.load_recursive_internal(&p, include_dirs, sm, visited, tag.clone())?;
+            } else if inc.path.contains("res/field/events/") && inc.path.ends_with(".h") {
+                let json_path_str = inc.path.replace(".h", ".json");
+                let json_rel = parent_dir.join(&json_path_str);
+                if json_rel.exists() {
+                    let _ = self.load_events_json(&json_rel);
+                } else {
+                    for dir in include_dirs {
+                        let json_p = dir.join(&json_path_str);
+                        if json_p.exists() {
+                            let _ = self.load_events_json(&json_p);
+                            break;
+                        }
+                    }
+                }
             }
         }
 
@@ -600,6 +614,32 @@ impl SymbolTable {
                 }
             }
         }
+
+        if let Some(events) = json.get("object_events").and_then(|v| v.as_array()) {
+            for (index, event) in events.iter().enumerate() {
+                if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
+                    let val = index as i64;
+                    self.symbols.insert(id.to_string(), val);
+                    self.value_to_names
+                        .entry(val)
+                        .or_default()
+                        .push(id.to_string());
+                    self.symbol_to_file
+                        .insert(id.to_string(), path.to_path_buf());
+                    count += 1;
+                }
+            }
+        }
+
+        Ok(count)
+    }
+
+    pub fn load_events_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path)?;
+        let json: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let mut count = 0;
 
         if let Some(events) = json.get("object_events").and_then(|v| v.as_array()) {
             for (index, event) in events.iter().enumerate() {

@@ -289,10 +289,10 @@ impl Workspace {
             symbols.load_headers_from_dir(&build_text_bank)?;
         }
 
-        let build_field_events = root.join("build/res/field/events");
-        if build_field_events.exists() {
-            symbols.load_headers_from_dir(&build_field_events)?;
-        }
+        // NOTE: We intentionally do NOT load build/res/field/events headers here.
+        // Those contain per-map LOCALID_* definitions that conflict across maps.
+        // Each script should load its own events header via #include resolution
+        // in collect_constants_for_file() or collect_constants_for_source().
 
         Ok(())
     }
@@ -303,6 +303,7 @@ impl Workspace {
     ) -> std::io::Result<SymbolTable> {
         let mut include_dirs = Vec::new();
         if self.project_type == ProjectType::Decomp {
+            include_dirs.push(self.project_path.clone());
             include_dirs.push(self.project_path.join("include"));
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
@@ -319,6 +320,7 @@ impl Workspace {
     ) -> std::io::Result<SymbolTable> {
         let mut include_dirs = Vec::new();
         if self.project_type == ProjectType::Decomp {
+            include_dirs.push(self.project_path.clone());
             include_dirs.push(self.project_path.join("include"));
             include_dirs.push(self.project_path.join("res/field/scripts"));
         }
