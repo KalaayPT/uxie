@@ -9,7 +9,7 @@
 //! The [`RomHeader`] struct automatically detects the source format and provides
 //! a unified interface for accessing header data.
 
-use crate::game::{Game, GameFamily};
+use crate::game::{Game, GameFamily, GameLanguage};
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -405,6 +405,14 @@ impl RomHeader {
             'I' => Some("Italy"),
             _ => None,
         })
+    }
+
+    pub fn detect_language(&self) -> GameLanguage {
+        self.game_code
+            .chars()
+            .nth(3)
+            .map(GameLanguage::from_region_code)
+            .unwrap_or_default()
     }
 }
 

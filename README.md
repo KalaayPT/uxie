@@ -23,6 +23,14 @@ ROM data from DSPRE projects and decompilation sources.
   - [event & encounter](#event--encounter)
   - [symbols](#symbols)
   - [resolve-script](#resolve-script)
+  - [personal](#personal)
+  - [move](#move)
+  - [item](#item)
+  - [trainer](#trainer)
+  - [evolution](#evolution)
+  - [learnset](#learnset)
+  - [egg-moves](#egg-moves)
+  - [Working Without Decompilation Sources](#working-without-decompilation-sources)
 - [Integration](#integration)
 - [Library Usage](#library-usage-1)
   - [High-Level Workspace](#high-level-workspace)
@@ -30,6 +38,7 @@ ROM data from DSPRE projects and decompilation sources.
   - [Reading ROM Headers](#reading-rom-headers)
   - [Reading Map Headers](#reading-map-headers)
   - [Working with DSPRE Projects](#working-with-dspre-projects)
+  - [GameStrings API](#gamestrings-api)
   - [Parsing C Headers](#parsing-c-headers)
 - [Supported Games](#supported-games)
 - [License](#license)
@@ -73,6 +82,7 @@ Performance benchmarks on a typical development machine:
 - **Smart Discovery**: Automatically detects game version, internal project names, and table offsets. No manual configuration required for standard projects.
 - **Unified ROM Access**: Auto-detects and reads data from DSPRE projects and decompilation sources.
 - **High-Level Workspace**: Unified API for managing symbols, script mappings, and text banks across a project
+- **GameStrings Support**: Automatic name resolution for species, items, moves, abilities, and types from DSPRE text archives when decompilation sources aren't available
 - **Full C Expression Evaluation**: Pratt parser implementation with correct operator precedence for all C operators (`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`, `~`, `!`, parentheses)
 - **Parallel Loading**: Multi-threaded header file loading via rayon for significantly faster project initialization
 - **Standard HashMap API**: Public getters return `std::collections::HashMap` for easy interoperability with Rust's standard library
@@ -218,6 +228,208 @@ Bidirectionally resolve constants within a script file (Names -> Values AND Valu
 uxie resolve-script game_script.s --decomp /path/to/pokeplatinum/
 ```
 
+### personal
+
+Query Pokémon personal/base stats data by species ID or name.
+
+```shell
+# Query by species ID
+uxie personal 25
+
+# Query by species name (works without decomp flag)
+uxie personal pikachu
+
+# Query by species name from specific DSPRE project
+uxie personal charizard -p /path/to/my-dspre-project/
+
+# Output as JSON
+uxie personal bulbasaur --json
+```
+
+**Example Output:**
+```text
+Personal Data 25 (Platinum)
+========================
+Species:         PIKACHU
+HP:              35
+Attack:          55
+Defense:         30
+Speed:           90
+Sp. Attack:      50
+Sp. Defense:     40
+Type 1:          ELECTRIC
+Type 2:          ELECTRIC
+Catch Rate:      190
+Base Exp:        82
+Ability 1:       Static
+... more fields ...
+```
+
+### move
+
+Query move data by ID or name.
+
+```shell
+uxie move thunderbolt
+uxie move 85 -p /path/to/dspre-project/
+uxie move flamethrower --json
+```
+
+**Example Output:**
+```text
+Move Data 85 (Platinum)
+===================
+Move:            Thunderbolt
+Effect:          6
+Split:           Special
+Power:           95
+Type:            ELECTRIC
+Accuracy:        100
+PP:              15
+Effect Chance:   10
+... more fields ...
+```
+
+### item
+
+Query item data by ID or name.
+
+```shell
+uxie item "master ball"
+uxie item 1 --json
+uxie item 300 -p /path/to/dspre-project/
+```
+
+**Example Output:**
+```text
+Item Data 1 (Platinum)
+===================
+Item:            Master Ball
+Price:           0
+Hold Effect:     0
+Hold Param:      0
+Natural Gift Pow: 0
+Fling Effect:    0
+Fling Power:     0
+Natural Gift Ty: 31
+Prevent Toss:    false
+... more fields ...
+```
+
+### trainer
+
+Query trainer data by ID.
+
+```shell
+uxie trainer 1
+uxie trainer 50 -p /path/to/dspre-project/ --json
+```
+
+**Example Output:**
+```text
+Trainer Data 1 (Platinum)
+======================
+Flags:           TrainerFlags(0x0)
+Trainer Class:   2
+Double Battle:   0
+Party Size:      1
+AI Mask:         0x00000001
+
+Party:
+  1. Lv5 STARLY (Diff=0)
+```
+
+### evolution
+
+Query evolution data by species name or ID.
+
+```shell
+uxie evolution eevee
+uxie evolution 133 --json
+```
+
+**Example Output:**
+```text
+Evolution Data for EEVEE (Platinum)
+================================
+  LevelUpNearMossRock (0) -> LEAFEON
+  LevelUpNearIceRock (0) -> GLACEON
+  UseItem (Thunderstone) -> JOLTEON
+  UseItem (Water Stone) -> VAPOREON
+  UseItem (Fire Stone) -> FLAREON
+  HappinessDay (0) -> ESPEON
+  HappinessNight (0) -> UMBREON
+```
+
+### learnset
+
+Query level-up learnset data by species.
+
+```shell
+uxie learnset pikachu
+uxie learnset 25 --json
+```
+
+**Example Output:**
+```text
+Learnset for PIKACHU (Platinum)
+==========================
+  Lv   1: ThunderShock
+  Lv   1: Growl
+  Lv   5: Tail Whip
+  Lv  10: Thunder Wave
+  Lv  13: Quick Attack
+  Lv  18: Double Team
+  Lv  21: Slam
+  ... more moves ...
+```
+
+### egg-moves
+
+Query egg move data by species (or list all species with egg moves).
+
+```shell
+# Query specific species
+uxie egg-moves pikachu
+
+# List all species with egg moves
+uxie egg-moves --json
+```
+
+**Note**: HGSS uses NARC format for egg moves (not yet supported). Platinum and DP use overlay data.
+
+### Working Without Decompilation Sources
+
+Most data commands (`personal`, `move`, `item`, `trainer`, `evolution`, `learnset`, `egg-moves`) now work **without** requiring the `-d/--decomp` flag. `uxie` automatically uses DSPRE's `expanded/textArchives/` folder to resolve names when decompilation sources aren't available.
+
+**Example workflow using only DSPRE project:**
+
+```bash
+# Works without any dspre source - uses text archives
+cd /path/to/my-dspre-project
+uxie personal pikachu
+uxie move thunderbolt --json
+uxie evolution eevee
+uxie learnset charizard
+```
+
+**When to use `-d/--decomp`:**
+
+- You have access to a decompilation project (e.g., pokeplatinum)
+- You need to resolve custom symbols not present in vanilla text archives
+- You want the most accurate symbolic names (decomp sources are authoritative)
+
+**Fallback behavior:**
+
+When both decomp and text archives are available, `uxie` tries decomp first, then falls back to text archives:
+
+```bash
+# Uses decomp symbols first, falls back to text archives if needed
+uxie personal CustomMon -p . -d /path/to/pokeplatinum/
+```
+
+**Note**: Type names, species names, move names, item names, and ability names are all resolved from text archives when decomp is not provided.
+
 ## Integration
 
 `uxie` is designed to bridge the gap between different toolchains in the Gen 4
@@ -340,6 +552,36 @@ let workspace = Workspace::open("path/to/dspre-project")?;
 println!("Project Type: {:?}", workspace.project_type); // Dspre
 println!("Detected Game: {:?}", workspace.game);
 ```
+
+### GameStrings API
+
+The `GameStrings` struct provides name resolution for game data without requiring decompilation sources. It automatically loads text archives from DSPRE's `expanded/textArchives/` folder (Chatot JSON format).
+
+```rust
+use uxie::{Workspace, GameStrings};
+
+// GameStrings is automatically loaded when opening a DSPRE workspace
+let workspace = Workspace::open("path/to/dspre-project")?;
+
+// Get species name by ID (supports all games: Platinum, DP, HGSS)
+if let Some(name) = workspace.game_strings.get_species_name(25) {
+    println!("Species #25: {}", name); // "PIKACHU"
+}
+
+// Get species ID by name (case-insensitive)
+if let Some(id) = workspace.game_strings.get_species_id("Pikachu") {
+    println!("Pikachu ID: {}", id); // 25
+}
+
+// All lookup methods support:
+// - get_species_name/id()
+// - get_move_name/id()
+// - get_item_name/id()
+// - get_ability_name/id()
+// - get_type_name/id()
+```
+
+**Fallback behavior**: When both a `SymbolTable` (from decomp) and `GameStrings` (from text archives) are available, the CLI automatically tries the SymbolTable first, then falls back to GameStrings. This allows name resolution to work even without decompilation sources.
 
 ### Parsing C Headers
 

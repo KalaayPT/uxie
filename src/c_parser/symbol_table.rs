@@ -280,6 +280,20 @@ impl SymbolTable {
             self.pending.insert(name, value);
             return;
         }
+        if let Some(val) = crate::c_parser::defines::eval_expr_with_context(
+            val_trimmed,
+            &self.pending,
+            &self.symbols,
+            &self.eval_cache,
+        ) {
+            self.symbols.insert(name.clone(), val);
+            self.value_to_names
+                .entry(val)
+                .or_default()
+                .push(name.clone());
+            self.pending.insert(name, value);
+            return;
+        }
         self.pending.insert(name, value);
     }
 
@@ -288,6 +302,15 @@ impl SymbolTable {
         for v in &e.variants {
             if let Some(val) = v.value {
                 current = val;
+            } else if let Some(ref raw) = v.raw_value {
+                if let Some(val) = crate::c_parser::defines::eval_expr_with_context(
+                    raw,
+                    &self.pending,
+                    &self.symbols,
+                    &self.eval_cache,
+                ) {
+                    current = val;
+                }
             }
             self.symbols.insert(v.name.clone(), current);
             self.value_to_names
@@ -314,11 +337,11 @@ impl SymbolTable {
         path: &Path,
         tag: SymbolTag,
     ) -> std::io::Result<()> {
-        for def in parse_defines(content) {
-            self.process_define(def.name, def.value, path, tag.clone());
-        }
         for e in parse_enums(content) {
             self.process_enum(e, path, tag.clone());
+        }
+        for def in parse_defines(content) {
+            self.process_define(def.name, def.value, path, tag.clone());
         }
         Ok(())
     }
@@ -765,7 +788,9 @@ impl SymbolTable {
     pub fn extend(&mut self, other: SymbolTable) {
         self.symbols.extend(other.symbols);
         self.pending.extend(other.pending);
-        self.value_to_names.extend(other.value_to_names);
+        for (val, names) in other.value_to_names {
+            self.value_to_names.entry(val).or_default().extend(names);
+        }
         self.symbol_to_file.extend(other.symbol_to_file);
         self.symbol_to_tags.extend(other.symbol_to_tags);
         self.loaded_files.extend(other.loaded_files);

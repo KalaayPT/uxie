@@ -133,30 +133,49 @@
 
 pub mod c_parser;
 pub mod ds_rom;
+pub mod egg_move_data;
 pub mod encounter_file;
 pub mod error;
 pub mod event_file;
+pub mod evolution_data;
 pub mod game;
+pub mod item_data;
+pub mod learnset_data;
 pub mod map_header;
+pub mod move_data;
 pub mod narc;
+pub mod personal_data;
 pub mod provider;
 pub mod rom_header;
 pub mod script_file;
 pub mod text_bank;
+pub mod trainer_data;
 pub mod workspace;
 
 pub use c_parser::SymbolTable;
 pub use ds_rom::{DsRomArm9Config, DsRomToolProject, DspreProject};
+pub use egg_move_data::{EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR, EggMoveData, EggMoveEntry};
 pub use encounter_file::{BinaryEncounterFile, JsonEncounterFile};
 pub use error::{Result, UxieError};
 pub use event_file::{
     BgEventBinary, BgEventJson, BinaryEventFile, CoordEventBinary, CoordEventJson, JsonEventFile,
     ObjectEventBinary, ObjectEventJson, WarpEventBinary, WarpEventJson,
 };
-pub use game::{Game, GameFamily};
+pub use evolution_data::{
+    EVOLUTION_FILE_SIZE, EVOLUTIONS_PER_SPECIES, EvolutionData, EvolutionEntry, EvolutionMethod,
+};
+pub use game::{Game, GameFamily, GameLanguage};
+pub use item_data::{BattlePocket, FieldPocket, ITEM_DATA_SIZE, ItemData, ItemPartyUseParam};
+pub use learnset_data::{LEARNSET_TERMINATOR, LearnsetData, LearnsetEntry};
 pub use map_header::{MapHeader, MapHeaderJson};
+pub use move_data::{MOVE_DATA_SIZE, MoveData, MoveFlags, MoveSplit};
+pub use narc::Narc;
+pub use personal_data::{PERSONAL_DATA_SIZE, PersonalData};
 pub use provider::{Arm9Provider, DataProvider};
 pub use rom_header::RomHeader;
 pub use script_file::ScriptTable;
-pub use text_bank::TextBankTable;
+pub use text_bank::{GameStrings, TextBankTable};
+pub use trainer_data::{
+    AiFlags, PartyPokemon, TRAINER_PROPERTIES_SIZE, TrainerData, TrainerFlags, TrainerProperties,
+};
 pub use workspace::{ProjectType, Workspace};

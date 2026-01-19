@@ -12,6 +12,7 @@ static RE_VARIANT: LazyLock<Regex> =
 pub struct CEnumVariant {
     pub name: String,
     pub value: Option<i64>,
+    pub raw_value: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,8 +66,8 @@ pub fn parse_enums(source: &str) -> Vec<CEnum> {
 
             if let Some(var_caps) = RE_VARIANT.captures(line) {
                 let var_name = var_caps[1].to_string();
-                let value = var_caps.get(2).and_then(|m| {
-                    let v = m.as_str().trim();
+                let raw_value = var_caps.get(2).map(|m| m.as_str().trim().to_string());
+                let value = raw_value.as_ref().and_then(|v| {
                     if v.starts_with("0x") || v.starts_with("0X") {
                         i64::from_str_radix(&v[2..], 16).ok()
                     } else {
@@ -76,6 +77,7 @@ pub fn parse_enums(source: &str) -> Vec<CEnum> {
                 variants.push(CEnumVariant {
                     name: var_name,
                     value,
+                    raw_value,
                 });
             }
         }

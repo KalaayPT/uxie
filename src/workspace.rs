@@ -8,7 +8,7 @@ use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::ScriptTable;
-use crate::text_bank::TextBankTable;
+use crate::text_bank::{GameStrings, TextBankTable};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -27,6 +27,7 @@ pub struct Workspace {
     pub symbols: Arc<SymbolTable>,
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
+    pub game_strings: GameStrings,
     pub source_manager: SourceManager,
     location_names: Option<Vec<String>>,
     internal_names: Option<Vec<String>>,
@@ -183,6 +184,9 @@ impl Workspace {
             (GameFamily::HGSS, _) => (0xF6BE0, 540),
         };
 
+        let game_strings = GameStrings::load_from_dspre(&path, family, header.detect_language())
+            .unwrap_or_default();
+
         let sm = SourceManager::new();
         Ok(Self {
             project_path: path,
@@ -193,6 +197,7 @@ impl Workspace {
             symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings,
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -243,6 +248,7 @@ impl Workspace {
             symbols,
             scripts,
             text_banks,
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -404,6 +410,7 @@ mod tests {
             symbols: Arc::new(symbols),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -431,6 +438,7 @@ mod tests {
             symbols: Arc::new(symbols),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -454,6 +462,7 @@ mod tests {
             symbols: Arc::new(symbols),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -477,6 +486,7 @@ mod tests {
             symbols: Arc::new(symbols),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: None,
             internal_names: Some(vec!["D01R0101".to_string(), "D02R0102".to_string()]),
@@ -504,6 +514,7 @@ mod tests {
             symbols: Arc::new(symbols),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: Some(vec![
                 "Twinleaf Town".to_string(),
@@ -541,6 +552,7 @@ mod tests {
             symbols: Arc::new(symbols),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,

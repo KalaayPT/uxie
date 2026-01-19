@@ -1,11 +1,11 @@
-//! Nintendo Archive (NARC) file format reader
+//! Nintendo Archive (NARC) file format reader and writer
 //!
 //! NARC is the archive format used extensively in Pokemon Gen 4 games
 //! for packing multiple files into a single archive.
 
 use crate::error::{Result, UxieError};
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::io::{Read, Seek, SeekFrom};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use std::io::{Read, Seek, SeekFrom, Write};
 
 #[derive(Debug)]
 pub struct Narc {
@@ -58,6 +58,55 @@ impl Narc {
         }
 
         Ok(Self { members })
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let entry_count = self.members.len() as u32;
+        let btaf_size = 12 + entry_count * 8;
+        let btnf_size = 16u32;
+
+        let mut file_offsets = Vec::with_capacity(self.members.len());
+        let mut current_offset = 0u32;
+        for data in &self.members {
+            file_offsets.push((current_offset, current_offset + data.len() as u32));
+            current_offset += data.len() as u32;
+        }
+        let gmif_size = 8 + current_offset;
+        let total_size = 16 + btaf_size + btnf_size + gmif_size;
+
+        let mut buf = Vec::with_capacity(total_size as usize);
+
+        buf.extend_from_slice(b"NARC");
+        buf.write_u16::<LittleEndian>(0xFFFE).unwrap();
+        buf.write_u16::<LittleEndian>(0x0100).unwrap();
+        buf.write_u32::<LittleEndian>(total_size).unwrap();
+        buf.write_u16::<LittleEndian>(16).unwrap();
+        buf.write_u16::<LittleEndian>(3).unwrap();
+
+        buf.extend_from_slice(b"BTAF");
+        buf.write_u32::<LittleEndian>(btaf_size).unwrap();
+        buf.write_u32::<LittleEndian>(entry_count).unwrap();
+        for (start, end) in &file_offsets {
+            buf.write_u32::<LittleEndian>(*start).unwrap();
+            buf.write_u32::<LittleEndian>(*end).unwrap();
+        }
+
+        buf.extend_from_slice(b"BTNF");
+        buf.write_u32::<LittleEndian>(btnf_size).unwrap();
+        buf.extend_from_slice(&[0u8; 8]);
+
+        buf.extend_from_slice(b"GMIF");
+        buf.write_u32::<LittleEndian>(gmif_size).unwrap();
+        for data in &self.members {
+            buf.extend_from_slice(data);
+        }
+
+        buf
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        writer.write_all(&self.to_bytes())?;
+        Ok(())
     }
 }
 
@@ -192,5 +241,48 @@ mod tests {
         let result = Narc::from_binary(&mut cursor);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_roundtrip_single_file() {
+        let file_content = b"Test data for roundtrip";
+        let narc_data = create_minimal_narc(&[file_content]);
+        let mut cursor = Cursor::new(narc_data);
+
+        let narc = Narc::from_binary(&mut cursor).unwrap();
+        let written = narc.to_bytes();
+        let mut cursor2 = Cursor::new(written);
+        let narc2 = Narc::from_binary(&mut cursor2).unwrap();
+
+        assert_eq!(narc.members, narc2.members);
+    }
+
+    #[test]
+    fn test_roundtrip_multiple_files() {
+        let files: Vec<&[u8]> = vec![b"First", b"Second file", b"Third"];
+        let narc_data = create_minimal_narc(&files);
+        let mut cursor = Cursor::new(narc_data);
+
+        let narc = Narc::from_binary(&mut cursor).unwrap();
+        let written = narc.to_bytes();
+        let mut cursor2 = Cursor::new(written);
+        let narc2 = Narc::from_binary(&mut cursor2).unwrap();
+
+        assert_eq!(narc.members.len(), 3);
+        assert_eq!(narc.members, narc2.members);
+    }
+
+    #[test]
+    fn test_roundtrip_empty_narc() {
+        let narc_data = create_minimal_narc(&[]);
+        let mut cursor = Cursor::new(narc_data);
+
+        let narc = Narc::from_binary(&mut cursor).unwrap();
+        let written = narc.to_bytes();
+        let mut cursor2 = Cursor::new(written);
+        let narc2 = Narc::from_binary(&mut cursor2).unwrap();
+
+        assert_eq!(narc.members.len(), 0);
+        assert_eq!(narc.members, narc2.members);
     }
 }

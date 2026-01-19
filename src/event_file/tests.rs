@@ -51,11 +51,11 @@ mod tests {
             }],
         };
 
-        let mut buffer = Vec::new();
+        let mut buffer = Cursor::new(Vec::new());
         file.to_binary(&mut buffer).unwrap();
 
-        let mut reader = Cursor::new(&buffer);
-        let decoded = BinaryEventFile::from_binary(&mut reader).unwrap();
+        buffer.set_position(0);
+        let decoded = BinaryEventFile::from_binary(&mut buffer).unwrap();
 
         assert_eq!(file.bg_events, decoded.bg_events);
         assert_eq!(file.object_events, decoded.object_events);

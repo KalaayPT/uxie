@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use uxie::{
-    BinaryEncounterFile, DspreProject, GameFamily, JsonEncounterFile, MapHeader, MapHeaderJson,
-    RomHeader, SymbolTable, Workspace,
+    BinaryEncounterFile, DspreProject, EggMoveData, EvolutionData, EvolutionMethod, GameFamily,
+    GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeader, MapHeaderJson, MoveData,
+    Narc, PersonalData, RomHeader, SymbolTable, TrainerData, Workspace,
 };
 
 #[derive(Parser)]
@@ -79,6 +80,55 @@ enum Commands {
         #[arg(short, long, default_value = ".")]
         decomp: PathBuf,
     },
+
+    Personal {
+        id: String,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
+
+    Move {
+        id: String,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
+
+    Item {
+        id: String,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
+
+    Trainer {
+        id: u16,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
+
+    Evolution {
+        id: String,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
+
+    Learnset {
+        id: String,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
+
+    EggMoves {
+        species: Option<String>,
+
+        #[command(flatten)]
+        args: ProjectArgs,
+    },
 }
 
 fn main() {
@@ -98,6 +148,17 @@ fn main() {
             json,
         } => cmd_parse_header(&path, only_defines, only_enums, json),
         Commands::ResolveScript { path, decomp } => cmd_resolve_script(&path, &decomp),
+        Commands::Personal { id, args } => cmd_personal(&id, &args.project, args.decomp, args.json),
+        Commands::Move { id, args } => cmd_move(&id, &args.project, args.decomp, args.json),
+        Commands::Item { id, args } => cmd_item(&id, &args.project, args.decomp, args.json),
+        Commands::Trainer { id, args } => cmd_trainer(id, &args.project, args.decomp, args.json),
+        Commands::Evolution { id, args } => {
+            cmd_evolution(&id, &args.project, args.decomp, args.json)
+        }
+        Commands::Learnset { id, args } => cmd_learnset(&id, &args.project, args.decomp, args.json),
+        Commands::EggMoves { species, args } => {
+            cmd_egg_moves(species, &args.project, args.decomp, args.json)
+        }
     };
 
     if let Err(e) = result {
@@ -414,6 +475,7 @@ fn load_symbols_from_decomp(
     } else {
         let _ = symbols.load_headers_from_dir(d.join("include/constants"));
         let _ = symbols.load_headers_from_dir(d.join("generated"));
+        let _ = symbols.load_headers_from_dir(d.join("build/generated"));
     }
     Ok(())
 }
@@ -546,5 +608,596 @@ fn print_map_header(header: &MapHeader, id: u16, symbols: &SymbolTable, ws: &Wor
             );
             println!("Flags:           0x{:02X}", h.flags);
         }
+    }
+}
+
+fn cmd_personal(
+    id: &str,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
+
+    let narc_path = project_path.join("data/poketool/personal/pl_personal.narc");
+    let narc = load_narc(&narc_path)?;
+
+    let data = narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Personal data ID {} out of range", id))?;
+
+    let mut cursor = std::io::Cursor::new(data);
+    let personal = PersonalData::from_binary(&mut cursor)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&personal)?);
+    } else {
+        let gs = &ws.game_strings;
+        let symbols = &ws.symbols;
+        let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+        println!("Personal Data {} (Platinum)", id);
+        println!("========================");
+        println!("Species:         {}", resolve(id, "SPECIES_"));
+        println!("HP:              {}", personal.hp);
+        println!("Attack:          {}", personal.attack);
+        println!("Defense:         {}", personal.defense);
+        println!("Speed:           {}", personal.speed);
+        println!("Sp. Attack:      {}", personal.sp_attack);
+        println!("Sp. Defense:     {}", personal.sp_defense);
+        println!(
+            "Type 1:          {}",
+            resolve(personal.type1 as u16, "TYPE_")
+        );
+        println!(
+            "Type 2:          {}",
+            resolve(personal.type2 as u16, "TYPE_")
+        );
+        println!("Catch Rate:      {}", personal.catch_rate);
+        println!("Base Exp:        {}", personal.base_exp);
+        println!(
+            "Ability 1:       {}",
+            resolve(personal.ability1 as u16, "ABILITY_")
+        );
+        println!(
+            "Ability 2:       {}",
+            resolve(personal.ability2 as u16, "ABILITY_")
+        );
+        println!("Gender Ratio:    {}", personal.gender_ratio);
+        println!("Egg Cycles:      {}", personal.egg_cycles);
+        println!("Base Friendship: {}", personal.base_friendship);
+        println!("Growth Rate:     {}", personal.growth_rate);
+        println!(
+            "Egg Group 1:     {}",
+            resolve(personal.egg_group1 as u16, "EGG_GROUP_")
+        );
+        println!(
+            "Egg Group 2:     {}",
+            resolve(personal.egg_group2 as u16, "EGG_GROUP_")
+        );
+    }
+
+    Ok(())
+}
+
+fn cmd_move(
+    id: &str,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let id = resolve_id(id, "MOVE_", &ws.symbols, &ws.game_strings)?;
+
+    let narc_path = project_path.join("data/poketool/waza/pl_waza_tbl.narc");
+    let narc = load_narc(&narc_path)?;
+
+    let data = narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Move data ID {} out of range", id))?;
+
+    let mut cursor = std::io::Cursor::new(data);
+    let move_data = MoveData::from_binary(&mut cursor)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&move_data)?);
+    } else {
+        let gs = &ws.game_strings;
+        let symbols = &ws.symbols;
+        let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+        println!("Move Data {} (Platinum)", id);
+        println!("===================");
+        println!("Move:            {}", resolve(id, "MOVE_"));
+        println!("Effect:          {}", move_data.battle_effect);
+        println!("Split:           {:?}", move_data.split);
+        println!("Power:           {}", move_data.power);
+        println!(
+            "Type:            {}",
+            resolve(move_data.move_type as u16, "TYPE_")
+        );
+        println!("Accuracy:        {}", move_data.accuracy);
+        println!("PP:              {}", move_data.pp);
+        println!("Effect Chance:   {}", move_data.side_effect_chance);
+        println!("Target:          {}", move_data.target);
+        println!("Priority:        {}", move_data.priority);
+        println!("Flags:           {:?}", move_data.flags);
+        println!("Contest Effect:  {}", move_data.contest_appeal);
+        println!("Contest Type:    {}", move_data.contest_condition);
+    }
+
+    Ok(())
+}
+
+fn cmd_item(
+    id: &str,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let id = resolve_id(id, "ITEM_", &ws.symbols, &ws.game_strings)?;
+
+    let narc_path = project_path.join("data/itemtool/itemdata/pl_item_data.narc");
+    let narc = load_narc(&narc_path)?;
+
+    let data = narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Item data ID {} out of range", id))?;
+
+    let mut cursor = std::io::Cursor::new(data);
+    let item = ItemData::from_binary(&mut cursor)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&item)?);
+    } else {
+        let gs = &ws.game_strings;
+        let symbols = &ws.symbols;
+        let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+        println!("Item Data {} (Platinum)", id);
+        println!("===================");
+        println!("Item:            {}", resolve(id, "ITEM_"));
+        println!("Price:           {}", item.price);
+        println!("Hold Effect:     {}", item.hold_effect);
+        println!("Hold Param:      {}", item.hold_effect_param);
+        println!("Natural Gift Pow: {}", item.natural_gift_power);
+        println!("Fling Effect:    {}", item.fling_effect);
+        println!("Fling Power:     {}", item.fling_power);
+        println!(
+            "Natural Gift Ty: {}",
+            resolve(item.natural_gift_type as u16, "TYPE_")
+        );
+        println!("Prevent Toss:    {}", item.prevent_toss);
+        println!("Is Selectable:   {}", item.is_selectable);
+        println!("Field Pocket:    {:?}", item.field_pocket);
+        println!("Battle Pocket:   {:?}", item.battle_pocket);
+        println!("Field Function:  {}", item.field_use_func);
+        println!("Battle Function: {}", item.battle_use_func);
+        println!("Party Use:       {}", item.party_use);
+    }
+
+    Ok(())
+}
+
+fn cmd_trainer(
+    id: u16,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let trdata_path = project_path.join("data/poketool/trainer/trdata.narc");
+    let trpoke_path = project_path.join("data/poketool/trainer/trpoke.narc");
+
+    let trdata_narc = load_narc(&trdata_path)?;
+    let trpoke_narc = load_narc(&trpoke_path)?;
+
+    let props_data = trdata_narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Trainer data ID {} out of range", id))?;
+    let party_data = trpoke_narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Trainer party ID {} out of range", id))?;
+
+    let mut props_cursor = std::io::Cursor::new(props_data);
+    let mut party_cursor = std::io::Cursor::new(party_data);
+
+    let trainer = TrainerData::from_binary_parts(&mut props_cursor, &mut party_cursor, ws.family)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&trainer)?);
+    } else {
+        let gs = &ws.game_strings;
+        let symbols = &ws.symbols;
+        let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+        println!("Trainer Data {} (Platinum)", id);
+        println!("======================");
+        println!("Flags:           {:?}", trainer.properties.flags);
+        println!(
+            "Trainer Class:   {}",
+            resolve(trainer.properties.trainer_class as u16, "TRAINERTYPE_")
+        );
+        println!("Double Battle:   {}", trainer.properties.double_battle);
+        println!("Party Size:      {}", trainer.properties.party_count);
+
+        for (i, item) in trainer.properties.items.iter().enumerate() {
+            if *item != 0 {
+                println!("Item {}:          {}", i + 1, resolve(*item, "ITEM_"));
+            }
+        }
+
+        println!("AI Mask:         {:?}", trainer.properties.ai_flags);
+
+        println!("\nParty:");
+        for (i, mon) in trainer.party.iter().enumerate() {
+            println!(
+                "  {}. Lv{} {} (Diff={})",
+                i + 1,
+                mon.level,
+                resolve(mon.species, "SPECIES_"),
+                mon.difficulty
+            );
+            if let Some(item) = mon.held_item {
+                println!("     Held: {}", resolve(item, "ITEM_"));
+            }
+            if let Some(ref moves) = mon.moves {
+                let move_strs: Vec<String> = moves
+                    .iter()
+                    .filter(|&&m| m != 0)
+                    .map(|&m| resolve(m, "MOVE_"))
+                    .collect();
+                if !move_strs.is_empty() {
+                    println!("     Moves: {}", move_strs.join(", "));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_evolution(
+    id: &str,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
+
+    let narc_path = project_path.join("data/poketool/personal/evo.narc");
+    let narc = load_narc(&narc_path)?;
+
+    let data = narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Evolution data ID {} out of range", id))?;
+
+    let mut cursor = std::io::Cursor::new(data);
+    let evo = EvolutionData::from_binary(&mut cursor)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&evo)?);
+    } else {
+        let gs = &ws.game_strings;
+        let symbols = &ws.symbols;
+        let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+        println!("Evolution Data for {} (Platinum)", resolve(id, "SPECIES_"));
+        println!("================================");
+
+        let active: Vec<_> = evo.active_evolutions().collect();
+        if active.is_empty() {
+            println!("No evolutions.");
+        } else {
+            for entry in active {
+                let method = EvolutionMethod::from(entry.method);
+                let param_str = match method {
+                    EvolutionMethod::UseItem
+                    | EvolutionMethod::UseItemMale
+                    | EvolutionMethod::UseItemFemale
+                    | EvolutionMethod::TradeWithItem
+                    | EvolutionMethod::LevelUpWithItem => resolve(entry.param, "ITEM_"),
+                    EvolutionMethod::LevelUp
+                    | EvolutionMethod::LevelUpMale
+                    | EvolutionMethod::LevelUpFemale => {
+                        format!("Lv{}", entry.param)
+                    }
+                    EvolutionMethod::LevelUpWithPartyMember => resolve(entry.param, "SPECIES_"),
+                    EvolutionMethod::LevelUpWithMoveType => resolve(entry.param, "TYPE_"),
+                    _ => entry.param.to_string(),
+                };
+                println!(
+                    "  {} ({}) -> {}",
+                    method,
+                    param_str,
+                    resolve(entry.target_species, "SPECIES_")
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_learnset(
+    id: &str,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
+
+    let narc_path = project_path.join("data/poketool/personal/wotbl.narc");
+    let narc = load_narc(&narc_path)?;
+
+    let data = narc
+        .members
+        .get(id as usize)
+        .ok_or_else(|| format!("Learnset data ID {} out of range", id))?;
+
+    let mut cursor = std::io::Cursor::new(data);
+    let learnset = LearnsetData::from_binary(&mut cursor)?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&learnset)?);
+    } else {
+        let gs = &ws.game_strings;
+        let symbols = &ws.symbols;
+        let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+        println!("Learnset for {} (Platinum)", resolve(id, "SPECIES_"));
+        println!("==========================");
+
+        if learnset.entries.is_empty() {
+            println!("No level-up moves.");
+        } else {
+            for entry in &learnset.entries {
+                println!(
+                    "  Lv {:3}: {}",
+                    entry.level,
+                    resolve(entry.move_id, "MOVE_")
+                );
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn cmd_egg_moves(
+    species: Option<String>,
+    project_path: &PathBuf,
+    decomp: Option<PathBuf>,
+    json: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, &d)?;
+        ws.symbols = Arc::new(symbols);
+    }
+
+    let egg_data = load_egg_move_data(project_path, ws.family)?;
+
+    let gs = &ws.game_strings;
+    let symbols = &ws.symbols;
+    let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
+
+    let game_name = match ws.family {
+        GameFamily::Platinum => "Platinum",
+        GameFamily::DP => "Diamond/Pearl",
+        GameFamily::HGSS => "HeartGold/SoulSilver",
+    };
+
+    let species_id: Option<u16> = species.as_ref().and_then(|s| {
+        if let Ok(id) = s.parse::<u16>() {
+            Some(id)
+        } else {
+            resolve_id(s, "SPECIES_", &ws.symbols, &ws.game_strings).ok()
+        }
+    });
+
+    if let Some(species_arg) = &species {
+        let species_id = species_id.ok_or_else(|| format!("Unknown species: {}", species_arg))?;
+        if let Some(entry) = egg_data.get_by_species(species_id) {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&entry)?);
+            } else {
+                println!(
+                    "Egg Moves for {} ({})",
+                    resolve(species_id, "SPECIES_"),
+                    game_name
+                );
+                println!("===========================");
+                if entry.move_ids.is_empty() {
+                    println!("No egg moves.");
+                } else {
+                    for move_id in &entry.move_ids {
+                        println!("  {}", resolve(*move_id, "MOVE_"));
+                    }
+                }
+            }
+        } else {
+            println!("No egg move data found for species {}", species_id);
+        }
+    } else {
+        if json {
+            println!("{}", serde_json::to_string_pretty(&egg_data)?);
+        } else {
+            println!("Egg Move Data ({})", game_name);
+            println!("========================");
+            println!("Total species with egg moves: {}", egg_data.entries.len());
+            for entry in &egg_data.entries {
+                println!(
+                    "\n{} ({} moves):",
+                    resolve(entry.species_id, "SPECIES_"),
+                    entry.move_ids.len()
+                );
+                for move_id in &entry.move_ids {
+                    println!("  {}", resolve(*move_id, "MOVE_"));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn load_egg_move_data(
+    project_path: &PathBuf,
+    family: GameFamily,
+) -> Result<EggMoveData, Box<dyn std::error::Error>> {
+    match family {
+        GameFamily::HGSS => {
+            let narc_path = project_path.join("data/data/kowaza.narc");
+            if !narc_path.exists() {
+                return Err("HGSS egg moves NARC not found (data/data/kowaza.narc)".into());
+            }
+            let narc = load_narc(&narc_path)?;
+            let data = narc.members.first().ok_or("Empty kowaza.narc")?;
+            let mut cursor = std::io::Cursor::new(data);
+            Ok(EggMoveData::from_binary(&mut cursor)?)
+        }
+        GameFamily::Platinum | GameFamily::DP => {
+            let overlay_path = project_path.join("overlay/overlay_0005.bin");
+            if !overlay_path.exists() {
+                return Err("Overlay 5 not found (DPPt egg moves are in ARM9 overlay 5)".into());
+            }
+            let overlay_data = std::fs::read(&overlay_path)?;
+            let offset = match family {
+                GameFamily::Platinum => 0x29222,
+                GameFamily::DP => 0x20668,
+                GameFamily::HGSS => unreachable!(),
+            };
+            let mut cursor = std::io::Cursor::new(&overlay_data[offset..]);
+            Ok(EggMoveData::from_binary(&mut cursor)?)
+        }
+    }
+}
+
+fn load_narc(path: &PathBuf) -> Result<Narc, Box<dyn std::error::Error>> {
+    let mut file = std::fs::File::open(path)?;
+    Ok(Narc::from_binary(&mut file)?)
+}
+
+fn resolve_id(
+    input: &str,
+    prefix: &str,
+    symbols: &SymbolTable,
+    game_strings: &GameStrings,
+) -> Result<u16, String> {
+    if let Ok(id) = input.parse::<u16>() {
+        return Ok(id);
+    }
+
+    let name = if input.starts_with(prefix) {
+        input.to_uppercase()
+    } else {
+        format!("{}{}", prefix, input.to_uppercase())
+    };
+
+    if let Some(v) = symbols.resolve_constant(&name) {
+        return Ok(v as u16);
+    }
+
+    let lowercase_input = input.to_lowercase();
+    match prefix {
+        "SPECIES_" => game_strings
+            .get_species_id(&lowercase_input)
+            .ok_or_else(|| format!("Unknown species: {}", input)),
+        "ITEM_" => game_strings
+            .get_item_id(&lowercase_input)
+            .ok_or_else(|| format!("Unknown item: {}", input)),
+        "MOVE_" => game_strings
+            .get_move_id(&lowercase_input)
+            .ok_or_else(|| format!("Unknown move: {}", input)),
+        _ => Err(format!(
+            "Unknown {}: {}",
+            prefix.trim_end_matches('_').to_lowercase(),
+            input
+        )),
+    }
+}
+
+fn resolve_name(
+    id: u16,
+    prefix: &str,
+    symbols: &SymbolTable,
+    game_strings: &GameStrings,
+) -> String {
+    if let Some(name) = symbols.resolve_name(id as i64, prefix) {
+        return name;
+    }
+
+    match prefix {
+        "SPECIES_" => game_strings
+            .get_species_name(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| id.to_string()),
+        "ITEM_" => game_strings
+            .get_item_name(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| id.to_string()),
+        "MOVE_" => game_strings
+            .get_move_name(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| id.to_string()),
+        "ABILITY_" => game_strings
+            .get_ability_name(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| id.to_string()),
+        "TYPE_" => game_strings
+            .get_type_name(id)
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| id.to_string()),
+        _ => symbols
+            .resolve_name(id as i64, prefix)
+            .unwrap_or_else(|| id.to_string()),
     }
 }

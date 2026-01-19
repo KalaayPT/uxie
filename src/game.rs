@@ -2,6 +2,26 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Game language/region
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
+pub enum GameLanguage {
+    /// English (USA/Europe)
+    #[default]
+    English,
+    /// Japanese
+    Japanese,
+    /// French
+    French,
+    /// German
+    German,
+    /// Italian
+    Italian,
+    /// Spanish
+    Spanish,
+    /// Korean
+    Korean,
+}
+
 /// Game family grouping
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GameFamily {
@@ -52,5 +72,25 @@ impl GameFamily {
             GameFamily::DP | GameFamily::Platinum => 0xFFFF,
             GameFamily::HGSS => 0xFF,
         }
+    }
+}
+
+impl GameLanguage {
+    pub fn from_region_code(code: char) -> Self {
+        match code {
+            'J' => GameLanguage::Japanese,
+            'E' => GameLanguage::English,
+            'P' => GameLanguage::English, // Europe uses English text banks
+            'F' => GameLanguage::French,
+            'D' => GameLanguage::German,
+            'I' => GameLanguage::Italian,
+            'S' => GameLanguage::Spanish,
+            'K' => GameLanguage::Korean,
+            _ => GameLanguage::English,
+        }
+    }
+
+    pub fn is_japanese(&self) -> bool {
+        matches!(self, GameLanguage::Japanese)
     }
 }
