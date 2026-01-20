@@ -7,7 +7,7 @@ use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
-use crate::script_file::ScriptTable;
+use crate::script_file::{GlobalScriptTable, ScriptTable};
 use crate::text_bank::{GameStrings, TextBankTable};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -28,6 +28,7 @@ pub struct Workspace {
     pub scripts: ScriptTable,
     pub text_banks: TextBankTable,
     pub game_strings: GameStrings,
+    pub global_script_table: GlobalScriptTable,
     pub source_manager: SourceManager,
     location_names: Option<Vec<String>>,
     internal_names: Option<Vec<String>>,
@@ -187,6 +188,13 @@ impl Workspace {
         let game_strings = GameStrings::load_from_dspre(&path, family, header.detect_language())
             .unwrap_or_default();
 
+        let global_script_table = match family {
+            GameFamily::HGSS => {
+                GlobalScriptTable::from_hgss_binary_file(&arm9_path).unwrap_or_default()
+            }
+            GameFamily::Platinum | GameFamily::DP => GlobalScriptTable::platinum_hardcoded(),
+        };
+
         let sm = SourceManager::new();
         Ok(Self {
             project_path: path,
@@ -198,6 +206,7 @@ impl Workspace {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings,
+            global_script_table,
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -236,6 +245,29 @@ impl Workspace {
         symbols.resolve_all();
         let symbols = Arc::new(symbols);
 
+        let global_script_table = match family {
+            GameFamily::HGSS => {
+                let fieldmap_path = root.join("src/fieldmap.c");
+                if fieldmap_path.exists() {
+                    let content = std::fs::read_to_string(&fieldmap_path)?;
+                    GlobalScriptTable::from_hgss_decomp(&content, &symbols)
+                        .unwrap_or_default()
+                } else {
+                    GlobalScriptTable::new()
+                }
+            }
+            GameFamily::Platinum | GameFamily::DP => {
+                let script_manager_path = root.join("src/script_manager.c");
+                if script_manager_path.exists() {
+                    let content = std::fs::read_to_string(&script_manager_path)?;
+                    GlobalScriptTable::from_platinum_decomp(&content, &symbols)
+                        .unwrap_or_else(GlobalScriptTable::platinum_hardcoded)
+                } else {
+                    GlobalScriptTable::platinum_hardcoded()
+                }
+            }
+        };
+
         Ok(Self {
             project_path: root.clone(),
             project_type: ProjectType::Decomp,
@@ -249,6 +281,7 @@ impl Workspace {
             scripts,
             text_banks,
             game_strings: GameStrings::new(),
+            global_script_table,
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -413,6 +446,7 @@ mod tests {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -441,6 +475,7 @@ mod tests {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -465,6 +500,7 @@ mod tests {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
@@ -489,6 +525,7 @@ mod tests {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
             source_manager: sm,
             location_names: None,
             internal_names: Some(vec!["D01R0101".to_string(), "D02R0102".to_string()]),
@@ -517,6 +554,7 @@ mod tests {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
             source_manager: sm,
             location_names: Some(vec![
                 "Twinleaf Town".to_string(),
@@ -555,6 +593,7 @@ mod tests {
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
             source_manager: sm,
             location_names: None,
             internal_names: None,
