@@ -135,6 +135,7 @@ pub struct ItemPartyUseValues {
 
 /// Party use parameters (18 bytes: 7 bytes flags + 11 bytes values)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub struct ItemPartyUseParam {
     // Byte 0: Status healing flags
     pub heal_sleep: bool,
@@ -197,56 +198,6 @@ pub struct ItemPartyUseParam {
     pub friendship_high: i8,
 }
 
-impl Default for ItemPartyUseParam {
-    fn default() -> Self {
-        Self {
-            heal_sleep: false,
-            heal_poison: false,
-            heal_burn: false,
-            heal_freeze: false,
-            heal_paralysis: false,
-            heal_confusion: false,
-            heal_attract: false,
-            guard_spec: false,
-            revive: false,
-            revive_all: false,
-            level_up: false,
-            evolve: false,
-            atk_stages: 0,
-            def_stages: 0,
-            spatk_stages: 0,
-            spdef_stages: 0,
-            speed_stages: 0,
-            acc_stages: 0,
-            crit_stages: 0,
-            pp_up: false,
-            pp_max: false,
-            pp_restore: false,
-            pp_restore_all: false,
-            hp_restore: false,
-            give_hp_evs: false,
-            give_atk_evs: false,
-            give_def_evs: false,
-            give_speed_evs: false,
-            give_spatk_evs: false,
-            give_spdef_evs: false,
-            give_friendship_low: false,
-            give_friendship_med: false,
-            give_friendship_high: false,
-            hp_evs: 0,
-            atk_evs: 0,
-            def_evs: 0,
-            speed_evs: 0,
-            spatk_evs: 0,
-            spdef_evs: 0,
-            hp_restored: 0,
-            pp_restored: 0,
-            friendship_low: 0,
-            friendship_med: 0,
-            friendship_high: 0,
-        }
-    }
-}
 
 impl ItemPartyUseParam {
     /// Convert from binary representation

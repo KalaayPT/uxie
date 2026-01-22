@@ -579,7 +579,7 @@ fn parse_primary(
                 depth,
                 parent_resolver,
             )?;
-            Some(if val == 0 { 1 } else { 0 })
+            Some(i64::from(val == 0))
         }
         _ => None,
     }

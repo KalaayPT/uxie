@@ -253,7 +253,7 @@ impl JsonEncounterFile {
             day,
             night,
             radar,
-            rate_form0: bin.form_encounter_rates.get(0).cloned().unwrap_or(0),
+            rate_form0: bin.form_encounter_rates.first().cloned().unwrap_or(0),
             rate_form1: bin.form_encounter_rates.get(1).cloned().unwrap_or(0),
             rate_form2: bin.form_encounter_rates.get(2).cloned().unwrap_or(0),
             rate_form3: bin.form_encounter_rates.get(3).cloned().unwrap_or(0),

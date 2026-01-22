@@ -11,7 +11,7 @@ pub struct CInclude {
 pub fn parse_includes(source: &str) -> Vec<CInclude> {
     let mut includes = Vec::new();
 
-    let system_pattern = Regex::new(r#"#include\s*<([^>]+)>"#).unwrap();
+    let system_pattern = Regex::new(r"#include\s*<([^>]+)>").unwrap();
     let local_pattern = Regex::new(r#"#include\s*"([^"]+)""#).unwrap();
 
     for line in source.lines() {
@@ -48,7 +48,7 @@ pub fn resolve_includes(
     if visited.contains(&canonical) {
         return resolved;
     }
-    visited.insert(canonical.clone());
+    visited.insert(canonical);
 
     let source = match std::fs::read_to_string(file_path) {
         Ok(s) => s,

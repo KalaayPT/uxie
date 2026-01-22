@@ -1066,22 +1066,20 @@ fn cmd_egg_moves(
         } else {
             println!("No egg move data found for species {}", species_id);
         }
+    } else if json {
+        println!("{}", serde_json::to_string_pretty(&egg_data)?);
     } else {
-        if json {
-            println!("{}", serde_json::to_string_pretty(&egg_data)?);
-        } else {
-            println!("Egg Move Data ({})", game_name);
-            println!("========================");
-            println!("Total species with egg moves: {}", egg_data.entries.len());
-            for entry in &egg_data.entries {
-                println!(
-                    "\n{} ({} moves):",
-                    resolve(entry.species_id, "SPECIES_"),
-                    entry.move_ids.len()
-                );
-                for move_id in &entry.move_ids {
-                    println!("  {}", resolve(*move_id, "MOVE_"));
-                }
+        println!("Egg Move Data ({})", game_name);
+        println!("========================");
+        println!("Total species with egg moves: {}", egg_data.entries.len());
+        for entry in &egg_data.entries {
+            println!(
+                "\n{} ({} moves):",
+                resolve(entry.species_id, "SPECIES_"),
+                entry.move_ids.len()
+            );
+            for move_id in &entry.move_ids {
+                println!("  {}", resolve(*move_id, "MOVE_"));
             }
         }
     }

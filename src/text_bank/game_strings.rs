@@ -244,8 +244,7 @@ fn extract_text(content: &MessageContent) -> String {
 fn normalize_name(name: &str) -> String {
     deunicode::deunicode(name)
         .to_lowercase()
-        .replace(' ', "")
-        .replace('-', "")
+        .replace([' ', '-'], "")
 }
 
 /// Build a lookup table from name -> index

@@ -443,7 +443,7 @@ impl SymbolTable {
     pub fn get_source_manager(&self) -> SourceManager {
         self.source_manager
             .clone()
-            .unwrap_or_else(SourceManager::new)
+            .unwrap_or_default()
     }
 
     pub fn resolve_name(&self, value: i64, prefix: &str) -> Option<String> {
@@ -470,7 +470,7 @@ impl SymbolTable {
                 .filter(|n| {
                     self.symbol_to_tags
                         .get(*n)
-                        .map_or(false, |tags| tags.contains(tag))
+                        .is_some_and(|tags| tags.contains(tag))
                 })
                 .min_by_key(|n| n.len())
             {
@@ -538,7 +538,7 @@ impl SymbolTable {
         let mut current_index = 0i64;
         for line in content.lines() {
             let line = line.trim();
-            if line.is_empty() || line.starts_with("//") || line.starts_with("#") {
+            if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
                 continue;
             }
             if let Some(pos) = line.find('=') {
@@ -770,8 +770,7 @@ impl SymbolTable {
             .arg(url)
             .output()?;
         if !output.status.success() {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 format!("Failed to fetch URL: {}", url),
             ));
         }
