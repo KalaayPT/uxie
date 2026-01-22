@@ -42,3 +42,78 @@ tempfile = "3.14"
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+[lints.clippy]
+# Enable pedantic and nursery lints at warn level
+# Priority -1 ensures individual lint settings override group settings
+pedantic = { level = "warn", priority = -1 }
+nursery = { level = "warn", priority = -1 }
+
+# Allow specific lints that are too noisy or not applicable
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+use_self = "allow"
+uninlined_format_args = "allow"
+option_if_let_else = "allow"
+missing_const_for_fn = "allow"
+
+# Binary parsing code requires many intentional casts between integer types
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_lossless = "allow"
+cast_possible_wrap = "allow"
+
+# Documentation lints - too pedantic for internal code
+doc_markdown = "allow"
+
+# Common in ROM parsing with similar field names (script_id, script_file_id, etc.)
+similar_names = "allow"
+
+# Style preferences that add noise without much benefit
+redundant_else = "allow"
+if_not_else = "allow"
+match_bool = "allow"
+items_after_statements = "allow"
+
+# Result/Option method chains - the suggested alternatives are often less readable
+map_unwrap_or = "allow"
+
+# Collapsible if - often intentionally structured for clarity
+collapsible_if = "allow"
+
+# Wildcard imports are sometimes appropriate (e.g., preludes, test imports)
+wildcard_imports = "allow"
+
+# These are valid patterns that clippy is overly aggressive about
+redundant_closure = "allow"
+or_fun_call = "allow"
+
+# Binary literals in ROM code often have semantic groupings that don't match clippy's expectations
+unusual_byte_groupings = "allow"
+
+# Passing small Copy types by value vs reference - let the compiler optimize
+trivially_copy_pass_by_ref = "allow"
+needless_pass_by_value = "allow"
+
+# Same-type casts sometimes needed for clarity or macro expansion
+unnecessary_cast = "allow"
+
+# Redundant closures are sometimes clearer than point-free style
+redundant_closure_for_method_calls = "allow"
+
+# cloned vs copied - both work, not worth warning about
+cloned_instead_of_copied = "allow"
+
+# let-else is newer syntax, don't force migration
+manual_let_else = "allow"
+
+# Match arms with identical bodies can be intentional for clarity
+match_same_arms = "allow"
+
+# Extension comparisons - we control the input data format
+case_sensitive_file_extension_comparisons = "allow"
+
+# Struct field initialization style preferences
+field_reassign_with_default = "allow"

@@ -1,0 +1,28 @@
+# Clippy configuration inspired by rotom's approach
+# Provides fine-grained control over Clippy lints and thresholds
+
+# Complexity thresholds
+cognitive-complexity-threshold = 30
+type-complexity-threshold = 250
+too-many-arguments-threshold = 7
+too-many-lines-threshold = 100
+
+# Performance-related thresholds
+pass-by-value-size-limit = 256
+unnecessary-box-size = 128
+vec-box-size-threshold = 4096
+
+# Import and wildcard settings
+warn-on-all-wildcard-imports = true
+
+# Allow common panic/unwrap patterns in tests
+allow-expect-in-tests = true
+allow-unwrap-in-tests = true
+allow-panic-in-tests = true
+
+# Documentation settings
+# List of valid identifiers that Clippy should not warn about in doc comments
+doc-valid-idents = [
+    "uxie",
+    "DSL",
+]
