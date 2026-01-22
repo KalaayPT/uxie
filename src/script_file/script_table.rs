@@ -1,5 +1,4 @@
 use rustc_hash::FxHashMap;
-use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Default)]
@@ -31,8 +30,8 @@ impl ScriptTable {
         Ok(())
     }
 
-    pub fn get_name(&self, id: usize) -> Option<&String> {
-        self.names.get(id)
+    pub fn get_name(&self, id: usize) -> Option<&str> {
+        self.names.get(id).map(|s| s.as_str())
     }
 
     pub fn get_id(&self, name: &str) -> Option<usize> {
@@ -41,13 +40,5 @@ impl ScriptTable {
 
     pub fn get_all_names(&self) -> &Vec<String> {
         &self.names
-    }
-
-    pub fn get_name_to_id_std(&self) -> HashMap<String, usize> {
-        let mut res = HashMap::with_capacity(self.name_to_id.len());
-        for (k, v) in &self.name_to_id {
-            res.insert(k.clone(), *v);
-        }
-        res
     }
 }

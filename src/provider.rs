@@ -24,6 +24,17 @@ pub trait DataProvider {
     fn get_map_header_count(&self) -> Result<usize>;
     /// Get the text archive ID associated with a script file
     fn get_text_archive_for_script(&self, script_id: u16) -> Result<Option<u16>>;
+    /// Find the map ID for a given script file ID
+    ///
+    /// Returns the first map ID that uses the specified script file ID,
+    /// or None if no map uses it.
+    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>>;
+
+    /// Find the map ID for a given level script file ID
+    ///
+    /// Returns the first map ID that uses the specified level script file ID,
+    /// or None if no map uses it.
+    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>>;
 }
 
 /// Provider for reading map data from ARM9 binary files
@@ -121,12 +132,17 @@ impl DataProvider for Arm9Provider {
 
     fn get_text_archive_for_script(&self, script_id: u16) -> Result<Option<u16>> {
         let headers = self.read_all_headers()?;
-        for header in headers {
-            if header.script_file_id() == script_id {
-                return Ok(Some(header.text_archive_id()));
-            }
-        }
-        Ok(None)
+        find_text_archive_in_headers(&headers, script_id)
+    }
+
+    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
+        let headers = self.read_all_headers()?;
+        find_map_by_script_file_in_headers(&headers, script_file_id)
+    }
+
+    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>> {
+        let headers = self.read_all_headers()?;
+        find_map_by_level_script_in_headers(&headers, level_script_file_id)
     }
 }
 
@@ -188,13 +204,51 @@ impl DataProvider for DecompProvider {
 
     fn get_text_archive_for_script(&self, script_id: u16) -> Result<Option<u16>> {
         let headers = self.load_all_headers()?;
-        for header in headers {
-            if header.script_file_id() == script_id {
-                return Ok(Some(header.text_archive_id()));
-            }
-        }
-        Ok(None)
+        find_text_archive_in_headers(&headers, script_id)
     }
+
+    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
+        let headers = self.load_all_headers()?;
+        find_map_by_script_file_in_headers(&headers, script_file_id)
+    }
+
+    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>> {
+        let headers = self.load_all_headers()?;
+        find_map_by_level_script_in_headers(&headers, level_script_file_id)
+    }
+}
+
+fn find_text_archive_in_headers(headers: &[MapHeader], script_id: u16) -> Result<Option<u16>> {
+    for header in headers {
+        if header.script_file_id() == script_id {
+            return Ok(Some(header.text_archive_id()));
+        }
+    }
+    Ok(None)
+}
+
+fn find_map_by_script_file_in_headers(
+    headers: &[MapHeader],
+    script_file_id: u16,
+) -> Result<Option<u16>> {
+    for (map_id, header) in headers.iter().enumerate() {
+        if header.script_file_id() == script_file_id {
+            return Ok(Some(map_id as u16));
+        }
+    }
+    Ok(None)
+}
+
+fn find_map_by_level_script_in_headers(
+    headers: &[MapHeader],
+    level_script_file_id: u16,
+) -> Result<Option<u16>> {
+    for (map_id, header) in headers.iter().enumerate() {
+        if header.level_script_id() == level_script_file_id {
+            return Ok(Some(map_id as u16));
+        }
+    }
+    Ok(None)
 }
 
 /// Find all map headers that use a specific script file
@@ -356,5 +410,22 @@ mod tests {
         let provider = Arm9Provider::platinum_us("/some/path/arm9.bin");
         assert_eq!(provider.header_count, 559);
         assert_eq!(provider.header_table_offset, 0xE601C);
+    }
+
+    #[test]
+    fn test_arm9_provider_find_map_by_script_file_id() {
+        let headers = vec![
+            create_test_pt_header(10, 100),
+            create_test_pt_header(20, 200),
+            create_test_pt_header(30, 300),
+        ];
+        let file = create_test_arm9_file(&headers);
+
+        let provider = Arm9Provider::new(file.path(), 0, 3, GameFamily::Platinum);
+
+        assert_eq!(provider.find_map_by_script_file_id(10).unwrap(), Some(0));
+        assert_eq!(provider.find_map_by_script_file_id(20).unwrap(), Some(1));
+        assert_eq!(provider.find_map_by_script_file_id(30).unwrap(), Some(2));
+        assert_eq!(provider.find_map_by_script_file_id(999).unwrap(), None);
     }
 }

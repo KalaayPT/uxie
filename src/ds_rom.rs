@@ -35,14 +35,94 @@ impl DspreProject {
         Ok(Self { root })
     }
 
+    pub fn unpacked_dir(&self) -> PathBuf {
+        self.root.join("unpacked")
+    }
+
+    pub fn scripts_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("scripts")
+    }
+
+    pub fn text_archives_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("textArchives")
+    }
+
     pub fn event_files_dir(&self) -> PathBuf {
-        self.root.join("unpacked").join("eventFiles")
+        self.unpacked_dir().join("eventFiles")
+    }
+
+    pub fn dynamic_headers_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("dynamicHeaders")
+    }
+
+    pub fn maps_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("maps")
+    }
+
+    pub fn matrices_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("matrices")
+    }
+
+    pub fn learnsets_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("learnsets")
+    }
+
+    pub fn personal_poke_data_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("personalPokeData")
+    }
+
+    pub fn trainer_properties_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("trainerProperties")
+    }
+
+    pub fn trainer_party_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("trainerParty")
+    }
+
+    pub fn area_data_dir(&self) -> PathBuf {
+        self.unpacked_dir().join("areaData")
+    }
+
+    pub fn script_file_path(&self, id: u16) -> PathBuf {
+        self.scripts_dir().join(format!("{:04}", id))
+    }
+
+    pub fn text_archive_path(&self, id: u16) -> PathBuf {
+        self.text_archives_dir().join(format!("{:04}", id))
+    }
+
+    pub fn event_file_path(&self, id: u16) -> PathBuf {
+        self.event_files_dir().join(format!("{:04}", id))
+    }
+
+    pub fn dynamic_header_path(&self, id: u16) -> PathBuf {
+        self.dynamic_headers_dir().join(format!("{:04}", id))
+    }
+
+    pub fn has_unpacked_scripts(&self) -> bool {
+        self.scripts_dir().exists()
+    }
+
+    pub fn has_unpacked_text_archives(&self) -> bool {
+        self.text_archives_dir().exists()
+    }
+
+    pub fn has_unpacked_events(&self) -> bool {
+        self.event_files_dir().exists()
     }
 
     pub fn load_event_file(&self, id: u32) -> io::Result<BinaryEventFile> {
         let path = self.event_files_dir().join(format!("{:04}", id));
         let mut file = std::fs::File::open(path)?;
         BinaryEventFile::from_binary(&mut file)
+    }
+
+    pub fn load_script_file(&self, id: u16) -> io::Result<Vec<u8>> {
+        std::fs::read(self.script_file_path(id))
+    }
+
+    pub fn load_text_archive(&self, id: u16) -> io::Result<Vec<u8>> {
+        std::fs::read(self.text_archive_path(id))
     }
 }
 

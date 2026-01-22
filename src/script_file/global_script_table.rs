@@ -1,5 +1,6 @@
 //! Global script ID to script file mapping table.
 //!
+//!
 //! Maps global script IDs (used by `CallCommonScript` and similar commands)
 //! to their corresponding script file and text bank indices.
 //!
@@ -21,6 +22,7 @@
 //! - **Platinum binary**: Hardcoded (no clean table in binary)
 
 use crate::c_parser::SymbolTable;
+use crate::script_file::COMMON_SCRIPT_THRESHOLD;
 use byteorder::{LittleEndian, ReadBytesExt};
 use regex::Regex;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
@@ -49,9 +51,8 @@ static RE_HGSS_ENTRY: LazyLock<Regex> = LazyLock::new(|| {
 /// Regex to match Platinum if-else chain entries:
 /// `if (retScriptID >= 10490) {`
 /// `    ScriptContext_Load(fieldSystem, ctx, scripts_unk_0499, TEXT_BANK_SCRATCH_OFF_CARDS);`
-static RE_PLATINUM_IF: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"if\s*\(\s*retScriptID\s*>=\s*([A-Za-z0-9_]+)\s*\)").unwrap()
-});
+static RE_PLATINUM_IF: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"if\s*\(\s*retScriptID\s*>=\s*([A-Za-z0-9_]+)\s*\)").unwrap());
 
 /// Regex to match ScriptContext_Load call
 static RE_PLATINUM_LOAD: LazyLock<Regex> = LazyLock::new(|| {
@@ -76,24 +77,24 @@ fn resolve_value(s: &str, symbols: &SymbolTable) -> Option<i64> {
 /// Entry mapping a global script ID range to a script file.
 ///
 /// Scripts with IDs >= `min_script_id` (and < the next entry's min_script_id)
-/// are loaded from `script_file_id` with text from `text_bank_id`.
+/// are loaded from `script_file_id` with text from `text_archive_id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GlobalScriptEntry {
     /// Minimum global script ID for this range (inclusive)
     pub min_script_id: u16,
     /// Script file NARC index (in fielddata/script/scr_seq)
     pub script_file_id: u16,
-    /// Text bank NARC index (in msgdata/msg)
-    pub text_bank_id: u16,
+    /// Text archive NARC index (in msgdata/msg)
+    pub text_archive_id: u16,
 }
 
 impl GlobalScriptEntry {
     /// Create a new entry
-    pub const fn new(min_script_id: u16, script_file_id: u16, text_bank_id: u16) -> Self {
+    pub const fn new(min_script_id: u16, script_file_id: u16, text_archive_id: u16) -> Self {
         Self {
             min_script_id,
             script_file_id,
-            text_bank_id,
+            text_archive_id,
         }
     }
 
@@ -101,11 +102,11 @@ impl GlobalScriptEntry {
     pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
         let min_script_id = reader.read_u16::<LittleEndian>()?;
         let script_file_id = reader.read_u16::<LittleEndian>()?;
-        let text_bank_id = reader.read_u16::<LittleEndian>()?;
+        let text_archive_id = reader.read_u16::<LittleEndian>()?;
         Ok(Self {
             min_script_id,
             script_file_id,
-            text_bank_id,
+            text_archive_id,
         })
     }
 }
@@ -171,16 +172,16 @@ impl GlobalScriptTable {
         for caps in RE_HGSS_ENTRY.captures_iter(block) {
             let script_id_sym = caps.get(1)?.as_str();
             let script_file_sym = caps.get(2)?.as_str();
-            let text_bank_sym = caps.get(3)?.as_str();
+            let text_archive_sym = caps.get(3)?.as_str();
 
             let min_script_id = symbols.resolve_constant(script_id_sym)? as u16;
             let script_file_id = symbols.resolve_constant(script_file_sym)? as u16;
-            let text_bank_id = symbols.resolve_constant(text_bank_sym)? as u16;
+            let text_archive_id = symbols.resolve_constant(text_archive_sym)? as u16;
 
             entries.push(GlobalScriptEntry::new(
                 min_script_id,
                 script_file_id,
-                text_bank_id,
+                text_archive_id,
             ));
         }
 
@@ -192,10 +193,16 @@ impl GlobalScriptTable {
     }
 
     /// Parse HGSS `sScriptBankMapping` from fieldmap.c file path.
-    pub fn from_hgss_decomp_file(path: impl AsRef<Path>, symbols: &SymbolTable) -> io::Result<Self> {
+    pub fn from_hgss_decomp_file(
+        path: impl AsRef<Path>,
+        symbols: &SymbolTable,
+    ) -> io::Result<Self> {
         let content = std::fs::read_to_string(path)?;
         Self::from_hgss_decomp(&content, symbols).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "Failed to parse sScriptBankMapping")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Failed to parse sScriptBankMapping",
+            )
         })
     }
 
@@ -226,16 +233,16 @@ impl GlobalScriptTable {
                                     (load_caps.get(1), load_caps.get(2))
                                 {
                                     let script_file_sym = script_file_match.as_str();
-                                    let text_bank_sym = text_bank_match.as_str();
+                                    let text_archive_sym = text_bank_match.as_str();
 
-                                    if let (Some(script_file_id), Some(text_bank_id)) = (
+                                    if let (Some(script_file_id), Some(text_archive_id)) = (
                                         resolve_value(script_file_sym, symbols),
-                                        resolve_value(text_bank_sym, symbols),
+                                        resolve_value(text_archive_sym, symbols),
                                     ) {
                                         entries.push(GlobalScriptEntry::new(
                                             min_script_id as u16,
                                             script_file_id as u16,
-                                            text_bank_id as u16,
+                                            text_archive_id as u16,
                                         ));
                                         break;
                                     }
@@ -314,16 +321,14 @@ impl GlobalScriptTable {
     ///
     /// Returns the entry where `script_id >= entry.min_script_id`.
     pub fn lookup(&self, script_id: u16) -> Option<&GlobalScriptEntry> {
-        self.entries
-            .iter()
-            .find(|e| script_id >= e.min_script_id)
+        self.entries.iter().find(|e| script_id >= e.min_script_id)
     }
 
     /// Check if a script ID is a global/common script (not a map script).
     ///
     /// Map scripts use IDs 1-1999, global scripts use 2000+.
     pub fn is_global_script(&self, script_id: u16) -> bool {
-        script_id >= 2000
+        script_id >= COMMON_SCRIPT_THRESHOLD
     }
 
     /// Get all entries in the table.
@@ -383,7 +388,7 @@ mod tests {
         let entry = GlobalScriptEntry::read_from(&mut cursor).unwrap();
         assert_eq!(entry.min_script_id, 2000);
         assert_eq!(entry.script_file_id, 211);
-        assert_eq!(entry.text_bank_id, 213);
+        assert_eq!(entry.text_archive_id, 213);
     }
 
     #[test]
@@ -409,7 +414,7 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         let entry = table.lookup(10500).unwrap();
         assert_eq!(entry.min_script_id, 10500);
         assert_eq!(entry.script_file_id, 263);
-        assert_eq!(entry.text_bank_id, 0x1B1);
+        assert_eq!(entry.text_archive_id, 0x1B1);
 
         let entry = table.lookup(2000).unwrap();
         assert_eq!(entry.min_script_id, 2000);
@@ -448,12 +453,12 @@ static u16 ScriptContext_LoadAndOffsetID(FieldSystem *fieldSystem, ScriptContext
         let entry = table.lookup(10490).unwrap();
         assert_eq!(entry.min_script_id, 10490);
         assert_eq!(entry.script_file_id, 499);
-        assert_eq!(entry.text_bank_id, 0x21D);
+        assert_eq!(entry.text_archive_id, 0x21D);
 
         let entry = table.lookup(2000).unwrap();
         assert_eq!(entry.min_script_id, 2000);
         assert_eq!(entry.script_file_id, 211);
-        assert_eq!(entry.text_bank_id, 0x0D5);
+        assert_eq!(entry.text_archive_id, 0x0D5);
     }
 
     #[test]

@@ -7,7 +7,9 @@ use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
-use crate::script_file::{GlobalScriptTable, ScriptTable};
+use crate::script_file::{
+    GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
+};
 use crate::text_bank::{GameStrings, TextBankTable};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -142,7 +144,7 @@ impl Workspace {
         let header = self.provider.get_map_header(map_id).ok()?;
         self.scripts
             .get_name(header.script_file_id() as usize)
-            .cloned()
+            .map(str::to_string)
     }
 
     pub fn get_symbols_for_map(&self, map_id: u16) -> Vec<String> {
@@ -151,9 +153,39 @@ impl Workspace {
     }
 
     pub fn resolve_script_id_to_name(&self, script_id: u16) -> Option<String> {
-        self.symbols
-            .resolve_name(script_id as i64, "CommonScript_")
-            .or_else(|| self.symbols.resolve_name(script_id as i64, ""))
+        if is_common_script_id(script_id) {
+            self.symbols.resolve_name(script_id as i64, "CommonScript_")
+        } else {
+            self.symbols.resolve_name(script_id as i64, "")
+        }
+    }
+
+    pub fn resolve_script(
+        &self,
+        script_id: u16,
+        map_id: Option<u16>,
+    ) -> crate::error::Result<Option<ScriptResolution>> {
+        crate::script_file::resolve_script_id(
+            script_id,
+            map_id,
+            &self.global_script_table,
+            self.provider.as_ref(),
+        )
+    }
+
+    pub fn resolve_level_script(
+        &self,
+        map_id: u16,
+    ) -> crate::error::Result<Option<ScriptResolution>> {
+        crate::script_file::resolve_level_script(
+            map_id,
+            &self.global_script_table,
+            self.provider.as_ref(),
+        )
+    }
+
+    pub fn get_map_script_info(&self, map_id: u16) -> crate::error::Result<MapScriptInfo> {
+        crate::script_file::get_script_file_info_for_map(map_id, self.provider.as_ref())
     }
 
     fn open_dspre(path: PathBuf) -> std::io::Result<Self> {
@@ -250,8 +282,7 @@ impl Workspace {
                 let fieldmap_path = root.join("src/fieldmap.c");
                 if fieldmap_path.exists() {
                     let content = std::fs::read_to_string(&fieldmap_path)?;
-                    GlobalScriptTable::from_hgss_decomp(&content, &symbols)
-                        .unwrap_or_default()
+                    GlobalScriptTable::from_hgss_decomp(&content, &symbols).unwrap_or_default()
                 } else {
                     GlobalScriptTable::new()
                 }
@@ -635,8 +666,8 @@ mod tests {
 
         let ws = Workspace::open(root).unwrap();
 
-        assert_eq!(ws.scripts.get_name(0), Some(&"script_main".to_string()));
-        assert_eq!(ws.scripts.get_name(1), Some(&"script_event".to_string()));
+        assert_eq!(ws.scripts.get_name(0), Some("script_main"));
+        assert_eq!(ws.scripts.get_name(1), Some("script_event"));
     }
 
     struct MockProvider;
@@ -653,6 +684,20 @@ mod tests {
         fn get_text_archive_for_script(
             &self,
             _script_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(None)
+        }
+
+        fn find_map_by_script_file_id(
+            &self,
+            _script_file_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(None)
+        }
+
+        fn find_map_by_level_script_file_id(
+            &self,
+            _level_script_file_id: u16,
         ) -> crate::error::Result<Option<u16>> {
             Ok(None)
         }
