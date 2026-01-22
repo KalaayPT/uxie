@@ -1,41 +1,79 @@
+//! Script ID resolution for Gen 4 Pokémon games.
+//!
+//! This module resolves script IDs to their containing files and associated
+//! metadata (text archives, event files, etc.). It handles both local scripts
+//! (ID 0-1999) that belong to specific maps and common/global scripts (ID 2000+)
+//! that are shared across the game.
+
 use crate::error::Result;
 use crate::provider::DataProvider;
 use crate::script_file::GlobalScriptTable;
 
+/// Script IDs at or above this threshold are common/global scripts.
+///
+/// Local scripts use IDs 0-1999, while common scripts use 2000+.
 pub const COMMON_SCRIPT_THRESHOLD: u16 = 2000;
 
+/// Basic information about a script file.
+///
+/// Contains the file ID and associated text archive, without map-specific data.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptFileInfo {
+    /// Index into the script NARC (`scr_seq.narc`).
     pub script_file_id: u16,
+    /// Index into the message NARC (`msg.narc`).
     pub text_archive_id: u16,
 }
 
+/// Complete script information for a map.
+///
+/// Contains all file references from a map header related to scripts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MapScriptInfo {
+    /// The map ID this information belongs to.
     pub map_id: u16,
+    /// Index into the script NARC for regular scripts.
     pub script_file_id: u16,
+    /// Index into the message NARC for text strings.
     pub text_archive_id: u16,
+    /// Index into the event NARC for NPC/trigger definitions.
     pub event_file_id: u16,
+    /// Index into the script NARC for level/init scripts.
     pub level_script_id: u16,
 }
 
+/// Result of resolving a script ID to its containing file and metadata.
+///
+/// Scripts are either common (global) scripts shared across the game,
+/// or map-specific scripts that belong to a particular location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScriptResolution {
+    /// A common/global script (ID >= 2000).
     CommonScript {
+        /// The original script ID that was resolved.
         script_id: u16,
+        /// Index into the script NARC containing this script.
         script_file_id: u16,
+        /// Index into the message NARC for text strings.
         text_archive_id: u16,
     },
+    /// A map-specific script (ID 0-1999).
     MapScript {
+        /// The original script ID that was resolved.
         script_id: u16,
+        /// The map this script belongs to.
         map_id: u16,
+        /// Index into the script NARC containing this script.
         script_file_id: u16,
+        /// Index into the message NARC for text strings.
         text_archive_id: u16,
+        /// Index into the event NARC for NPC/trigger definitions.
         event_file_id: u16,
     },
 }
 
 impl ScriptResolution {
+    /// Returns the script file ID regardless of resolution type.
     pub fn script_file_id(&self) -> u16 {
         match self {
             ScriptResolution::CommonScript { script_file_id, .. } => *script_file_id,
@@ -43,6 +81,7 @@ impl ScriptResolution {
         }
     }
 
+    /// Returns the text archive ID regardless of resolution type.
     pub fn text_archive_id(&self) -> u16 {
         match self {
             ScriptResolution::CommonScript {
@@ -54,14 +93,17 @@ impl ScriptResolution {
         }
     }
 
+    /// Returns `true` if this is a common/global script.
     pub fn is_common_script(&self) -> bool {
         matches!(self, ScriptResolution::CommonScript { .. })
     }
 
+    /// Returns `true` if this is a map-specific script.
     pub fn is_map_script(&self) -> bool {
         matches!(self, ScriptResolution::MapScript { .. })
     }
 
+    /// Returns the event file ID if this is a map script.
     pub fn event_file_id(&self) -> Option<u16> {
         match self {
             ScriptResolution::CommonScript { .. } => None,
@@ -69,6 +111,7 @@ impl ScriptResolution {
         }
     }
 
+    /// Returns the map ID if this is a map script.
     pub fn map_id(&self) -> Option<u16> {
         match self {
             ScriptResolution::CommonScript { .. } => None,
@@ -77,10 +120,19 @@ impl ScriptResolution {
     }
 }
 
+/// Returns `true` if the script ID is a common/global script (>= 2000).
 pub fn is_common_script_id(script_id: u16) -> bool {
     script_id >= COMMON_SCRIPT_THRESHOLD
 }
 
+/// Resolves a script ID to its file and metadata.
+///
+/// Use this when you know the current map ID. For common scripts (ID >= 2000),
+/// the map_id is ignored and resolution uses the global table.
+///
+/// Returns `None` if:
+/// - The script is a common script not found in the global table
+/// - The script is local but no map_id was provided
 pub fn resolve_script_id(
     script_id: u16,
     map_id: Option<u16>,
@@ -94,6 +146,14 @@ pub fn resolve_script_id(
     }
 }
 
+/// Resolves a script ID when you're in a regular script file.
+///
+/// Use this when processing a script file and you encounter a script call.
+/// The function finds the map that uses this script file to resolve local scripts.
+///
+/// Returns `None` if:
+/// - The script is a common script not found in the global table
+/// - The script is local but no map uses this script file
 pub fn resolve_script_id_by_file(
     script_id: u16,
     script_file_id: u16,
@@ -108,6 +168,15 @@ pub fn resolve_script_id_by_file(
     }
 }
 
+/// Resolves a script ID when you're in a level/init script file.
+///
+/// Level scripts can call local scripts that live in the map's *regular*
+/// script file (not the level script file). This function handles that
+/// indirection by finding the map and returning its regular script file.
+///
+/// Returns `None` if:
+/// - The script is a common script not found in the global table
+/// - No map uses this level script file
 pub fn resolve_script_id_by_level_script_file(
     script_id: u16,
     level_script_file_id: u16,
@@ -153,6 +222,10 @@ fn resolve_map_script(
     }))
 }
 
+/// Resolves a map's level/init script to its file and metadata.
+///
+/// Level scripts run automatically on map transitions. This returns
+/// information about where the level script is located.
 pub fn resolve_level_script(
     map_id: u16,
     global_table: &GlobalScriptTable,
@@ -174,6 +247,10 @@ pub fn resolve_level_script(
     }
 }
 
+/// Resolves level script information given only a level script file ID.
+///
+/// Finds the map that uses this level script file and returns its resolution.
+/// Returns `None` if no map uses this level script file.
 pub fn resolve_level_script_by_file(
     level_script_file_id: u16,
     global_table: &GlobalScriptTable,
@@ -188,6 +265,9 @@ pub fn resolve_level_script_by_file(
     resolve_level_script(map_id, global_table, provider)
 }
 
+/// Gets complete script file information for a map.
+///
+/// Returns all script-related file IDs from the map header.
 pub fn get_script_file_info_for_map(
     map_id: u16,
     provider: &dyn DataProvider,
@@ -202,6 +282,9 @@ pub fn get_script_file_info_for_map(
     })
 }
 
+/// Gets file information for a common/global script ID.
+///
+/// Returns `None` if the script ID is local (< 2000) or not found in the table.
 pub fn get_common_script_info(
     script_id: u16,
     global_table: &GlobalScriptTable,
@@ -216,6 +299,10 @@ pub fn get_common_script_info(
     })
 }
 
+/// Finds all maps that use a given script file.
+///
+/// Multiple maps can share the same script file. This returns all map IDs
+/// that reference the given script file ID in their headers.
 pub fn find_maps_for_script_file(
     script_file_id: u16,
     provider: &dyn DataProvider,
@@ -233,6 +320,10 @@ pub fn find_maps_for_script_file(
     Ok(maps)
 }
 
+/// Finds all maps that use a given level script file.
+///
+/// Multiple maps can share the same level script file. This returns all
+/// map IDs that reference the given level script file ID in their headers.
 pub fn find_maps_for_level_script_file(
     level_script_file_id: u16,
     provider: &dyn DataProvider,
