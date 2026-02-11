@@ -1,41 +1,35 @@
-use std::path::PathBuf;
-
 use uxie::Workspace;
 use uxie::script_file::{
     resolve_level_script_by_file, resolve_script_id, resolve_script_id_by_file,
     resolve_script_id_by_level_script_file,
 };
+use uxie::test_env::existing_path_from_env;
 
-const PLATINUM_DECOMP_PATH: &str = "C:/dev/pokeplatinum";
-const DSPRE_PLATINUM_PATH: &str = "C:/dev/romhacking/renHERgade platinum/pt_DSPRE_contents";
+const ENV_PLATINUM_DECOMP_PATH: &str = "UXIE_TEST_PLATINUM_DECOMP_PATH";
+const ENV_PLATINUM_DSPRE_PATH: &str = "UXIE_TEST_PLATINUM_DSPRE_PATH";
 
-fn test_decomp_workspace() -> Workspace {
-    let path = PathBuf::from(PLATINUM_DECOMP_PATH);
-    if !path.exists() {
-        panic!(
-            "pokeplatinum decompilation project not found at {}.
-            Please clone the repository from https://github.com/pret/pokeplatinum",
-            PLATINUM_DECOMP_PATH
-        );
-    }
-    Workspace::open(&path).expect("Failed to open pokeplatinum workspace")
+macro_rules! require_ws {
+    ($ws:expr) => {
+        match $ws {
+            Some(ws) => ws,
+            None => return,
+        }
+    };
 }
 
-fn test_dspre_workspace() -> Workspace {
-    let path = PathBuf::from(DSPRE_PLATINUM_PATH);
-    if !path.exists() {
-        panic!(
-            "DSPRE Platinum project not found at {}.
-            Please create or download a DSPRE project",
-            DSPRE_PLATINUM_PATH
-        );
-    }
-    Workspace::open(&path).expect("Failed to open DSPRE workspace")
+fn test_decomp_workspace() -> Option<Workspace> {
+    existing_path_from_env(ENV_PLATINUM_DECOMP_PATH, "decomp test")
+        .map(|path| Workspace::open(&path).expect("Failed to open workspace"))
+}
+
+fn test_dspre_workspace() -> Option<Workspace> {
+    existing_path_from_env(ENV_PLATINUM_DSPRE_PATH, "DSPRE test")
+        .map(|path| Workspace::open(&path).expect("Failed to open workspace"))
 }
 
 #[test]
 fn test_resolve_common_script_by_file_decomp() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let script_file_id = 211;
     let common_script_id = 2018;
@@ -58,7 +52,7 @@ fn test_resolve_common_script_by_file_decomp() {
 
 #[test]
 fn test_resolve_map_script_by_file_decomp() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider
@@ -86,7 +80,7 @@ fn test_resolve_map_script_by_file_decomp() {
 
 #[test]
 fn test_resolve_level_script_by_file_decomp() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider
@@ -113,7 +107,7 @@ fn test_resolve_level_script_by_file_decomp() {
 
 #[test]
 fn test_resolve_script_id_by_level_script_file_decomp_local() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider
@@ -146,7 +140,7 @@ fn test_resolve_script_id_by_level_script_file_decomp_local() {
 
 #[test]
 fn test_resolve_script_id_by_level_script_file_decomp_common() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider
@@ -173,7 +167,7 @@ fn test_resolve_script_id_by_level_script_file_decomp_common() {
 
 #[test]
 fn test_resolve_script_by_file_not_found_decomp() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let script_file_id = 9999;
     let local_script_id = 1;
@@ -194,7 +188,7 @@ fn test_resolve_script_by_file_not_found_decomp() {
 
 #[test]
 fn test_resolve_common_script_by_file_dspre() {
-    let ws = test_dspre_workspace();
+    let ws = require_ws!(test_dspre_workspace());
 
     let script_file_id = 211;
     let common_script_id = 2018;
@@ -217,7 +211,7 @@ fn test_resolve_common_script_by_file_dspre() {
 
 #[test]
 fn test_resolve_map_script_by_file_dspre() {
-    let ws = test_dspre_workspace();
+    let ws = require_ws!(test_dspre_workspace());
 
     let script_file_id = 100;
     let local_script_id = 1;
@@ -242,7 +236,7 @@ fn test_resolve_map_script_by_file_dspre() {
 
 #[test]
 fn test_resolve_level_script_by_file_dspre() {
-    let ws = test_dspre_workspace();
+    let ws = require_ws!(test_dspre_workspace());
 
     let header = ws
         .provider
@@ -269,7 +263,7 @@ fn test_resolve_level_script_by_file_dspre() {
 
 #[test]
 fn test_resolve_script_id_by_level_script_file_dspre() {
-    let ws = test_dspre_workspace();
+    let ws = require_ws!(test_dspre_workspace());
 
     let header = ws
         .provider
@@ -302,7 +296,7 @@ fn test_resolve_script_id_by_level_script_file_dspre() {
 
 #[test]
 fn test_old_vs_new_api_comparison() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider
@@ -340,7 +334,7 @@ fn test_old_vs_new_api_comparison() {
 
 #[test]
 fn test_find_map_by_level_script_file_id_decomp() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider
@@ -362,7 +356,7 @@ fn test_find_map_by_level_script_file_id_decomp() {
 
 #[test]
 fn test_find_map_by_level_script_file_id_dspre() {
-    let ws = test_dspre_workspace();
+    let ws = require_ws!(test_dspre_workspace());
 
     let header = ws
         .provider
@@ -384,7 +378,7 @@ fn test_find_map_by_level_script_file_id_dspre() {
 
 #[test]
 fn test_multiple_maps_same_script_file() {
-    let ws = test_decomp_workspace();
+    let ws = require_ws!(test_decomp_workspace());
 
     let header = ws
         .provider

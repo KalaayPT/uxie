@@ -160,20 +160,29 @@ mod tests {
     fn integration_dspre_map_header_jubilife() {
         use crate::GameFamily;
         use crate::provider::{Arm9Provider, DataProvider};
-        use std::path::Path;
+        let Some(dspre_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "map header integration test",
+        ) else {
+            return;
+        };
+        let Some(decomp_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "map header integration test",
+        ) else {
+            return;
+        };
+        let headers_path = decomp_path.join("build/generated");
+        let include_path = decomp_path.join("include");
 
-        let dspre_path = Path::new("/home/kalaay/Desktop/pt_DSPRE_contents");
-        let headers_path = Path::new("/home/kalaay/dev/pokeplatinum/build/generated");
-        let include_path = Path::new("/home/kalaay/dev/pokeplatinum/include");
-
-        if !dspre_path.exists() || !headers_path.exists() {
-            eprintln!("Skipping: test data not available");
+        if !dspre_path.exists() || !headers_path.exists() || !include_path.exists() {
+            eprintln!("Skipping: test data not available at configured paths");
             return;
         }
 
         let mut symbols = SymbolTable::new();
-        let _ = symbols.load_headers_from_dir(headers_path);
-        let _ = symbols.load_headers_from_dir(include_path);
+        symbols.load_headers_from_dir(&headers_path).unwrap();
+        symbols.load_headers_from_dir(&include_path).unwrap();
 
         let arm9_path = dspre_path.join("arm9.bin");
         let provider = Arm9Provider::new(&arm9_path, 0xE601C, 559, GameFamily::Platinum);

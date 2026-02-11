@@ -431,14 +431,15 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
     #[test]
     #[ignore]
     fn test_hgss_binary_real_file() {
-        let path = std::env::var("HGSS_ARM9_PATH")
-            .unwrap_or_else(|_| "C:/dev/romhacking/hg_DSPRE_contents/arm9.bin".to_string());
-        if !std::path::Path::new(&path).exists() {
-            eprintln!("Skipping test: HGSS arm9.bin not found at {}", path);
+        let Some(path) = crate::test_env::existing_path_from_env_with_fallback(
+            "UXIE_TEST_HGSS_ARM9_PATH",
+            "HGSS_ARM9_PATH",
+            "HGSS arm9 integration test",
+        ) else {
             return;
-        }
+        };
 
-        let table = GlobalScriptTable::from_hgss_binary_file(&path).unwrap();
+        let table = GlobalScriptTable::from_hgss_binary_file(path).unwrap();
         assert_eq!(table.len(), 30);
 
         let entry = table.lookup(10500).unwrap();

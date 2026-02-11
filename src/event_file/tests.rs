@@ -116,28 +116,35 @@ mod tests {
     #[ignore]
     fn integration_dspre_event_eterna_dp_gym() {
         use crate::ds_rom::DspreProject;
-        use std::path::Path;
-
-        let dspre_path = Path::new("/home/kalaay/Desktop/pt_DSPRE_contents");
-        let headers_path = Path::new("/home/kalaay/dev/pokeplatinum/build/generated");
-        let expected_path = Path::new(
-            "/home/kalaay/dev/pokeplatinum/res/field/events/events_eterna_city_dp_gym.json",
-        );
+        let Some(dspre_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "event integration test",
+        ) else {
+            return;
+        };
+        let Some(decomp_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "event integration test",
+        ) else {
+            return;
+        };
+        let headers_path = decomp_path.join("build/generated");
+        let expected_path = decomp_path.join("res/field/events/events_eterna_city_dp_gym.json");
 
         if !dspre_path.exists() || !headers_path.exists() || !expected_path.exists() {
-            eprintln!("Skipping: test data not available");
+            eprintln!("Skipping: test data not available at configured paths");
             return;
         }
 
-        let project = DspreProject::open(dspre_path).unwrap();
+        let project = DspreProject::open(&dspre_path).unwrap();
         let mut symbols = SymbolTable::new();
-        symbols.load_headers_from_dir(headers_path).unwrap();
+        symbols.load_headers_from_dir(&headers_path).unwrap();
 
         let bin_event = project.load_event_file(67).unwrap();
         let json_event = JsonEventFile::from_binary(&bin_event, &symbols);
 
         let expected: JsonEventFile =
-            serde_json::from_str(&std::fs::read_to_string(expected_path).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(&expected_path).unwrap()).unwrap();
 
         assert_eq!(json_event.bg_events.len(), expected.bg_events.len());
         assert_eq!(json_event.object_events.len(), expected.object_events.len());

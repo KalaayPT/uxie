@@ -148,6 +148,8 @@ pub mod personal_data;
 pub mod provider;
 pub mod rom_header;
 pub mod script_file;
+#[doc(hidden)]
+pub mod test_env;
 pub mod text_bank;
 pub mod trainer_data;
 pub mod workspace;

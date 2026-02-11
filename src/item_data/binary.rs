@@ -215,14 +215,22 @@ mod tests {
         use std::fs::File;
         use std::io::BufReader;
 
-        let narc_path = std::path::Path::new(
-            "/home/kalaay/Desktop/pt_DSPRE_contents/data/itemtool/itemdata/pl_item_data.narc",
-        );
+        let Some(dspre_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "item data real ROM roundtrip test",
+        ) else {
+            return;
+        };
+        let narc_path = dspre_path.join("data/itemtool/itemdata/pl_item_data.narc");
         if !narc_path.exists() {
+            eprintln!(
+                "Skipping: test data not available at {}",
+                narc_path.display()
+            );
             return;
         }
 
-        let file = File::open(narc_path).expect("Failed to open NARC");
+        let file = File::open(&narc_path).expect("Failed to open NARC");
         let mut reader = BufReader::new(file);
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load NARC");
 
