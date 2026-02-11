@@ -337,6 +337,7 @@ mod tests {
     use super::*;
     use crate::c_parser::SymbolTable;
     use crate::map_header::write_map_header_to_bytes;
+    use proptest::prelude::*;
     use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -345,6 +346,19 @@ mod tests {
         MapHeader::Pt(crate::map_header::MapHeaderPt {
             script_file_id: script_id,
             text_archive_id: text_id,
+            ..Default::default()
+        })
+    }
+
+    fn create_test_pt_header_with_level(
+        script_id: u16,
+        text_id: u16,
+        level_script_id: u16,
+    ) -> MapHeader {
+        MapHeader::Pt(crate::map_header::MapHeaderPt {
+            script_file_id: script_id,
+            text_archive_id: text_id,
+            level_script_id,
             ..Default::default()
         })
     }
@@ -662,5 +676,67 @@ mod tests {
 
         let second = provider.get_map_header(0).unwrap();
         assert_eq!(second.script_file_id(), 4);
+    }
+
+    fn pt_headers_strategy() -> impl Strategy<Value = Vec<MapHeader>> {
+        prop::collection::vec((any::<u16>(), any::<u16>(), any::<u16>()), 0..64).prop_map(
+            |triples| {
+                triples
+                    .into_iter()
+                    .map(|(script_id, text_id, level_script_id)| {
+                        create_test_pt_header_with_level(script_id, text_id, level_script_id)
+                    })
+                    .collect()
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_find_headers_using_script_matches_manual(headers in pt_headers_strategy(), script_id in any::<u16>()) {
+            let expected: Vec<usize> = headers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, h)| (h.script_file_id() == script_id).then_some(idx))
+                .collect();
+            let actual = find_headers_using_script(&headers, script_id);
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_find_headers_using_text_matches_manual(headers in pt_headers_strategy(), text_id in any::<u16>()) {
+            let expected: Vec<usize> = headers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, h)| (h.text_archive_id() == text_id).then_some(idx))
+                .collect();
+            let actual = find_headers_using_text(&headers, text_id);
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_find_map_by_script_file_returns_first_match(headers in pt_headers_strategy(), script_id in any::<u16>()) {
+            let expected = headers
+                .iter()
+                .enumerate()
+                .find_map(|(idx, h)| (h.script_file_id() == script_id).then_some(idx as u16));
+            let actual = find_map_by_script_file_in_headers(&headers, script_id).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_find_map_by_level_script_returns_first_match(headers in pt_headers_strategy(), level_script_id in any::<u16>()) {
+            let expected = headers
+                .iter()
+                .enumerate()
+                .find_map(|(idx, h)| (h.level_script_id() == level_script_id).then_some(idx as u16));
+            let actual = find_map_by_level_script_in_headers(&headers, level_script_id).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
     }
 }
