@@ -153,6 +153,7 @@ impl DataProvider for Arm9Provider {
 pub struct DecompProvider {
     pub root: PathBuf,
     pub symbols: crate::c_parser::SymbolTable,
+    pub family: GameFamily,
 }
 
 impl DecompProvider {
@@ -162,24 +163,52 @@ impl DecompProvider {
     ///
     /// * `root` - Root directory of the decompilation project
     /// * `symbols` - Pre-loaded symbol table with project constants
-    pub fn new(root: impl AsRef<Path>, symbols: crate::c_parser::SymbolTable) -> Self {
+    pub fn new(
+        root: impl AsRef<Path>,
+        symbols: crate::c_parser::SymbolTable,
+        family: GameFamily,
+    ) -> Self {
         Self {
             root: root.as_ref().to_path_buf(),
             symbols,
+            family,
         }
     }
 
+    fn map_headers_path(&self) -> PathBuf {
+        let primary = match self.family {
+            GameFamily::HGSS => self.root.join("src/data/map_headers.h"),
+            GameFamily::DP | GameFamily::Platinum => self.root.join("include/data/map_headers.h"),
+        };
+
+        if primary.exists() {
+            return primary;
+        }
+
+        let fallback = match self.family {
+            GameFamily::HGSS => self.root.join("include/data/map_headers.h"),
+            GameFamily::DP | GameFamily::Platinum => self.root.join("src/data/map_headers.h"),
+        };
+
+        if fallback.exists() { fallback } else { primary }
+    }
+
     fn load_all_headers(&self) -> Result<Vec<MapHeader>> {
-        let path = self.root.join("include/data/map_headers.h");
+        let path = self.map_headers_path();
         let content = std::fs::read_to_string(path)?;
         let parsed = crate::map_header::parse_map_headers_from_c(&content);
 
         let mut headers = Vec::new();
         for p in parsed {
-            headers.push(MapHeader::Pt(crate::map_header::parsed_to_pt_header(
-                &p,
-                &self.symbols,
-            )));
+            let header = match self.family {
+                GameFamily::HGSS => {
+                    MapHeader::HGSS(crate::map_header::parsed_to_hgss_header(&p, &self.symbols))
+                }
+                GameFamily::DP | GameFamily::Platinum => {
+                    MapHeader::Pt(crate::map_header::parsed_to_pt_header(&p, &self.symbols))
+                }
+            };
+            headers.push(header);
         }
         Ok(headers)
     }
@@ -278,7 +307,9 @@ pub fn find_headers_using_text(headers: &[MapHeader], text_id: u16) -> Vec<usize
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::c_parser::SymbolTable;
     use crate::map_header::write_map_header_to_bytes;
+    use std::fs;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -427,5 +458,108 @@ mod tests {
         assert_eq!(provider.find_map_by_script_file_id(20).unwrap(), Some(1));
         assert_eq!(provider.find_map_by_script_file_id(30).unwrap(), Some(2));
         assert_eq!(provider.find_map_by_script_file_id(999).unwrap(), None);
+    }
+
+    #[test]
+    fn test_decomp_provider_loads_pt_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_TEST] = {
+            .areaDataArchiveID = 1,
+            .unk_01 = 2,
+            .mapMatrixID = 3,
+            .scriptsArchiveID = 4,
+            .initScriptsArchiveID = 5,
+            .msgArchiveID = 6,
+            .dayMusicID = 7,
+            .nightMusicID = 8,
+            .wildEncountersArchiveID = 9,
+            .eventsArchiveID = 10,
+            .mapLabelTextID = 11,
+            .mapLabelWindowID = 12,
+            .weather = 13,
+            .cameraType = 14,
+            .mapType = 15,
+            .battleBG = 16,
+            .isBikeAllowed = TRUE,
+            .isRunningAllowed = FALSE,
+            .isEscapeRopeAllowed = TRUE,
+            .isFlyAllowed = FALSE,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+        let header = provider.get_map_header(0).unwrap();
+        match header {
+            MapHeader::Pt(h) => {
+                assert_eq!(h.script_file_id, 4);
+                assert_eq!(h.level_script_id, 5);
+                assert_eq!(h.text_archive_id, 6);
+                assert_eq!(h.flags, 0b0101);
+            }
+            _ => panic!("expected Platinum map header variant"),
+        }
+    }
+
+    #[test]
+    fn test_decomp_provider_loads_hgss_headers() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("src/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_EVERYWHERE] = {
+            .wildEncounterBank = 1,
+            .areaDataBank = 2,
+            .moveModelBank = 3,
+            .worldMapX = 4,
+            .worldMapY = 5,
+            .matrixId = 6,
+            .scriptsBank = 7,
+            .scriptHeaderBank = 8,
+            .msgBank = 9,
+            .dayMusicId = 10,
+            .nightMusicId = 11,
+            .eventsBank = 12,
+            .mapsec = 13,
+            .areaIcon = 14,
+            .momCallIntroParam = 15,
+            .isKanto = TRUE,
+            .weather = 16,
+            .mapType = 17,
+            .cameraType = 18,
+            .followMode = 2,
+            .battleBg = 19,
+            .bikeAllowed = TRUE,
+            .runningAllowed_Unused = FALSE,
+            .escapeRopeAllowed = TRUE,
+            .flyAllowed = FALSE,
+            .outgoingCalls = TRUE,
+            .incomingCalls = FALSE,
+            .radioSignal = TRUE,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::HGSS);
+        let header = provider.get_map_header(0).unwrap();
+        match header {
+            MapHeader::HGSS(h) => {
+                assert_eq!(h.script_file_id, 7);
+                assert_eq!(h.level_script_id, 8);
+                assert_eq!(h.text_archive_id, 9);
+                assert!(h.kanto_flag);
+                assert_eq!(h.flags, 0x55);
+            }
+            _ => panic!("expected HGSS map header variant"),
+        }
     }
 }

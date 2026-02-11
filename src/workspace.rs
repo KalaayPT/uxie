@@ -307,6 +307,7 @@ impl Workspace {
             provider: Box::new(crate::provider::DecompProvider::new(
                 root,
                 (*symbols).clone(),
+                family,
             )),
             symbols,
             scripts,
