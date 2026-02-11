@@ -83,6 +83,7 @@ impl EggMoveEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     #[test]
@@ -212,5 +213,86 @@ mod tests {
 
         let terminator = cursor.read_u16::<LittleEndian>().unwrap();
         assert_eq!(terminator, EGG_MOVE_TERMINATOR);
+    }
+
+    fn normal_move_id_strategy() -> impl Strategy<Value = u16> {
+        0u16..=EGG_MOVE_SPECIES_OFFSET
+    }
+
+    fn species_id_strategy() -> impl Strategy<Value = u16> {
+        // Avoid species marker colliding with the 0xFFFF stream terminator.
+        0u16..(u16::MAX - EGG_MOVE_SPECIES_OFFSET)
+    }
+
+    fn egg_move_entry_strategy() -> impl Strategy<Value = EggMoveEntry> {
+        (
+            species_id_strategy(),
+            prop::collection::vec(normal_move_id_strategy(), 0..24),
+        )
+            .prop_map(|(species_id, move_ids)| EggMoveEntry {
+                species_id,
+                move_ids,
+            })
+    }
+
+    fn egg_move_data_strategy() -> impl Strategy<Value = EggMoveData> {
+        prop::collection::vec(egg_move_entry_strategy(), 0..48)
+            .prop_map(|entries| EggMoveData { entries })
+    }
+
+    fn simple_move_id_strategy() -> impl Strategy<Value = u16> {
+        any::<u16>().prop_filter("0xFFFF is the simple-format terminator", |v| {
+            *v != EGG_MOVE_TERMINATOR
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_egg_move_data_roundtrip(data in egg_move_data_strategy()) {
+            let bytes = data.to_bytes();
+            prop_assert_eq!(bytes.len(), data.total_byte_size());
+            prop_assert_eq!(&bytes[bytes.len() - 2..], &[0xFF, 0xFF]);
+
+            let mut cursor = Cursor::new(bytes);
+            let parsed = EggMoveData::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(data, parsed);
+        }
+
+        #[test]
+        fn prop_simple_format_roundtrip(move_ids in prop::collection::vec(simple_move_id_strategy(), 0..64)) {
+            let entry = EggMoveEntry::new(123, move_ids.clone());
+            let bytes = entry.to_bytes_simple();
+            prop_assert_eq!(bytes.len(), (move_ids.len() + 1) * 2);
+            prop_assert_eq!(&bytes[bytes.len() - 2..], &[0xFF, 0xFF]);
+
+            let mut cursor = Cursor::new(bytes);
+            let parsed = EggMoveEntry::from_binary_simple(&mut cursor).unwrap();
+            prop_assert_eq!(parsed.move_ids, move_ids);
+            prop_assert_eq!(parsed.species_id, 0);
+        }
+
+        #[test]
+        fn prop_get_by_species_matches_first_entry(data in egg_move_data_strategy(), species_id in any::<u16>()) {
+            let expected = data.entries.iter().find(|e| e.species_id == species_id);
+            let actual = data.get_by_species(species_id);
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_can_learn_matches_manual_lookup(data in egg_move_data_strategy(), species_id in any::<u16>(), move_id in any::<u16>()) {
+            let expected = data
+                .entries
+                .iter()
+                .find(|e| e.species_id == species_id)
+                .map(|e| e.move_ids.contains(&move_id))
+                .unwrap_or(false);
+            let actual = data.can_learn(species_id, move_id);
+            prop_assert_eq!(actual, expected);
+        }
     }
 }
