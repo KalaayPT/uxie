@@ -5,6 +5,7 @@ mod tests {
         BgEventBinary, BinaryEventFile, CoordEventBinary, ObjectEventBinary, WarpEventBinary,
     };
     use crate::event_file::json::JsonEventFile;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     #[test]
@@ -160,6 +161,171 @@ mod tests {
             assert_eq!(got.z, exp.z);
             assert_eq!(got.dest_header_id, exp.dest_header_id);
             assert_eq!(got.dest_warp_id, exp.dest_warp_id);
+        }
+    }
+
+    fn bg_event_strategy() -> impl Strategy<Value = BgEventBinary> {
+        (
+            any::<u16>(),
+            any::<u16>(),
+            any::<i32>(),
+            any::<i32>(),
+            any::<i32>(),
+            any::<u16>(),
+        )
+            .prop_map(
+                |(script, event_type, x, z, y, player_facing_dir)| BgEventBinary {
+                    script,
+                    event_type,
+                    x,
+                    z,
+                    y,
+                    player_facing_dir,
+                },
+            )
+    }
+
+    fn object_event_strategy() -> impl Strategy<Value = ObjectEventBinary> {
+        let part1 = (
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+        );
+        let part2 = (
+            any::<i16>(),
+            any::<[u16; 3]>(),
+            any::<i16>(),
+            any::<i16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<i32>(),
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (local_id, graphics_id, movement_type, trainer_type, hidden_flag, script),
+                (dir, data, movement_range_x, movement_range_z, x, z, y),
+            )| ObjectEventBinary {
+                local_id,
+                graphics_id,
+                movement_type,
+                trainer_type,
+                hidden_flag,
+                script,
+                dir,
+                data,
+                movement_range_x,
+                movement_range_z,
+                x,
+                z,
+                y,
+            },
+        )
+    }
+
+    fn warp_event_strategy() -> impl Strategy<Value = WarpEventBinary> {
+        (any::<u16>(), any::<u16>(), any::<u16>(), any::<u16>()).prop_map(
+            |(x, z, dest_header_id, dest_warp_id)| WarpEventBinary {
+                x,
+                z,
+                dest_header_id,
+                dest_warp_id,
+            },
+        )
+    }
+
+    fn coord_event_strategy() -> impl Strategy<Value = CoordEventBinary> {
+        (
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+        )
+            .prop_map(
+                |(script, x, z, width, length, y, value, var)| CoordEventBinary {
+                    script,
+                    x,
+                    z,
+                    width,
+                    length,
+                    y,
+                    value,
+                    var,
+                },
+            )
+    }
+
+    fn binary_event_file_strategy() -> impl Strategy<Value = BinaryEventFile> {
+        (
+            prop::collection::vec(bg_event_strategy(), 0..24),
+            prop::collection::vec(object_event_strategy(), 0..24),
+            prop::collection::vec(warp_event_strategy(), 0..24),
+            prop::collection::vec(coord_event_strategy(), 0..24),
+        )
+            .prop_map(|(bg_events, object_events, warp_events, coord_events)| {
+                BinaryEventFile {
+                    bg_events,
+                    object_events,
+                    warp_events,
+                    coord_events,
+                }
+            })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_event_binary_roundtrip(file in binary_event_file_strategy()) {
+            let mut buffer = Cursor::new(Vec::new());
+            file.to_binary(&mut buffer).unwrap();
+            buffer.set_position(0);
+            let decoded = BinaryEventFile::from_binary(&mut buffer).unwrap();
+            prop_assert_eq!(file.bg_events, decoded.bg_events);
+            prop_assert_eq!(file.object_events, decoded.object_events);
+            prop_assert_eq!(file.warp_events, decoded.warp_events);
+            prop_assert_eq!(file.coord_events, decoded.coord_events);
+        }
+
+        #[test]
+        fn prop_json_from_binary_coordinate_normalization(file in binary_event_file_strategy()) {
+            let symbols = SymbolTable::new();
+            let json = JsonEventFile::from_binary(&file, &symbols);
+
+            prop_assert_eq!(json.bg_events.len(), file.bg_events.len());
+            prop_assert_eq!(json.object_events.len(), file.object_events.len());
+            prop_assert_eq!(json.warp_events.len(), file.warp_events.len());
+            prop_assert_eq!(json.coord_events.len(), file.coord_events.len());
+
+            for (bg_json, bg_bin) in json.bg_events.iter().zip(file.bg_events.iter()) {
+                prop_assert_eq!(bg_json.x, bg_bin.x % 32);
+                prop_assert_eq!(bg_json.z, bg_bin.z % 32);
+            }
+
+            for (obj_json, obj_bin) in json.object_events.iter().zip(file.object_events.iter()) {
+                prop_assert_eq!(obj_json.x, obj_bin.x % 32);
+                prop_assert_eq!(obj_json.z, obj_bin.z % 32);
+            }
+
+            for (warp_json, warp_bin) in json.warp_events.iter().zip(file.warp_events.iter()) {
+                prop_assert_eq!(warp_json.x, warp_bin.x % 32);
+                prop_assert_eq!(warp_json.z, warp_bin.z % 32);
+            }
+
+            for (coord_json, coord_bin) in json.coord_events.iter().zip(file.coord_events.iter()) {
+                prop_assert_eq!(coord_json.x, coord_bin.x % 32);
+                prop_assert_eq!(coord_json.z, coord_bin.z % 32);
+            }
         }
     }
 }
