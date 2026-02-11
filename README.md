@@ -1,6 +1,6 @@
 <img src="docs/uxie.gif" align="right" width="120" alt="Animated sprite of Uxie from Pokemon Black and White"/>
 
-# `uxie`
+# Uxie
 
 A data fetching library for Pokemon Gen 4 romhacking. Provides unified access to
 ROM data from DSPRE projects and decompilation sources.

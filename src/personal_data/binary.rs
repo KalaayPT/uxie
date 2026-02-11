@@ -24,6 +24,7 @@ impl PersonalData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     fn create_test_personal_data() -> PersonalData {
@@ -85,5 +86,142 @@ mod tests {
             assert!(data.can_learn_tm(i));
         }
         assert!(!data.can_learn_tm(128));
+    }
+
+    fn personal_data_strategy() -> impl Strategy<Value = PersonalData> {
+        let part1 = (
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u16>(),
+            any::<u16>(),
+        );
+        let part2 = (
+            any::<u16>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<[u8; 16]>(),
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    hp,
+                    attack,
+                    defense,
+                    speed,
+                    sp_attack,
+                    sp_defense,
+                    type1,
+                    type2,
+                    catch_rate,
+                    base_exp,
+                    ev_yield,
+                    item1,
+                ),
+                (
+                    item2,
+                    gender_ratio,
+                    egg_cycles,
+                    base_friendship,
+                    growth_rate,
+                    egg_group1,
+                    egg_group2,
+                    ability1,
+                    ability2,
+                    safari_flee_rate,
+                    color_flip,
+                    tm_compatibility,
+                ),
+            )| PersonalData {
+                hp,
+                attack,
+                defense,
+                speed,
+                sp_attack,
+                sp_defense,
+                type1,
+                type2,
+                catch_rate,
+                base_exp,
+                ev_yield,
+                item1,
+                item2,
+                gender_ratio,
+                egg_cycles,
+                base_friendship,
+                growth_rate,
+                egg_group1,
+                egg_group2,
+                ability1,
+                ability2,
+                safari_flee_rate,
+                color_flip,
+                tm_compatibility,
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_personal_data_roundtrip(data in personal_data_strategy()) {
+            let bytes = data.to_bytes();
+            prop_assert_eq!(bytes.len(), PERSONAL_DATA_SIZE);
+
+            let mut cursor = Cursor::new(bytes);
+            let parsed = PersonalData::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(data, parsed);
+        }
+
+        #[test]
+        fn prop_ev_yield_accessors_match_packed_bits(ev_yield in any::<u16>()) {
+            let mut data = create_test_personal_data();
+            data.ev_yield = ev_yield;
+
+            prop_assert_eq!(data.ev_yield_hp(), (ev_yield & 0b11) as u8);
+            prop_assert_eq!(data.ev_yield_attack(), ((ev_yield >> 2) & 0b11) as u8);
+            prop_assert_eq!(data.ev_yield_defense(), ((ev_yield >> 4) & 0b11) as u8);
+            prop_assert_eq!(data.ev_yield_speed(), ((ev_yield >> 6) & 0b11) as u8);
+            prop_assert_eq!(data.ev_yield_sp_attack(), ((ev_yield >> 8) & 0b11) as u8);
+            prop_assert_eq!(data.ev_yield_sp_defense(), ((ev_yield >> 10) & 0b11) as u8);
+        }
+
+        #[test]
+        fn prop_can_learn_tm_single_bit_behavior(tm_index in 0u8..128, other_tm in 0u8..128) {
+            let mut data = create_test_personal_data();
+            data.tm_compatibility = [0; 16];
+            let byte_idx = (tm_index / 8) as usize;
+            let bit_idx = tm_index % 8;
+            data.tm_compatibility[byte_idx] = 1 << bit_idx;
+
+            prop_assert!(data.can_learn_tm(tm_index));
+            prop_assert_eq!(data.can_learn_tm(other_tm), other_tm == tm_index);
+        }
+
+        #[test]
+        fn prop_can_learn_tm_out_of_range_is_false(tm_index in 128u8..=u8::MAX) {
+            let data = create_test_personal_data();
+            prop_assert!(!data.can_learn_tm(tm_index));
+        }
     }
 }
