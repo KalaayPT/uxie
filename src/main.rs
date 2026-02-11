@@ -468,12 +468,29 @@ fn load_symbols_from_decomp(
             "include/constants/battle.h",
         ];
         for f in files {
-            let _ = symbols.load_from_url(&format!("{}{}", base, f));
+            let url = format!("{}{}", base, f);
+            symbols.load_from_url(&url).map_err(|e| {
+                std::io::Error::other(format!("Failed loading symbols from {}: {}", url, e))
+            })?;
         }
     } else {
-        let _ = symbols.load_headers_from_dir(d.join("include/constants"));
-        let _ = symbols.load_headers_from_dir(d.join("generated"));
-        let _ = symbols.load_headers_from_dir(d.join("build/generated"));
+        if !d.exists() {
+            return Err(format!("Decomp path does not exist: {}", d.display()).into());
+        }
+
+        let include_count = symbols.load_headers_from_dir(d.join("include/constants"))?;
+        let generated_count = symbols.load_headers_from_dir(d.join("generated"))?;
+        let build_generated_count = symbols.load_headers_from_dir(d.join("build/generated"))?;
+
+        if include_count + generated_count + build_generated_count == 0 {
+            return Err(
+                std::io::Error::other(format!(
+                    "No symbol source files found under {} (checked include/constants, generated, build/generated)",
+                    d.display()
+                ))
+                .into(),
+            );
+        }
     }
     Ok(())
 }

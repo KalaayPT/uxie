@@ -104,10 +104,7 @@ impl SymbolTable {
             let entry = sm.get_or_parse(path)?;
             self.load_file_entry(&entry, &canonical, tag);
         } else {
-            let content = match std::fs::read_to_string(path) {
-                Ok(c) => c,
-                Err(_) => return Ok(()),
-            };
+            let content = std::fs::read_to_string(path)?;
             self.load_header_str_with_tag(&content, &canonical, tag)?;
         }
 
@@ -441,9 +438,7 @@ impl SymbolTable {
     }
 
     pub fn get_source_manager(&self) -> SourceManager {
-        self.source_manager
-            .clone()
-            .unwrap_or_default()
+        self.source_manager.clone().unwrap_or_default()
     }
 
     pub fn resolve_name(&self, value: i64, prefix: &str) -> Option<String> {
@@ -521,7 +516,7 @@ impl SymbolTable {
         tag: SymbolTag,
     ) -> std::io::Result<()> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content = std::fs::read_to_string(path)?;
         self.load_list_file_str_with_tag(&content, path, tag)
     }
 
@@ -682,23 +677,19 @@ impl SymbolTable {
                 );
                 let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
                 match ext.to_lowercase().as_str() {
-                    "h" | "hpp" => {
-                        let _ = table.load_header(&path);
-                    }
-                    "txt" => {
-                        let _ = table.load_list_file(&path);
-                    }
-                    "py" => {
-                        let _ = table.load_python_enum(&path);
-                    }
+                    "h" | "hpp" => table.load_header(&path)?,
+                    "txt" => table.load_list_file(&path)?,
+                    "py" => table.load_python_enum(&path)?,
                     "json" => {
-                        let _ = table.load_text_bank_json(&path);
+                        table.load_text_bank_json(&path)?;
                     }
                     _ => {}
-                }
-                table
+                };
+                Ok(table)
             })
-            .collect();
+            .collect::<Vec<std::io::Result<SymbolTable>>>()
+            .into_iter()
+            .collect::<std::io::Result<Vec<_>>>()?;
 
         for table in results {
             self.extend(table);
@@ -770,9 +761,10 @@ impl SymbolTable {
             .arg(url)
             .output()?;
         if !output.status.success() {
-            return Err(std::io::Error::other(
-                format!("Failed to fetch URL: {}", url),
-            ));
+            return Err(std::io::Error::other(format!(
+                "Failed to fetch URL: {}",
+                url
+            )));
         }
         let content = String::from_utf8_lossy(&output.stdout);
         let dummy_path = Path::new("url_source.h");

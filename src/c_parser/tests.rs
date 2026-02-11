@@ -90,4 +90,26 @@ mod tests {
 
         assert_eq!(table.resolve_constant("DERIVED"), Some(15));
     }
+
+    #[test]
+    fn test_load_header_missing_file_returns_error() {
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("missing.h");
+        let mut table = SymbolTable::new();
+
+        let err = table.load_header(&missing).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+    }
+
+    #[test]
+    fn test_load_headers_from_dir_propagates_read_errors() {
+        let dir = tempdir().unwrap();
+        let invalid = dir.path().join("broken.h");
+        std::fs::write(&invalid, [0xFF, 0xFE, 0x00, 0x01]).unwrap();
+
+        let mut table = SymbolTable::new();
+        let err = table.load_headers_from_dir(dir.path()).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 }
