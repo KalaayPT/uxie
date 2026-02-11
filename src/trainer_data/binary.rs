@@ -179,6 +179,7 @@ impl TrainerData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     #[test]
@@ -316,6 +317,202 @@ mod tests {
             assert_eq!(orig.species, parsed.species);
             assert_eq!(orig.level, parsed.level);
             assert_eq!(orig.moves, parsed.moves);
+        }
+    }
+
+    fn family_strategy() -> impl Strategy<Value = GameFamily> {
+        prop_oneof![
+            Just(GameFamily::DP),
+            Just(GameFamily::Platinum),
+            Just(GameFamily::HGSS),
+        ]
+    }
+
+    fn trainer_flags_strategy() -> impl Strategy<Value = TrainerFlags> {
+        (0u8..4).prop_map(TrainerFlags::from_bits_truncate)
+    }
+
+    fn trainer_properties_strategy() -> impl Strategy<Value = TrainerProperties> {
+        (
+            trainer_flags_strategy(),
+            any::<u8>(),
+            any::<u8>(),
+            0u8..16,
+            any::<[u16; 4]>(),
+            any::<u32>(),
+            any::<u32>(),
+        )
+            .prop_map(
+                |(
+                    flags,
+                    trainer_class,
+                    unknown,
+                    party_count,
+                    items,
+                    ai_flags_bits,
+                    double_battle,
+                )| TrainerProperties {
+                    flags,
+                    trainer_class,
+                    unknown,
+                    party_count,
+                    items,
+                    ai_flags: AiFlags::from_bits_truncate(ai_flags_bits),
+                    double_battle,
+                },
+            )
+    }
+
+    fn party_pokemon_strategy(
+        flags: TrainerFlags,
+        family: GameFamily,
+    ) -> BoxedStrategy<PartyPokemon> {
+        let held_item = if flags.contains(TrainerFlags::HAS_ITEMS) {
+            any::<u16>().prop_map(Some).boxed()
+        } else {
+            Just(None).boxed()
+        };
+
+        let moves = if flags.contains(TrainerFlags::HAS_MOVES) {
+            any::<[u16; 4]>().prop_map(Some).boxed()
+        } else {
+            Just(None).boxed()
+        };
+
+        let ball_seal = if family != GameFamily::DP {
+            any::<u16>().prop_map(Some).boxed()
+        } else {
+            Just(None).boxed()
+        };
+
+        (
+            any::<u8>(),
+            any::<u8>(),
+            any::<u16>(),
+            0u16..1024,
+            0u8..64,
+            held_item,
+            moves,
+            ball_seal,
+        )
+            .prop_map(
+                |(
+                    difficulty,
+                    gender_ability,
+                    level,
+                    species,
+                    form,
+                    held_item,
+                    moves,
+                    ball_seal,
+                )| PartyPokemon {
+                    difficulty,
+                    gender_ability,
+                    level,
+                    species,
+                    form,
+                    held_item,
+                    moves,
+                    ball_seal,
+                },
+            )
+            .boxed()
+    }
+
+    fn party_case_strategy() -> impl Strategy<Value = (TrainerFlags, GameFamily, PartyPokemon)> {
+        (trainer_flags_strategy(), family_strategy()).prop_flat_map(|(flags, family)| {
+            party_pokemon_strategy(flags, family).prop_map(move |pokemon| (flags, family, pokemon))
+        })
+    }
+
+    fn trainer_data_case_strategy() -> impl Strategy<Value = (TrainerData, GameFamily)> {
+        (
+            trainer_flags_strategy(),
+            family_strategy(),
+            any::<u8>(),
+            any::<u8>(),
+            0u8..12,
+            any::<[u16; 4]>(),
+            any::<u32>(),
+            any::<u32>(),
+        )
+            .prop_flat_map(
+                |(
+                    flags,
+                    family,
+                    trainer_class,
+                    unknown,
+                    party_count,
+                    items,
+                    ai_flags_bits,
+                    double_battle,
+                )| {
+                    let properties = TrainerProperties {
+                        flags,
+                        trainer_class,
+                        unknown,
+                        party_count,
+                        items,
+                        ai_flags: AiFlags::from_bits_truncate(ai_flags_bits),
+                        double_battle,
+                    };
+                    let party_len = usize::from(party_count);
+                    prop::collection::vec(party_pokemon_strategy(flags, family), party_len)
+                        .prop_map(move |party| {
+                            (
+                                TrainerData {
+                                    properties: properties.clone(),
+                                    party,
+                                },
+                                family,
+                            )
+                        })
+                },
+            )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_trainer_properties_roundtrip(props in trainer_properties_strategy()) {
+            let bytes = props.to_bytes();
+            prop_assert_eq!(bytes.len(), TRAINER_PROPERTIES_SIZE);
+            let mut cursor = Cursor::new(bytes);
+            let parsed = TrainerProperties::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(props, parsed);
+        }
+
+        #[test]
+        fn prop_party_pokemon_roundtrip((flags, family, pokemon) in party_case_strategy()) {
+            let mut buf = Vec::new();
+            pokemon.to_binary(&mut buf, flags, family).unwrap();
+            prop_assert_eq!(buf.len(), PartyPokemon::binary_size(flags, family));
+            let mut cursor = Cursor::new(buf);
+            let parsed = PartyPokemon::from_binary(&mut cursor, flags, family).unwrap();
+            prop_assert_eq!(pokemon, parsed);
+        }
+
+        #[test]
+        fn prop_trainer_data_roundtrip((trainer, family) in trainer_data_case_strategy()) {
+            let mut properties_buf = Vec::new();
+            let mut party_buf = Vec::new();
+            trainer
+                .to_binary_parts(&mut properties_buf, &mut party_buf, family)
+                .unwrap();
+
+            let mut properties_cursor = Cursor::new(properties_buf);
+            let mut party_cursor = Cursor::new(party_buf);
+            let parsed = TrainerData::from_binary_parts(
+                &mut properties_cursor,
+                &mut party_cursor,
+                family,
+            ).unwrap();
+
+            prop_assert_eq!(trainer, parsed);
         }
     }
 }

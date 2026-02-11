@@ -134,8 +134,7 @@ pub struct ItemPartyUseValues {
 }
 
 /// Party use parameters (18 bytes: 7 bytes flags + 11 bytes values)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ItemPartyUseParam {
     // Byte 0: Status healing flags
     pub heal_sleep: bool,
@@ -197,7 +196,6 @@ pub struct ItemPartyUseParam {
     pub friendship_med: i8,
     pub friendship_high: i8,
 }
-
 
 impl ItemPartyUseParam {
     /// Convert from binary representation
