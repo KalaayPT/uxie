@@ -226,12 +226,7 @@ fn cmd_map(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(path, decomp.as_ref())?;
 
     let header = ws.provider.get_map_header(id)?;
 
@@ -250,12 +245,7 @@ fn cmd_event(
     decomp: Option<PathBuf>,
     _json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let dspre = DspreProject::open(project_path)?;
     let bin_event = dspre.load_event_file(id)?;
@@ -271,12 +261,7 @@ fn cmd_encounter(
     decomp: Option<PathBuf>,
     _json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let narc_path = match ws.family {
         GameFamily::DP => project_path.join("data/fielddata/encountdata/d_enc_data.narc"),
@@ -419,9 +404,22 @@ fn cmd_resolve_script(
     Ok(())
 }
 
+fn open_workspace_with_decomp(
+    project_path: &std::path::Path,
+    decomp: Option<&PathBuf>,
+) -> Result<Workspace, Box<dyn std::error::Error>> {
+    let mut ws = Workspace::open(project_path)?;
+    if let Some(d) = decomp {
+        let mut symbols = (*ws.symbols).clone();
+        load_symbols_from_decomp(&mut symbols, d.as_path())?;
+        ws.symbols = Arc::new(symbols);
+    }
+    Ok(ws)
+}
+
 fn load_symbols_from_decomp(
     symbols: &mut SymbolTable,
-    d: &PathBuf,
+    d: &std::path::Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let d_str = d.to_string_lossy();
     if d_str.starts_with("http") || d_str.contains("github.com") {
@@ -617,12 +615,7 @@ fn cmd_personal(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
@@ -694,12 +687,7 @@ fn cmd_move(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let id = resolve_id(id, "MOVE_", &ws.symbols, &ws.game_strings)?;
 
@@ -750,12 +738,7 @@ fn cmd_item(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let id = resolve_id(id, "ITEM_", &ws.symbols, &ws.game_strings)?;
 
@@ -808,12 +791,7 @@ fn cmd_trainer(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let trdata_path = project_path.join("data/poketool/trainer/trdata.narc");
     let trpoke_path = project_path.join("data/poketool/trainer/trpoke.narc");
@@ -894,12 +872,7 @@ fn cmd_evolution(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
@@ -964,12 +937,7 @@ fn cmd_learnset(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
@@ -1016,12 +984,7 @@ fn cmd_egg_moves(
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut ws = Workspace::open(project_path)?;
-    if let Some(d) = decomp {
-        let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, &d)?;
-        ws.symbols = Arc::new(symbols);
-    }
+    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let egg_data = load_egg_move_data(project_path, ws.family)?;
 
