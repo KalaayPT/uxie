@@ -113,6 +113,7 @@ impl Narc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     fn create_minimal_narc(file_data: &[&[u8]]) -> Vec<u8> {
@@ -284,5 +285,49 @@ mod tests {
 
         assert_eq!(narc.members.len(), 0);
         assert_eq!(narc.members, narc2.members);
+    }
+
+    fn narc_strategy() -> impl Strategy<Value = Narc> {
+        prop::collection::vec(prop::collection::vec(any::<u8>(), 0..256), 0..64)
+            .prop_map(|members| Narc { members })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_narc_roundtrip(narc in narc_strategy()) {
+            let bytes = narc.to_bytes();
+            let mut cursor = Cursor::new(bytes);
+            let parsed = Narc::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(parsed.members, narc.members);
+        }
+
+        #[test]
+        fn prop_write_to_matches_to_bytes(narc in narc_strategy()) {
+            let expected = narc.to_bytes();
+            let mut written = Vec::new();
+            narc.write_to(&mut written).unwrap();
+            prop_assert_eq!(written.as_slice(), expected.as_slice());
+
+            let mut cursor = Cursor::new(written);
+            let parsed = Narc::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(parsed.members, narc.members);
+        }
+
+        #[test]
+        fn prop_rejects_non_narc_magic(
+            magic in any::<[u8; 4]>().prop_filter("must not be NARC magic", |m| m != b"NARC"),
+            tail in prop::collection::vec(any::<u8>(), 0..64)
+        ) {
+            let mut bytes = magic.to_vec();
+            bytes.extend_from_slice(&tail);
+            let mut cursor = Cursor::new(bytes);
+            let result = Narc::from_binary(&mut cursor);
+            prop_assert!(result.is_err());
+        }
     }
 }
