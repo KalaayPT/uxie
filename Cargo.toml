@@ -38,6 +38,7 @@ rayon = "1.10.0"
 
 [dev-dependencies]
 tempfile = "3.14"
+proptest = "1.6"
 
 [package.metadata.docs.rs]
 all-features = true

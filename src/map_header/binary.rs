@@ -210,6 +210,7 @@ pub fn write_map_header_to_bytes(header: &MapHeader) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_pt_header_roundtrip() {
@@ -238,5 +239,258 @@ mod tests {
 
         let parsed = read_map_header_from_bytes(&bytes, GameFamily::Platinum).unwrap();
         assert_eq!(original, parsed);
+    }
+
+    fn dp_header_strategy() -> impl Strategy<Value = MapHeader> {
+        let part1 = (
+            any::<u8>(),
+            any::<u8>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+        );
+        let part2 = (
+            any::<u16>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            0u8..16,
+            0u8..16,
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    area_data_id,
+                    unknown1,
+                    matrix_id,
+                    script_file_id,
+                    level_script_id,
+                    text_archive_id,
+                    music_day_id,
+                    music_night_id,
+                    wild_pokemon,
+                    event_file_id,
+                ),
+                (
+                    location_name,
+                    weather_id,
+                    camera_angle_id,
+                    location_specifier,
+                    battle_background,
+                    flags,
+                ),
+            )| {
+                MapHeader::DP(MapHeaderDP {
+                    area_data_id,
+                    unknown1,
+                    matrix_id,
+                    script_file_id,
+                    level_script_id,
+                    text_archive_id,
+                    music_day_id,
+                    music_night_id,
+                    wild_pokemon,
+                    event_file_id,
+                    location_name,
+                    weather_id,
+                    camera_angle_id,
+                    location_specifier,
+                    battle_background,
+                    flags,
+                })
+            },
+        )
+    }
+
+    fn pt_header_strategy() -> impl Strategy<Value = MapHeader> {
+        let part1 = (
+            any::<u8>(),
+            any::<u8>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+        );
+        let part2 = (
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            0u8..128,
+            0u8..32,
+            0u8..16,
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    area_data_id,
+                    unknown1,
+                    matrix_id,
+                    script_file_id,
+                    level_script_id,
+                    text_archive_id,
+                    music_day_id,
+                    music_night_id,
+                    wild_pokemon,
+                    event_file_id,
+                ),
+                (
+                    location_name,
+                    area_icon,
+                    weather_id,
+                    camera_angle_id,
+                    location_specifier,
+                    battle_background,
+                    flags,
+                ),
+            )| {
+                MapHeader::Pt(MapHeaderPt {
+                    area_data_id,
+                    unknown1,
+                    matrix_id,
+                    script_file_id,
+                    level_script_id,
+                    text_archive_id,
+                    music_day_id,
+                    music_night_id,
+                    wild_pokemon,
+                    event_file_id,
+                    location_name,
+                    area_icon,
+                    weather_id,
+                    camera_angle_id,
+                    location_specifier,
+                    battle_background,
+                    flags,
+                })
+            },
+        )
+    }
+
+    fn hgss_header_strategy() -> impl Strategy<Value = MapHeader> {
+        let part1 = (
+            any::<u8>(),
+            any::<u8>(),
+            0u8..16,
+            0u8..64,
+            0u8..64,
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+            any::<u16>(),
+        );
+        let part2 = (
+            any::<u16>(),
+            any::<u8>(),
+            0u8..16,
+            0u8..16,
+            any::<bool>(),
+            0u8..128,
+            0u8..16,
+            0u8..64,
+            0u8..4,
+            0u8..32,
+            0u8..128,
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    wild_pokemon,
+                    area_data_id,
+                    unknown0,
+                    worldmap_x,
+                    worldmap_y,
+                    matrix_id,
+                    script_file_id,
+                    level_script_id,
+                    text_archive_id,
+                    music_day_id,
+                    music_night_id,
+                ),
+                (
+                    event_file_id,
+                    location_name,
+                    area_icon,
+                    unknown1,
+                    kanto_flag,
+                    weather_id,
+                    location_type,
+                    camera_angle_id,
+                    follow_mode,
+                    battle_background,
+                    flags,
+                ),
+            )| {
+                MapHeader::HGSS(MapHeaderHGSS {
+                    wild_pokemon,
+                    area_data_id,
+                    unknown0,
+                    worldmap_x,
+                    worldmap_y,
+                    matrix_id,
+                    script_file_id,
+                    level_script_id,
+                    text_archive_id,
+                    music_day_id,
+                    music_night_id,
+                    event_file_id,
+                    location_name,
+                    area_icon,
+                    unknown1,
+                    kanto_flag,
+                    weather_id,
+                    location_type,
+                    camera_angle_id,
+                    follow_mode,
+                    battle_background,
+                    flags,
+                })
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_dp_header_roundtrip(header in dp_header_strategy()) {
+            let bytes = write_map_header_to_bytes(&header);
+            prop_assert_eq!(bytes.len(), MAP_HEADER_SIZE);
+            let parsed = read_map_header_from_bytes(&bytes, GameFamily::DP).unwrap();
+            prop_assert_eq!(header, parsed);
+        }
+
+        #[test]
+        fn prop_pt_header_roundtrip(header in pt_header_strategy()) {
+            let bytes = write_map_header_to_bytes(&header);
+            prop_assert_eq!(bytes.len(), MAP_HEADER_SIZE);
+            let parsed = read_map_header_from_bytes(&bytes, GameFamily::Platinum).unwrap();
+            prop_assert_eq!(header, parsed);
+        }
+
+        #[test]
+        fn prop_hgss_header_roundtrip(header in hgss_header_strategy()) {
+            let bytes = write_map_header_to_bytes(&header);
+            prop_assert_eq!(bytes.len(), MAP_HEADER_SIZE);
+            let parsed = read_map_header_from_bytes(&bytes, GameFamily::HGSS).unwrap();
+            prop_assert_eq!(header, parsed);
+        }
     }
 }

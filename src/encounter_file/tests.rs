@@ -4,6 +4,7 @@ mod tests {
     use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
     use crate::encounter_file::json::JsonEncounterFile;
     use crate::game::GameFamily;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     fn build_dppt_fixture() -> BinaryEncounterFile {
@@ -207,5 +208,208 @@ mod tests {
         assert_eq!(bin.grass_encounters[0].species, 1);
         assert_eq!(bin.swarm_encounters[0], 2);
         assert_eq!(bin.swarm_encounters[1], 2);
+    }
+
+    fn encounter_entry_strategy(
+        species: impl Strategy<Value = u32>,
+    ) -> impl Strategy<Value = EncounterEntry> {
+        (any::<u8>(), species).prop_map(|(level, species)| EncounterEntry { level, species })
+    }
+
+    fn water_entry_strategy(
+        species: impl Strategy<Value = u32>,
+    ) -> impl Strategy<Value = WaterEncounterEntry> {
+        (any::<u8>(), any::<u8>(), species).prop_map(|(min_level, max_level, species)| {
+            WaterEncounterEntry {
+                min_level,
+                max_level,
+                species,
+            }
+        })
+    }
+
+    fn dppt_encounter_strategy() -> impl Strategy<Value = BinaryEncounterFile> {
+        let part1 = (
+            any::<u32>(),
+            proptest::collection::vec(encounter_entry_strategy(any::<u32>()), 12),
+            proptest::collection::vec(any::<u32>(), 2),
+            proptest::collection::vec(any::<u32>(), 2),
+            proptest::collection::vec(any::<u32>(), 2),
+            proptest::collection::vec(any::<u32>(), 4),
+            proptest::collection::vec(any::<u32>(), 5),
+            any::<u32>(),
+            proptest::collection::vec(any::<u32>(), 2),
+            proptest::collection::vec(any::<u32>(), 2),
+            proptest::collection::vec(any::<u32>(), 2),
+        );
+        let part2 = (
+            proptest::collection::vec(any::<u32>(), 2),
+            proptest::collection::vec(any::<u32>(), 2),
+            any::<u32>(),
+            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            any::<u32>(),
+            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            any::<u32>(),
+            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            any::<u32>(),
+            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    walking_rate,
+                    grass_encounters,
+                    swarm_encounters,
+                    day_encounters,
+                    night_encounters,
+                    radar_encounters,
+                    form_encounter_rates,
+                    unown_table_id,
+                    dual_slot_ruby,
+                    dual_slot_sapphire,
+                    dual_slot_emerald,
+                ),
+                (
+                    dual_slot_firered,
+                    dual_slot_leafgreen,
+                    surf_rate,
+                    surf_encounters,
+                    old_rod_rate,
+                    old_rod_encounters,
+                    good_rod_rate,
+                    good_rod_encounters,
+                    super_rod_rate,
+                    super_rod_encounters,
+                ),
+            )| {
+                BinaryEncounterFile {
+                    walking_rate,
+                    grass_encounters,
+                    swarm_encounters,
+                    day_encounters,
+                    night_encounters,
+                    radar_encounters,
+                    form_encounter_rates,
+                    unown_table_id,
+                    dual_slot_ruby,
+                    dual_slot_sapphire,
+                    dual_slot_emerald,
+                    dual_slot_firered,
+                    dual_slot_leafgreen,
+                    surf_rate,
+                    surf_encounters,
+                    old_rod_rate,
+                    old_rod_encounters,
+                    good_rod_rate,
+                    good_rod_encounters,
+                    super_rod_rate,
+                    super_rod_encounters,
+                    rock_smash_rate: 0,
+                    rock_smash_encounters: Vec::new(),
+                    morning_encounters: Vec::new(),
+                }
+            },
+        )
+    }
+
+    fn hgss_encounter_strategy() -> impl Strategy<Value = BinaryEncounterFile> {
+        let part1 = (
+            0u32..=255,
+            0u32..=255,
+            0u32..=255,
+            0u32..=255,
+            0u32..=255,
+            0u32..=255,
+            proptest::collection::vec(encounter_entry_strategy(0u32..=65535), 12),
+            proptest::collection::vec(0u32..=65535, 12),
+        );
+        let part2 = (
+            proptest::collection::vec(0u32..=65535, 12),
+            proptest::collection::vec(0u32..=65535, 4),
+            proptest::collection::vec(0u32..=65535, 4),
+            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
+            proptest::collection::vec(water_entry_strategy(0u32..=65535), 2),
+            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
+            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
+            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    walking_rate,
+                    surf_rate,
+                    rock_smash_rate,
+                    old_rod_rate,
+                    good_rod_rate,
+                    super_rod_rate,
+                    morning_encounters,
+                    day_encounters,
+                ),
+                (
+                    night_encounters,
+                    swarm_encounters,
+                    radar_encounters,
+                    surf_encounters,
+                    rock_smash_encounters,
+                    old_rod_encounters,
+                    good_rod_encounters,
+                    super_rod_encounters,
+                ),
+            )| {
+                BinaryEncounterFile {
+                    walking_rate,
+                    grass_encounters: morning_encounters.clone(),
+                    swarm_encounters,
+                    day_encounters,
+                    night_encounters,
+                    radar_encounters,
+                    form_encounter_rates: Vec::new(),
+                    unown_table_id: 0,
+                    dual_slot_ruby: Vec::new(),
+                    dual_slot_sapphire: Vec::new(),
+                    dual_slot_emerald: Vec::new(),
+                    dual_slot_firered: Vec::new(),
+                    dual_slot_leafgreen: Vec::new(),
+                    surf_rate,
+                    surf_encounters,
+                    old_rod_rate,
+                    old_rod_encounters,
+                    good_rod_rate,
+                    good_rod_encounters,
+                    super_rod_rate,
+                    super_rod_encounters,
+                    rock_smash_rate,
+                    rock_smash_encounters,
+                    morning_encounters,
+                }
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 48,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_encounter_dppt_roundtrip(file in dppt_encounter_strategy()) {
+            let mut buf = Vec::new();
+            file.to_binary(&mut buf, GameFamily::Platinum).unwrap();
+            let mut reader = Cursor::new(buf);
+            let decoded = BinaryEncounterFile::from_binary(&mut reader, GameFamily::Platinum).unwrap();
+            prop_assert_eq!(file, decoded);
+        }
+
+        #[test]
+        fn prop_encounter_hgss_roundtrip(file in hgss_encounter_strategy()) {
+            let mut buf = Vec::new();
+            file.to_binary(&mut buf, GameFamily::HGSS).unwrap();
+            let mut reader = Cursor::new(buf);
+            let decoded = BinaryEncounterFile::from_binary(&mut reader, GameFamily::HGSS).unwrap();
+            prop_assert_eq!(file, decoded);
+        }
     }
 }
