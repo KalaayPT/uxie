@@ -326,6 +326,8 @@ impl GlobalScriptTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use byteorder::WriteBytesExt;
+    use proptest::prelude::*;
 
     #[test]
     fn test_platinum_hardcoded_table() {
@@ -447,5 +449,74 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
 
         let entry = table.lookup(2000).unwrap();
         assert!(entry.min_script_id <= 2000);
+    }
+
+    fn global_entries_strategy() -> impl Strategy<Value = Vec<GlobalScriptEntry>> {
+        prop::collection::btree_map(any::<u16>(), (any::<u16>(), any::<u16>()), 0..48).prop_map(
+            |mapping| {
+                mapping
+                    .into_iter()
+                    .map(|(min_script_id, (script_file_id, text_archive_id))| {
+                        GlobalScriptEntry::new(min_script_id, script_file_id, text_archive_id)
+                    })
+                    .collect()
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_from_entries_sorts_descending(entries in global_entries_strategy()) {
+            let table = GlobalScriptTable::from_entries(entries.clone());
+            let mins: Vec<u16> = table.entries().iter().map(|e| e.min_script_id).collect();
+            prop_assert!(mins.windows(2).all(|w| w[0] >= w[1]));
+            prop_assert_eq!(table.len(), entries.len());
+        }
+
+        #[test]
+        fn prop_lookup_matches_manual_search(entries in global_entries_strategy(), script_id in any::<u16>()) {
+            let mut expected_entries = entries.clone();
+            expected_entries.sort_by(|a, b| b.min_script_id.cmp(&a.min_script_id));
+            let expected = expected_entries
+                .iter()
+                .find(|e| script_id >= e.min_script_id)
+                .copied();
+
+            let table = GlobalScriptTable::from_entries(entries);
+            let actual = table.lookup(script_id).copied();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_is_global_script_threshold(script_id in any::<u16>()) {
+            let table = GlobalScriptTable::new();
+            prop_assert_eq!(
+                table.is_global_script(script_id),
+                script_id >= COMMON_SCRIPT_THRESHOLD
+            );
+        }
+
+        #[test]
+        fn prop_entry_read_from_roundtrip(
+            min_script_id in any::<u16>(),
+            script_file_id in any::<u16>(),
+            text_archive_id in any::<u16>()
+        ) {
+            let mut bytes = Vec::new();
+            bytes.write_u16::<LittleEndian>(min_script_id).unwrap();
+            bytes.write_u16::<LittleEndian>(script_file_id).unwrap();
+            bytes.write_u16::<LittleEndian>(text_archive_id).unwrap();
+
+            let mut cursor = Cursor::new(bytes);
+            let parsed = GlobalScriptEntry::read_from(&mut cursor).unwrap();
+            prop_assert_eq!(parsed.min_script_id, min_script_id);
+            prop_assert_eq!(parsed.script_file_id, script_file_id);
+            prop_assert_eq!(parsed.text_archive_id, text_archive_id);
+        }
     }
 }
