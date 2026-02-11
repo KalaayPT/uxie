@@ -106,6 +106,7 @@ impl ItemData {
 mod tests {
     use super::*;
     use crate::item_data::types::{BattlePocket, FieldPocket};
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     #[test]
@@ -207,6 +208,263 @@ mod tests {
         assert_eq!(parsed.field_pocket, FieldPocket::KeyItems);
         assert!(parsed.battle_pocket.contains(BattlePocket::POKE_BALLS));
         assert!(parsed.battle_pocket.contains(BattlePocket::HP_RESTORE));
+    }
+
+    fn field_pocket_strategy() -> impl Strategy<Value = FieldPocket> {
+        prop_oneof![
+            Just(FieldPocket::Items),
+            Just(FieldPocket::Medicine),
+            Just(FieldPocket::Balls),
+            Just(FieldPocket::TmHms),
+            Just(FieldPocket::Berries),
+            Just(FieldPocket::Mail),
+            Just(FieldPocket::BattleItems),
+            Just(FieldPocket::KeyItems),
+        ]
+    }
+
+    fn party_use_param_strategy() -> impl Strategy<Value = ItemPartyUseParam> {
+        let status = (
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+        );
+        let stages = (
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            0u8..16,
+            0u8..16,
+            0u8..16,
+            0u8..16,
+            0u8..16,
+            0u8..16,
+            0u8..4,
+        );
+        let flags = (
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+            any::<bool>(),
+        );
+        let values_a = (
+            any::<bool>(),
+            any::<bool>(),
+            any::<i8>(),
+            any::<i8>(),
+            any::<i8>(),
+            any::<i8>(),
+            any::<i8>(),
+            any::<i8>(),
+            any::<u8>(),
+            any::<u8>(),
+        );
+        let values_b = (any::<i8>(), any::<i8>(), any::<i8>());
+
+        (status, stages, flags, values_a, values_b).prop_map(
+            |(
+                (
+                    heal_sleep,
+                    heal_poison,
+                    heal_burn,
+                    heal_freeze,
+                    heal_paralysis,
+                    heal_confusion,
+                    heal_attract,
+                    guard_spec,
+                ),
+                (
+                    revive,
+                    revive_all,
+                    level_up,
+                    evolve,
+                    atk_stages,
+                    def_stages,
+                    spatk_stages,
+                    spdef_stages,
+                    speed_stages,
+                    acc_stages,
+                    crit_stages,
+                ),
+                (
+                    pp_up,
+                    pp_max,
+                    pp_restore,
+                    pp_restore_all,
+                    hp_restore,
+                    give_hp_evs,
+                    give_atk_evs,
+                    give_def_evs,
+                    give_speed_evs,
+                    give_spatk_evs,
+                    give_spdef_evs,
+                    give_friendship_low,
+                ),
+                (
+                    give_friendship_med,
+                    give_friendship_high,
+                    hp_evs,
+                    atk_evs,
+                    def_evs,
+                    speed_evs,
+                    spatk_evs,
+                    spdef_evs,
+                    hp_restored,
+                    pp_restored,
+                ),
+                (friendship_low, friendship_med, friendship_high),
+            )| ItemPartyUseParam {
+                heal_sleep,
+                heal_poison,
+                heal_burn,
+                heal_freeze,
+                heal_paralysis,
+                heal_confusion,
+                heal_attract,
+                guard_spec,
+                revive,
+                revive_all,
+                level_up,
+                evolve,
+                atk_stages,
+                def_stages,
+                spatk_stages,
+                spdef_stages,
+                speed_stages,
+                acc_stages,
+                crit_stages,
+                pp_up,
+                pp_max,
+                pp_restore,
+                pp_restore_all,
+                hp_restore,
+                give_hp_evs,
+                give_atk_evs,
+                give_def_evs,
+                give_speed_evs,
+                give_spatk_evs,
+                give_spdef_evs,
+                give_friendship_low,
+                give_friendship_med,
+                give_friendship_high,
+                hp_evs,
+                atk_evs,
+                def_evs,
+                speed_evs,
+                spatk_evs,
+                spdef_evs,
+                hp_restored,
+                pp_restored,
+                friendship_low,
+                friendship_med,
+                friendship_high,
+            },
+        )
+    }
+
+    fn item_data_strategy() -> impl Strategy<Value = ItemData> {
+        let part1 = (
+            any::<u16>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            0u8..32,
+            any::<bool>(),
+            any::<bool>(),
+        );
+        let part2 = (
+            field_pocket_strategy(),
+            0u8..32,
+            any::<u8>(),
+            any::<u8>(),
+            any::<u8>(),
+            party_use_param_strategy(),
+        );
+
+        (part1, part2).prop_map(
+            |(
+                (
+                    price,
+                    hold_effect,
+                    hold_effect_param,
+                    pluck_effect,
+                    fling_effect,
+                    fling_power,
+                    natural_gift_power,
+                    natural_gift_type,
+                    prevent_toss,
+                    is_selectable,
+                ),
+                (
+                    field_pocket,
+                    battle_pocket_bits,
+                    field_use_func,
+                    battle_use_func,
+                    party_use,
+                    party_use_param,
+                ),
+            )| ItemData {
+                price,
+                hold_effect,
+                hold_effect_param,
+                pluck_effect,
+                fling_effect,
+                fling_power,
+                natural_gift_power,
+                natural_gift_type,
+                prevent_toss,
+                is_selectable,
+                field_pocket,
+                battle_pocket: BattlePocket::from_bits_truncate(battle_pocket_bits),
+                field_use_func,
+                battle_use_func,
+                party_use,
+                party_use_param,
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_item_party_use_param_roundtrip(param in party_use_param_strategy()) {
+            let mut buf = Cursor::new(Vec::new());
+            param.to_binary(&mut buf).unwrap();
+            prop_assert_eq!(buf.get_ref().len(), 18);
+            buf.set_position(0);
+            let parsed = ItemPartyUseParam::from_binary(&mut buf).unwrap();
+            prop_assert_eq!(param, parsed);
+        }
+
+        #[test]
+        fn prop_item_data_roundtrip(item in item_data_strategy()) {
+            let bytes = item.to_bytes();
+            prop_assert_eq!(bytes.len(), ITEM_DATA_SIZE);
+            let mut cursor = Cursor::new(bytes);
+            let parsed = ItemData::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(item, parsed);
+        }
     }
 
     #[test]
