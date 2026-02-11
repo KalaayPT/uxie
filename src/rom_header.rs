@@ -419,12 +419,12 @@ impl RomHeader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
-    #[test]
-    fn test_detect_platinum_us() {
-        let header = RomHeader {
-            game_title: "POKEMON PL".into(),
-            game_code: "CPUE".into(),
+    fn header_with_code(game_code: String) -> RomHeader {
+        RomHeader {
+            game_title: "TEST".into(),
+            game_code,
             maker_code: "01".into(),
             unit_code: 0,
             rom_version: 0,
@@ -443,7 +443,61 @@ mod tests {
             fat_size: None,
             header_crc: None,
             source: RomHeaderSource::DsRomTool,
-        };
+        }
+    }
+
+    fn known_code_mappings() -> Vec<(&'static str, Game)> {
+        vec![
+            ("ADAE", Game::Diamond),
+            ("ADAJ", Game::Diamond),
+            ("ADAP", Game::Diamond),
+            ("ADAS", Game::Diamond),
+            ("ADAK", Game::Diamond),
+            ("APAE", Game::Pearl),
+            ("APAJ", Game::Pearl),
+            ("APAP", Game::Pearl),
+            ("APAS", Game::Pearl),
+            ("APAK", Game::Pearl),
+            ("CPUE", Game::Platinum),
+            ("CPUJ", Game::Platinum),
+            ("CPUP", Game::Platinum),
+            ("CPUS", Game::Platinum),
+            ("CPUK", Game::Platinum),
+            ("IPKE", Game::HeartGold),
+            ("IPKJ", Game::HeartGold),
+            ("IPKP", Game::HeartGold),
+            ("IPKS", Game::HeartGold),
+            ("IPKK", Game::HeartGold),
+            ("IPGE", Game::SoulSilver),
+            ("IPGJ", Game::SoulSilver),
+            ("IPGP", Game::SoulSilver),
+            ("IPGS", Game::SoulSilver),
+            ("IPGK", Game::SoulSilver),
+        ]
+    }
+
+    fn is_known_code(code: &str) -> bool {
+        known_code_mappings().iter().any(|(c, _)| *c == code)
+    }
+
+    fn expected_region(ch: char) -> Option<&'static str> {
+        match ch {
+            'E' => Some("USA"),
+            'J' => Some("Japan"),
+            'P' => Some("Europe"),
+            'S' => Some("Spain"),
+            'K' => Some("Korea"),
+            'F' => Some("France"),
+            'D' => Some("Germany"),
+            'I' => Some("Italy"),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn test_detect_platinum_us() {
+        let mut header = header_with_code("CPUE".into());
+        header.game_title = "POKEMON PL".into();
 
         assert_eq!(header.detect_game(), Some(Game::Platinum));
         assert_eq!(header.detect_game_family(), Some(GameFamily::Platinum));
@@ -471,5 +525,52 @@ secure_area_delay: 3454
         assert!(header.arm9_size.is_none());
 
         std::fs::remove_file(&temp).ok();
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_detect_game_known_codes((code, expected_game) in prop::sample::select(known_code_mappings())) {
+            let header = header_with_code(code.to_string());
+            prop_assert_eq!(header.detect_game(), Some(expected_game));
+            prop_assert_eq!(header.detect_game_family(), Some(expected_game.family()));
+        }
+
+        #[test]
+        fn prop_detect_game_unknown_4char_codes(
+            a in b'A'..=b'Z',
+            b in b'A'..=b'Z',
+            c in b'A'..=b'Z',
+            d in b'A'..=b'Z'
+        ) {
+            let code = String::from_utf8(vec![a, b, c, d]).unwrap();
+            prop_assume!(!is_known_code(&code));
+            let header = header_with_code(code);
+            prop_assert_eq!(header.detect_game(), None);
+            prop_assert_eq!(header.detect_game_family(), None);
+        }
+
+        #[test]
+        fn prop_region_and_language_follow_fourth_char(ch in any::<char>()) {
+            let mut code = String::from("AAA");
+            code.push(ch);
+            let header = header_with_code(code);
+            prop_assert_eq!(header.region(), expected_region(ch));
+            prop_assert_eq!(header.detect_language(), GameLanguage::from_region_code(ch));
+        }
+
+        #[test]
+        fn prop_short_codes_are_non_game_and_default_language(code_bytes in prop::collection::vec(b'A'..=b'Z', 0..3)) {
+            let code = String::from_utf8(code_bytes).unwrap();
+            let header = header_with_code(code);
+            prop_assert_eq!(header.detect_game(), None);
+            prop_assert_eq!(header.detect_game_family(), None);
+            prop_assert_eq!(header.region(), None);
+            prop_assert_eq!(header.detect_language(), GameLanguage::English);
+        }
     }
 }
