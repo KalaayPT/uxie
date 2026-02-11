@@ -12,6 +12,7 @@ use crate::map_header::{
 };
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 /// Trait for accessing ROM data regardless of source format
 ///
@@ -154,6 +155,7 @@ pub struct DecompProvider {
     pub root: PathBuf,
     pub symbols: crate::c_parser::SymbolTable,
     pub family: GameFamily,
+    headers_cache: Mutex<Option<Arc<Vec<MapHeader>>>>,
 }
 
 impl DecompProvider {
@@ -172,6 +174,7 @@ impl DecompProvider {
             root: root.as_ref().to_path_buf(),
             symbols,
             family,
+            headers_cache: Mutex::new(None),
         }
     }
 
@@ -193,7 +196,7 @@ impl DecompProvider {
         if fallback.exists() { fallback } else { primary }
     }
 
-    fn load_all_headers(&self) -> Result<Vec<MapHeader>> {
+    fn parse_all_headers(&self) -> Result<Vec<MapHeader>> {
         let path = self.map_headers_path();
         let content = std::fs::read_to_string(path)?;
         let parsed = crate::map_header::parse_map_headers_from_c(&content);
@@ -211,6 +214,31 @@ impl DecompProvider {
             headers.push(header);
         }
         Ok(headers)
+    }
+
+    fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
+        {
+            let cache = self
+                .headers_cache
+                .lock()
+                .map_err(|_| UxieError::invalid_format("Decomp header cache lock poisoned"))?;
+            if let Some(headers) = cache.as_ref() {
+                return Ok(headers.clone());
+            }
+        }
+
+        let parsed = Arc::new(self.parse_all_headers()?);
+
+        let mut cache = self
+            .headers_cache
+            .lock()
+            .map_err(|_| UxieError::invalid_format("Decomp header cache lock poisoned"))?;
+        if let Some(headers) = cache.as_ref() {
+            return Ok(headers.clone());
+        }
+        *cache = Some(parsed.clone());
+
+        Ok(parsed)
     }
 }
 
@@ -561,5 +589,78 @@ mod tests {
             }
             _ => panic!("expected HGSS map header variant"),
         }
+    }
+
+    #[test]
+    fn test_decomp_provider_caches_headers_after_first_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_TEST] = {
+            .areaDataArchiveID = 1,
+            .unk_01 = 2,
+            .mapMatrixID = 3,
+            .scriptsArchiveID = 4,
+            .initScriptsArchiveID = 5,
+            .msgArchiveID = 6,
+            .dayMusicID = 7,
+            .nightMusicID = 8,
+            .wildEncountersArchiveID = 9,
+            .eventsArchiveID = 10,
+            .mapLabelTextID = 11,
+            .mapLabelWindowID = 12,
+            .weather = 13,
+            .cameraType = 14,
+            .mapType = 15,
+            .battleBG = 16,
+            .isBikeAllowed = TRUE,
+            .isRunningAllowed = FALSE,
+            .isEscapeRopeAllowed = TRUE,
+            .isFlyAllowed = FALSE,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+
+        let first = provider.get_map_header(0).unwrap();
+        assert_eq!(first.script_file_id(), 4);
+
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_TEST] = {
+            .areaDataArchiveID = 1,
+            .unk_01 = 2,
+            .mapMatrixID = 3,
+            .scriptsArchiveID = 99,
+            .initScriptsArchiveID = 5,
+            .msgArchiveID = 6,
+            .dayMusicID = 7,
+            .nightMusicID = 8,
+            .wildEncountersArchiveID = 9,
+            .eventsArchiveID = 10,
+            .mapLabelTextID = 11,
+            .mapLabelWindowID = 12,
+            .weather = 13,
+            .cameraType = 14,
+            .mapType = 15,
+            .battleBG = 16,
+            .isBikeAllowed = TRUE,
+            .isRunningAllowed = FALSE,
+            .isEscapeRopeAllowed = TRUE,
+            .isFlyAllowed = FALSE,
+        },
+        ",
+        )
+        .unwrap();
+
+        let second = provider.get_map_header(0).unwrap();
+        assert_eq!(second.script_file_id(), 4);
     }
 }
