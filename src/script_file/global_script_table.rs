@@ -18,7 +18,7 @@
 //! The table can be loaded from:
 //! - **HGSS binary**: Read from arm9.bin (pointer at 0x40164)
 //! - **HGSS decomp**: Parse `src/fieldmap.c` `sScriptBankMapping` table
-//! - **Platinum decomp**: Parse `src/script_manager.c` if-else chain
+//! - **Platinum decomp**: Parse `src/script_manager.c` `SCRIPT_RANGE_TABLE` macro
 //! - **Platinum binary**: Hardcoded (no clean table in binary)
 
 use crate::c_parser::SymbolTable;
@@ -48,18 +48,11 @@ static RE_HGSS_ENTRY: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"\{\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\}").unwrap()
 });
 
-/// Regex to match Platinum if-else chain entries:
-/// `if (retScriptID >= 10490) {`
-/// `    ScriptContext_Load(fieldSystem, ctx, scripts_unk_0499, TEXT_BANK_SCRATCH_OFF_CARDS);`
-static RE_PLATINUM_IF: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"if\s*\(\s*retScriptID\s*>=\s*([A-Za-z0-9_]+)\s*\)").unwrap());
-
-/// Regex to match ScriptContext_Load call
-static RE_PLATINUM_LOAD: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r"ScriptContext_Load\s*\(\s*fieldSystem\s*,\s*ctx\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)",
-    )
-    .unwrap()
+/// Regex to match SCRIPT_RANGE_TABLE macro entries:
+/// `Entry(10490, scripts_unk_0499, TEXT_BANK_SCRATCH_OFF_CARDS) \`
+static RE_PLATINUM_TABLE_ENTRY: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"Entry\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)")
+        .unwrap()
 });
 
 fn resolve_value(s: &str, symbols: &SymbolTable) -> Option<i64> {
@@ -206,53 +199,36 @@ impl GlobalScriptTable {
         })
     }
 
-    /// Parse Platinum if-else chain from script_manager.c source.
+    /// Parse Platinum `SCRIPT_RANGE_TABLE` macro from script_manager.c source.
     ///
-    /// Parses patterns like:
+    /// Parses the macro table format:
     /// ```c
-    /// if (retScriptID >= 10490) {
-    ///     ScriptContext_Load(fieldSystem, ctx, scripts_unk_0499, TEXT_BANK_...);
+    /// #define SCRIPT_RANGE_TABLE(Entry) \
+    ///     Entry(10490, scripts_unk_0499, TEXT_BANK_SCRATCH_OFF_CARDS) \
+    ///     Entry(10450, scripts_unk_0500, TEXT_BANK_UNK_0016) \
+    ///     ...
     /// ```
     pub fn from_platinum_decomp(content: &str, symbols: &SymbolTable) -> Option<Self> {
+        // Find the SCRIPT_RANGE_TABLE macro definition
+        let start = content.find("SCRIPT_RANGE_TABLE")?;
+        let block_start = content[start..].find('(')?;
+        let block = &content[start + block_start..];
+
         let mut entries = Vec::new();
+        for caps in RE_PLATINUM_TABLE_ENTRY.captures_iter(block) {
+            let script_id_sym = caps.get(1)?.as_str();
+            let script_file_sym = caps.get(2)?.as_str();
+            let text_archive_sym = caps.get(3)?.as_str();
 
-        let lines: Vec<&str> = content.lines().collect();
-        let mut i = 0;
+            let min_script_id = resolve_value(script_id_sym, symbols)? as u16;
+            let script_file_id = resolve_value(script_file_sym, symbols)? as u16;
+            let text_archive_id = resolve_value(text_archive_sym, symbols)? as u16;
 
-        while i < lines.len() {
-            let line = lines[i];
-
-            if let Some(if_caps) = RE_PLATINUM_IF.captures(line) {
-                if let Some(script_id_match) = if_caps.get(1) {
-                    let script_id_sym = script_id_match.as_str();
-                    if let Some(min_script_id) = resolve_value(script_id_sym, symbols) {
-                        // Look for ScriptContext_Load in next few lines
-                        for j in i + 1..std::cmp::min(i + 5, lines.len()) {
-                            if let Some(load_caps) = RE_PLATINUM_LOAD.captures(lines[j]) {
-                                if let (Some(script_file_match), Some(text_bank_match)) =
-                                    (load_caps.get(1), load_caps.get(2))
-                                {
-                                    let script_file_sym = script_file_match.as_str();
-                                    let text_archive_sym = text_bank_match.as_str();
-
-                                    if let (Some(script_file_id), Some(text_archive_id)) = (
-                                        resolve_value(script_file_sym, symbols),
-                                        resolve_value(text_archive_sym, symbols),
-                                    ) {
-                                        entries.push(GlobalScriptEntry::new(
-                                            min_script_id as u16,
-                                            script_file_id as u16,
-                                            text_archive_id as u16,
-                                        ));
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            i += 1;
+            entries.push(GlobalScriptEntry::new(
+                min_script_id,
+                script_file_id,
+                text_archive_id,
+            ));
         }
 
         if entries.is_empty() {
@@ -262,7 +238,7 @@ impl GlobalScriptTable {
         Some(Self::from_entries(entries))
     }
 
-    /// Parse Platinum if-else chain from script_manager.c file path.
+    /// Parse Platinum `SCRIPT_RANGE_TABLE` macro from script_manager.c file path.
     pub fn from_platinum_decomp_file(
         path: impl AsRef<Path>,
         symbols: &SymbolTable,
@@ -271,7 +247,7 @@ impl GlobalScriptTable {
         Self::from_platinum_decomp(&content, symbols).ok_or_else(|| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
-                "Failed to parse ScriptContext_LoadAndOffsetID",
+                "Failed to parse SCRIPT_RANGE_TABLE macro",
             )
         })
     }
@@ -431,20 +407,11 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         symbols.insert_define("SCRIPT_ID_OFFSET_COMMON_SCRIPTS".to_string(), 2000);
 
         let content = r#"
-static u16 ScriptContext_LoadAndOffsetID(FieldSystem *fieldSystem, ScriptContext *ctx, u16 scriptID)
-{
-    u16 retScriptID = scriptID;
-
-    if (retScriptID >= 10490) {
-        ScriptContext_Load(fieldSystem, ctx, scripts_unk_0499, TEXT_BANK_SCRATCH_OFF_CARDS);
-        retScriptID -= 10490;
-    } else if (retScriptID >= SCRIPT_ID_OFFSET_COMMON_SCRIPTS) {
-        ScriptContext_Load(fieldSystem, ctx, scripts_common, TEXT_BANK_COMMON_STRINGS);
-        retScriptID -= SCRIPT_ID_OFFSET_COMMON_SCRIPTS;
-    }
-
-    return retScriptID;
-}
+// clang-format off
+#define SCRIPT_RANGE_TABLE(Entry) \
+    Entry(10490,                                    scripts_unk_0499,                       TEXT_BANK_SCRATCH_OFF_CARDS) \
+    Entry(SCRIPT_ID_OFFSET_COMMON_SCRIPTS,          scripts_common,                         TEXT_BANK_COMMON_STRINGS)
+// clang-format on
 "#;
 
         let table = GlobalScriptTable::from_platinum_decomp(content, &symbols).unwrap();
