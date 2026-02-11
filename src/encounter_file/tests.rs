@@ -6,8 +6,7 @@ mod tests {
     use crate::game::GameFamily;
     use std::io::Cursor;
 
-    #[test]
-    fn test_encounter_binary_roundtrip_dppt() {
+    fn build_dppt_fixture() -> BinaryEncounterFile {
         let mut grass = Vec::new();
         for i in 0..12 {
             grass.push(EncounterEntry {
@@ -25,7 +24,7 @@ mod tests {
             });
         }
 
-        let file = BinaryEncounterFile {
+        BinaryEncounterFile {
             walking_rate: 30,
             grass_encounters: grass,
             swarm_encounters: vec![1, 2],
@@ -46,11 +45,93 @@ mod tests {
             good_rod_rate: 15,
             good_rod_encounters: water.clone(),
             super_rod_rate: 20,
-            super_rod_encounters: water.clone(),
+            super_rod_encounters: water,
             rock_smash_rate: 0,
             rock_smash_encounters: Vec::new(),
             morning_encounters: Vec::new(),
-        };
+        }
+    }
+
+    fn build_hgss_fixture() -> BinaryEncounterFile {
+        let morning: Vec<EncounterEntry> = (0..12)
+            .map(|i| EncounterEntry {
+                level: (i + 2) as u8,
+                species: (i + 1) as u32,
+            })
+            .collect();
+
+        let day: Vec<u32> = (0..12).map(|i| (i + 20) as u32).collect();
+        let night: Vec<u32> = (0..12).map(|i| (i + 40) as u32).collect();
+        let swarm = vec![100, 101, 102, 103];
+        let radar = vec![200, 201, 202, 203];
+
+        let surf: Vec<WaterEncounterEntry> = (0..5)
+            .map(|i| WaterEncounterEntry {
+                min_level: (i + 1) as u8,
+                max_level: (i + 6) as u8,
+                species: (300 + i) as u32,
+            })
+            .collect();
+        let rock: Vec<WaterEncounterEntry> = (0..2)
+            .map(|i| WaterEncounterEntry {
+                min_level: (i + 1) as u8,
+                max_level: (i + 4) as u8,
+                species: (400 + i) as u32,
+            })
+            .collect();
+        let old_rod: Vec<WaterEncounterEntry> = (0..5)
+            .map(|i| WaterEncounterEntry {
+                min_level: (i + 2) as u8,
+                max_level: (i + 5) as u8,
+                species: (500 + i) as u32,
+            })
+            .collect();
+        let good_rod: Vec<WaterEncounterEntry> = (0..5)
+            .map(|i| WaterEncounterEntry {
+                min_level: (i + 3) as u8,
+                max_level: (i + 6) as u8,
+                species: (600 + i) as u32,
+            })
+            .collect();
+        let super_rod: Vec<WaterEncounterEntry> = (0..5)
+            .map(|i| WaterEncounterEntry {
+                min_level: (i + 4) as u8,
+                max_level: (i + 7) as u8,
+                species: (700 + i) as u32,
+            })
+            .collect();
+
+        BinaryEncounterFile {
+            walking_rate: 20,
+            grass_encounters: morning.clone(),
+            swarm_encounters: swarm,
+            day_encounters: day,
+            night_encounters: night,
+            radar_encounters: radar,
+            form_encounter_rates: Vec::new(),
+            unown_table_id: 0,
+            dual_slot_ruby: Vec::new(),
+            dual_slot_sapphire: Vec::new(),
+            dual_slot_emerald: Vec::new(),
+            dual_slot_firered: Vec::new(),
+            dual_slot_leafgreen: Vec::new(),
+            surf_rate: 10,
+            surf_encounters: surf,
+            old_rod_rate: 5,
+            old_rod_encounters: old_rod,
+            good_rod_rate: 15,
+            good_rod_encounters: good_rod,
+            super_rod_rate: 20,
+            super_rod_encounters: super_rod,
+            rock_smash_rate: 12,
+            rock_smash_encounters: rock,
+            morning_encounters: morning,
+        }
+    }
+
+    #[test]
+    fn test_encounter_binary_roundtrip_dppt() {
+        let file = build_dppt_fixture();
 
         let mut buffer = Vec::new();
         file.to_binary(&mut buffer, GameFamily::Platinum).unwrap();
@@ -59,6 +140,45 @@ mod tests {
         let decoded = BinaryEncounterFile::from_binary(&mut reader, GameFamily::Platinum).unwrap();
 
         assert_eq!(file, decoded);
+    }
+
+    #[test]
+    fn test_encounter_binary_roundtrip_hgss() {
+        let file = build_hgss_fixture();
+
+        let mut buffer = Vec::new();
+        file.to_binary(&mut buffer, GameFamily::HGSS).unwrap();
+
+        let mut reader = Cursor::new(&buffer);
+        let decoded = BinaryEncounterFile::from_binary(&mut reader, GameFamily::HGSS).unwrap();
+
+        assert_eq!(file, decoded);
+    }
+
+    #[test]
+    fn test_encounter_binary_rejects_invalid_dppt_shape() {
+        let mut file = build_dppt_fixture();
+        file.grass_encounters.pop();
+
+        let mut buffer = Vec::new();
+        let err = file
+            .to_binary(&mut buffer, GameFamily::Platinum)
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("grass_encounters"));
+    }
+
+    #[test]
+    fn test_encounter_binary_rejects_hgss_rate_overflow() {
+        let mut file = build_hgss_fixture();
+        file.walking_rate = 300;
+
+        let mut buffer = Vec::new();
+        let err = file.to_binary(&mut buffer, GameFamily::HGSS).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("walking_rate"));
     }
 
     #[test]
