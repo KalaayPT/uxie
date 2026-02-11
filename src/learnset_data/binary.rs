@@ -33,6 +33,7 @@ impl LearnsetData {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::io::Cursor;
 
     #[test]
@@ -90,5 +91,56 @@ mod tests {
         let learned_at_5: Vec<_> = learnset.moves_learned_at(5).collect();
         assert_eq!(learned_at_5.len(), 1);
         assert_eq!(learned_at_5[0].move_id, 2);
+    }
+
+    fn valid_entry_strategy() -> impl Strategy<Value = LearnsetEntry> {
+        (0u16..=0x1FF, 0u8..=0x7F)
+            .prop_filter("avoid reserved terminator encoding", |(move_id, level)| {
+                !(*move_id == 0x1FF && *level == 0x7F)
+            })
+            .prop_map(|(move_id, level)| LearnsetEntry { move_id, level })
+    }
+
+    fn learnset_strategy() -> impl Strategy<Value = LearnsetData> {
+        prop::collection::vec(valid_entry_strategy(), 0..64)
+            .prop_map(|entries| LearnsetData { entries })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_entry_pack_roundtrip(entry in valid_entry_strategy()) {
+            let packed = entry.to_packed();
+            prop_assert_ne!(packed, LEARNSET_TERMINATOR);
+            let unpacked = LearnsetEntry::from_packed(packed);
+            prop_assert_eq!(entry, unpacked);
+        }
+
+        #[test]
+        fn prop_learnset_roundtrip(learnset in learnset_strategy()) {
+            let bytes = learnset.to_bytes();
+            prop_assert_eq!(bytes.len(), (learnset.entries.len() + 1) * 2);
+            prop_assert_eq!(&bytes[bytes.len() - 2..], &[0xFF, 0xFF]);
+
+            let mut cursor = Cursor::new(bytes);
+            let parsed = LearnsetData::from_binary(&mut cursor).unwrap();
+            prop_assert_eq!(learnset, parsed);
+        }
+
+        #[test]
+        fn prop_level_query_helpers_match_filters(learnset in learnset_strategy(), level in any::<u8>()) {
+            let expected_at_level: Vec<_> = learnset.entries.iter().filter(|e| e.level <= level).collect();
+            let expected_learned_at: Vec<_> = learnset.entries.iter().filter(|e| e.level == level).collect();
+
+            let actual_at_level: Vec<_> = learnset.moves_at_level(level).collect();
+            let actual_learned_at: Vec<_> = learnset.moves_learned_at(level).collect();
+
+            prop_assert_eq!(actual_at_level, expected_at_level);
+            prop_assert_eq!(actual_learned_at, expected_learned_at);
+        }
     }
 }
