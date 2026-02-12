@@ -2,6 +2,13 @@ use super::types::*;
 use crate::c_parser::SymbolTable;
 use regex::Regex;
 use std::collections::HashMap;
+use std::sync::LazyLock;
+
+static HEADER_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\[([A-Z_][A-Z0-9_]*)\]\s*=\s*\{([^}]+)\}").unwrap());
+
+static FIELD_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^,}]+)").unwrap());
 
 #[derive(Debug, Clone)]
 pub struct ParsedMapHeader {
@@ -13,16 +20,12 @@ pub struct ParsedMapHeader {
 pub fn parse_map_headers_from_c(source: &str) -> Vec<ParsedMapHeader> {
     let mut headers = Vec::new();
 
-    let header_pattern = Regex::new(r"\[([A-Z_][A-Z0-9_]*)\]\s*=\s*\{([^}]+)\}").unwrap();
-
-    let field_pattern = Regex::new(r"\.([a-zA-Z_][a-zA-Z0-9_]*)\s*=\s*([^,}]+)").unwrap();
-
-    for cap in header_pattern.captures_iter(source) {
+    for cap in HEADER_PATTERN.captures_iter(source) {
         let name = cap[1].to_string();
         let body = &cap[2];
 
         let mut fields = HashMap::new();
-        for field_cap in field_pattern.captures_iter(body) {
+        for field_cap in FIELD_PATTERN.captures_iter(body) {
             let field_name = field_cap[1].trim().to_string();
             let field_value = field_cap[2].trim().to_string();
             fields.insert(field_name, field_value);

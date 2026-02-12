@@ -1,6 +1,13 @@
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
+
+static SYSTEM_INCLUDE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"#include\s*<([^>]+)>").unwrap());
+
+static LOCAL_INCLUDE_PATTERN: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"#include\s*"([^"]+)""#).unwrap());
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CInclude {
@@ -11,18 +18,15 @@ pub struct CInclude {
 pub fn parse_includes(source: &str) -> Vec<CInclude> {
     let mut includes = Vec::new();
 
-    let system_pattern = Regex::new(r"#include\s*<([^>]+)>").unwrap();
-    let local_pattern = Regex::new(r#"#include\s*"([^"]+)""#).unwrap();
-
     for line in source.lines() {
         let line = line.trim();
 
-        if let Some(caps) = system_pattern.captures(line) {
+        if let Some(caps) = SYSTEM_INCLUDE_PATTERN.captures(line) {
             includes.push(CInclude {
                 path: caps[1].to_string(),
                 is_system: true,
             });
-        } else if let Some(caps) = local_pattern.captures(line) {
+        } else if let Some(caps) = LOCAL_INCLUDE_PATTERN.captures(line) {
             includes.push(CInclude {
                 path: caps[1].to_string(),
                 is_system: false,
