@@ -4,9 +4,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use uxie::{
     BinaryEncounterFile, DspreProject, EggMoveData, EvolutionData, EvolutionMethod, GameFamily,
-    GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeader, MapHeaderJson, MoveData,
-    Narc, PersonalData, RomHeader, SymbolTable, TrainerData, Workspace,
+    GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeaderJson, MoveData, Narc,
+    PersonalData, RomHeader, SymbolTable, TrainerData, Workspace,
 };
+
+mod cli;
+
+use crate::cli::render::{print_encounter_file, print_event_file, print_map_header};
 
 #[derive(Parser)]
 #[command(name = "uxie")]
@@ -243,15 +247,19 @@ fn cmd_event(
     id: u32,
     project_path: &PathBuf,
     decomp: Option<PathBuf>,
-    _json: bool,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
     let dspre = DspreProject::open(project_path)?;
     let bin_event = dspre.load_event_file(id)?;
-    let json_event = uxie::JsonEventFile::from_binary(&bin_event, &ws.symbols);
+    let event = uxie::JsonEventFile::from_binary(&bin_event, &ws.symbols);
 
-    println!("{}", serde_json::to_string_pretty(&json_event)?);
+    if json {
+        println!("{}", serde_json::to_string_pretty(&event)?);
+    } else {
+        print_event_file(&event, id);
+    }
     Ok(())
 }
 
@@ -259,7 +267,7 @@ fn cmd_encounter(
     id: u32,
     project_path: &PathBuf,
     decomp: Option<PathBuf>,
-    _json: bool,
+    json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
 
@@ -289,8 +297,13 @@ fn cmd_encounter(
 
     let mut reader = std::io::Cursor::new(bin_data);
     let bin = BinaryEncounterFile::from_binary(&mut reader, ws.family)?;
-    let json = JsonEncounterFile::from_binary(&bin, &ws.symbols, ws.family);
-    println!("{}", serde_json::to_string_pretty(&json)?);
+    let encounter = JsonEncounterFile::from_binary(&bin, &ws.symbols, ws.family);
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&encounter)?);
+    } else {
+        print_encounter_file(&encounter, id, ws.family);
+    }
 
     Ok(())
 }
@@ -493,137 +506,6 @@ fn load_symbols_from_decomp(
         }
     }
     Ok(())
-}
-
-fn print_map_header(header: &MapHeader, id: u16, symbols: &SymbolTable, ws: &Workspace) {
-    let (game_name, divider_len) = match header {
-        MapHeader::DP(_) => ("Diamond/Pearl", 29),
-        MapHeader::Pt(_) => ("Platinum", 25),
-        MapHeader::HGSS(_) => ("HeartGold/SoulSilver", 36),
-    };
-
-    let resolve = |val: i64, prefix: &str| -> String {
-        symbols
-            .resolve_name(val, prefix)
-            .unwrap_or_else(|| val.to_string())
-    };
-
-    let internal_name = ws
-        .get_map_internal_name(id)
-        .unwrap_or_else(|| "Unknown".to_string());
-    let location_id = match header {
-        MapHeader::DP(h) => h.location_name as u16,
-        MapHeader::Pt(h) => h.location_name as u16,
-        MapHeader::HGSS(h) => h.location_name as u16,
-    };
-    let pretty_name = ws
-        .get_map_location_name(location_id as u8)
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    println!("Map Header {} ({})", id, game_name);
-    println!("Internal Name:   {}", internal_name);
-    println!("Pretty Name:     {}", pretty_name);
-    println!("{}", "=".repeat(divider_len));
-
-    println!("Area Data ID:    {}", header.area_data_id());
-    println!("Matrix ID:       {}", header.matrix_id());
-    println!("Script File ID:  {}", header.script_file_id());
-    println!("Level Script ID: {}", header.level_script_id());
-    println!("Text Archive ID: {}", header.text_archive_id());
-
-    match header {
-        MapHeader::DP(h) => {
-            println!(
-                "Music Day:       {}",
-                resolve(h.music_day_id as i64, "SEQ_")
-            );
-            println!(
-                "Music Night:     {}",
-                resolve(h.music_night_id as i64, "SEQ_")
-            );
-            println!("Wild Pokemon:    {}", h.wild_pokemon);
-            println!("Event File ID:   {}", h.event_file_id);
-            println!(
-                "Location Name:   {}",
-                resolve(h.location_name as i64, "MAPSEC_")
-            );
-            println!(
-                "Weather:         {}",
-                resolve(h.weather_id as i64, "OVERWORLD_WEATHER_")
-            );
-            println!(
-                "Camera:          {}",
-                resolve(h.camera_angle_id as i64, "CAMERA_TYPE_")
-            );
-            println!(
-                "Battle BG:       {}",
-                resolve(h.battle_background as i64, "BATTLE_BG_")
-            );
-            println!("Flags:           0x{:02X}", h.flags);
-        }
-        MapHeader::Pt(h) => {
-            println!(
-                "Music Day:       {}",
-                resolve(h.music_day_id as i64, "SEQ_")
-            );
-            println!(
-                "Music Night:     {}",
-                resolve(h.music_night_id as i64, "SEQ_")
-            );
-            println!("Wild Pokemon:    {}", h.wild_pokemon);
-            println!("Event File ID:   {}", h.event_file_id);
-            println!(
-                "Location Name:   {}",
-                resolve(h.location_name as i64, "MAPSEC_")
-            );
-            println!("Area Icon:       {}", h.area_icon);
-            println!(
-                "Weather:         {}",
-                resolve(h.weather_id as i64, "OVERWORLD_WEATHER_")
-            );
-            println!(
-                "Camera:          {}",
-                resolve(h.camera_angle_id as i64, "CAMERA_TYPE_")
-            );
-            println!(
-                "Battle BG:       {}",
-                resolve(h.battle_background as i64, "BATTLE_BG_")
-            );
-            println!("Flags:           0x{:02X}", h.flags);
-        }
-        MapHeader::HGSS(h) => {
-            println!(
-                "Music Day:       {}",
-                resolve(h.music_day_id as i64, "SEQ_")
-            );
-            println!(
-                "Music Night:     {}",
-                resolve(h.music_night_id as i64, "SEQ_")
-            );
-            println!("Wild Pokemon:    {}", h.wild_pokemon);
-            println!("Event File ID:   {}", h.event_file_id);
-            println!(
-                "Location Name:   {}",
-                resolve(h.location_name as i64, "MAPSEC_")
-            );
-            println!("Area Icon:       {}", h.area_icon);
-            println!(
-                "Weather:         {}",
-                resolve(h.weather_id as i64, "OVERWORLD_WEATHER_")
-            );
-            println!(
-                "Camera:          {}",
-                resolve(h.camera_angle_id as i64, "CAMERA_TYPE_")
-            );
-            println!("Worldmap:        ({}, {})", h.worldmap_x, h.worldmap_y);
-            println!("Kanto:           {}", h.kanto_flag);
-            println!(
-                "Battle BG:       {}",
-                resolve(h.battle_background as i64, "BATTLE_BG_")
-            );
-            println!("Flags:           0x{:02X}", h.flags);
-        }
-    }
 }
 
 fn cmd_personal(
