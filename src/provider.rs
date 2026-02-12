@@ -25,17 +25,33 @@ pub trait DataProvider {
     fn get_map_header_count(&self) -> Result<usize>;
     /// Get the text archive ID associated with a script file
     fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>>;
-    /// Find the map ID for a given script file ID
+    /// Find all map IDs for a given script file ID.
+    fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>>;
+
+    /// Find the first map ID for a given script file ID.
     ///
     /// Returns the first map ID that uses the specified script file ID,
     /// or None if no map uses it.
-    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>>;
+    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
+        Ok(self
+            .find_maps_by_script_file_id(script_file_id)?
+            .into_iter()
+            .next())
+    }
 
-    /// Find the map ID for a given level script file ID
+    /// Find all map IDs for a given level script file ID.
+    fn find_maps_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Vec<u16>>;
+
+    /// Find the first map ID for a given level script file ID.
     ///
     /// Returns the first map ID that uses the specified level script file ID,
     /// or None if no map uses it.
-    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>>;
+    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>> {
+        Ok(self
+            .find_maps_by_level_script_file_id(level_script_file_id)?
+            .into_iter()
+            .next())
+    }
 }
 
 /// Provider for reading map data from ARM9 binary files
@@ -136,14 +152,20 @@ impl DataProvider for Arm9Provider {
         find_text_archive_in_headers(&headers, script_file_id)
     }
 
-    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
+    fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>> {
         let headers = self.read_all_headers()?;
-        find_map_by_script_file_in_headers(&headers, script_file_id)
+        Ok(find_maps_by_script_file_in_headers(
+            &headers,
+            script_file_id,
+        ))
     }
 
-    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>> {
+    fn find_maps_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Vec<u16>> {
         let headers = self.read_all_headers()?;
-        find_map_by_level_script_in_headers(&headers, level_script_file_id)
+        Ok(find_maps_by_level_script_in_headers(
+            &headers,
+            level_script_file_id,
+        ))
     }
 }
 
@@ -264,14 +286,20 @@ impl DataProvider for DecompProvider {
         find_text_archive_in_headers(&headers, script_file_id)
     }
 
-    fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
+    fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>> {
         let headers = self.load_all_headers()?;
-        find_map_by_script_file_in_headers(&headers, script_file_id)
+        Ok(find_maps_by_script_file_in_headers(
+            &headers,
+            script_file_id,
+        ))
     }
 
-    fn find_map_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Option<u16>> {
+    fn find_maps_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Vec<u16>> {
         let headers = self.load_all_headers()?;
-        find_map_by_level_script_in_headers(&headers, level_script_file_id)
+        Ok(find_maps_by_level_script_in_headers(
+            &headers,
+            level_script_file_id,
+        ))
     }
 }
 
@@ -284,28 +312,27 @@ fn find_text_archive_in_headers(headers: &[MapHeader], script_file_id: u16) -> R
     Ok(None)
 }
 
-fn find_map_by_script_file_in_headers(
-    headers: &[MapHeader],
-    script_file_id: u16,
-) -> Result<Option<u16>> {
-    for (map_id, header) in headers.iter().enumerate() {
-        if header.script_file_id() == script_file_id {
-            return Ok(Some(map_id as u16));
-        }
-    }
-    Ok(None)
+fn find_maps_by_script_file_in_headers(headers: &[MapHeader], script_file_id: u16) -> Vec<u16> {
+    headers
+        .iter()
+        .enumerate()
+        .filter_map(|(map_id, header)| {
+            (header.script_file_id() == script_file_id).then_some(map_id as u16)
+        })
+        .collect()
 }
 
-fn find_map_by_level_script_in_headers(
+fn find_maps_by_level_script_in_headers(
     headers: &[MapHeader],
     level_script_file_id: u16,
-) -> Result<Option<u16>> {
-    for (map_id, header) in headers.iter().enumerate() {
-        if header.level_script_id() == level_script_file_id {
-            return Ok(Some(map_id as u16));
-        }
-    }
-    Ok(None)
+) -> Vec<u16> {
+    headers
+        .iter()
+        .enumerate()
+        .filter_map(|(map_id, header)| {
+            (header.level_script_id() == level_script_file_id).then_some(map_id as u16)
+        })
+        .collect()
 }
 
 /// Find all map headers that use a specific script file
@@ -506,6 +533,36 @@ mod tests {
         assert_eq!(provider.find_map_by_script_file_id(20).unwrap(), Some(1));
         assert_eq!(provider.find_map_by_script_file_id(30).unwrap(), Some(2));
         assert_eq!(provider.find_map_by_script_file_id(999).unwrap(), None);
+    }
+
+    #[test]
+    fn test_arm9_provider_find_maps_by_script_and_level_file_id() {
+        let headers = vec![
+            create_test_pt_header_with_level(10, 100, 1),
+            create_test_pt_header_with_level(20, 200, 2),
+            create_test_pt_header_with_level(10, 300, 2),
+            create_test_pt_header_with_level(40, 400, 3),
+        ];
+        let file = create_test_arm9_file(&headers);
+
+        let provider = Arm9Provider::new(file.path(), 0, 4, GameFamily::Platinum);
+
+        assert_eq!(
+            provider.find_maps_by_script_file_id(10).unwrap(),
+            vec![0, 2]
+        );
+        assert_eq!(
+            provider.find_maps_by_script_file_id(999).unwrap(),
+            Vec::<u16>::new()
+        );
+        assert_eq!(
+            provider.find_maps_by_level_script_file_id(2).unwrap(),
+            vec![1, 2]
+        );
+        assert_eq!(
+            provider.find_maps_by_level_script_file_id(999).unwrap(),
+            Vec::<u16>::new()
+        );
     }
 
     #[test]
@@ -727,21 +784,47 @@ mod tests {
 
         #[test]
         fn prop_find_map_by_script_file_returns_first_match(headers in pt_headers_strategy(), script_id in any::<u16>()) {
+            let matches = find_maps_by_script_file_in_headers(&headers, script_id);
             let expected = headers
                 .iter()
                 .enumerate()
                 .find_map(|(idx, h)| (h.script_file_id() == script_id).then_some(idx as u16));
-            let actual = find_map_by_script_file_in_headers(&headers, script_id).unwrap();
+            let actual = matches.first().copied();
+            prop_assert_eq!(matches.first().copied(), expected);
             prop_assert_eq!(actual, expected);
         }
 
         #[test]
         fn prop_find_map_by_level_script_returns_first_match(headers in pt_headers_strategy(), level_script_id in any::<u16>()) {
+            let matches = find_maps_by_level_script_in_headers(&headers, level_script_id);
             let expected = headers
                 .iter()
                 .enumerate()
                 .find_map(|(idx, h)| (h.level_script_id() == level_script_id).then_some(idx as u16));
-            let actual = find_map_by_level_script_in_headers(&headers, level_script_id).unwrap();
+            let actual = matches.first().copied();
+            prop_assert_eq!(matches.first().copied(), expected);
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_find_maps_by_script_file_matches_manual(headers in pt_headers_strategy(), script_id in any::<u16>()) {
+            let expected: Vec<u16> = headers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, h)| (h.script_file_id() == script_id).then_some(idx as u16))
+                .collect();
+            let actual = find_maps_by_script_file_in_headers(&headers, script_id);
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_find_maps_by_level_script_file_matches_manual(headers in pt_headers_strategy(), level_script_id in any::<u16>()) {
+            let expected: Vec<u16> = headers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, h)| (h.level_script_id() == level_script_id).then_some(idx as u16))
+                .collect();
+            let actual = find_maps_by_level_script_in_headers(&headers, level_script_id);
             prop_assert_eq!(actual, expected);
         }
     }

@@ -696,11 +696,25 @@ mod tests {
             Ok(None)
         }
 
+        fn find_maps_by_script_file_id(
+            &self,
+            _script_file_id: u16,
+        ) -> crate::error::Result<Vec<u16>> {
+            Ok(Vec::new())
+        }
+
         fn find_map_by_level_script_file_id(
             &self,
             _level_script_file_id: u16,
         ) -> crate::error::Result<Option<u16>> {
             Ok(None)
+        }
+
+        fn find_maps_by_level_script_file_id(
+            &self,
+            _level_script_file_id: u16,
+        ) -> crate::error::Result<Vec<u16>> {
+            Ok(Vec::new())
         }
     }
 }

@@ -382,6 +382,17 @@ mod tests {
             Ok(None)
         }
 
+        fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>> {
+            Ok(self
+                .headers
+                .iter()
+                .enumerate()
+                .filter_map(|(map_id, header)| {
+                    (header.script_file_id() == script_file_id).then_some(map_id as u16)
+                })
+                .collect())
+        }
+
         fn find_map_by_level_script_file_id(
             &self,
             level_script_file_id: u16,
@@ -392,6 +403,17 @@ mod tests {
                 }
             }
             Ok(None)
+        }
+
+        fn find_maps_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Vec<u16>> {
+            Ok(self
+                .headers
+                .iter()
+                .enumerate()
+                .filter_map(|(map_id, header)| {
+                    (header.level_script_id() == level_script_file_id).then_some(map_id as u16)
+                })
+                .collect())
         }
     }
 
