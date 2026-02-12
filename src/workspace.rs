@@ -52,40 +52,51 @@ impl Workspace {
     }
 
     fn load_names(&mut self) -> std::io::Result<()> {
-        if self.project_type == ProjectType::Dspre {
-            let mapname_bin = self
-                .project_path
-                .join("data/fielddata/maptable/mapname.bin");
-            if mapname_bin.exists() {
-                let data = std::fs::read(mapname_bin)?;
-                let mut names = Vec::new();
-                for chunk in data.chunks_exact(16) {
-                    let name = String::from_utf8_lossy(chunk)
-                        .trim_end_matches('\0')
-                        .to_string();
-                    names.push(name);
+        let internal_names = match self.project_type {
+            ProjectType::Dspre => {
+                let mapname_bin = self
+                    .project_path
+                    .join("data/fielddata/maptable/mapname.bin");
+                if mapname_bin.exists() {
+                    let data = std::fs::read(mapname_bin)?;
+                    Some(
+                        data.chunks_exact(16)
+                            .map(|chunk| {
+                                String::from_utf8_lossy(chunk)
+                                    .trim_end_matches('\0')
+                                    .to_string()
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
                 }
-                self.internal_names = Some(names);
             }
-        } else {
-            let maps_txt = self.project_path.join("generated/maps.txt");
-            if maps_txt.exists() {
-                let content = std::fs::read_to_string(maps_txt)?;
-                let mut names = Vec::new();
-                for line in content.lines() {
-                    let line = line.trim();
-                    if !line.is_empty() && !line.starts_with('#') {
-                        let name = if let Some(pos) = line.find('=') {
-                            line[..pos].trim()
-                        } else {
-                            line
-                        };
-                        names.push(name.to_string());
-                    }
+            ProjectType::Decomp => {
+                let maps_txt = self.project_path.join("generated/maps.txt");
+                if maps_txt.exists() {
+                    let content = std::fs::read_to_string(maps_txt)?;
+                    Some(
+                        content
+                            .lines()
+                            .map(str::trim)
+                            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                            .map(|line| {
+                                if let Some(pos) = line.find('=') {
+                                    line[..pos].trim().to_string()
+                                } else {
+                                    line.to_string()
+                                }
+                            })
+                            .collect(),
+                    )
+                } else {
+                    None
                 }
-                self.internal_names = Some(names);
             }
-        }
+        };
+
+        self.internal_names = internal_names;
 
         let location_text_id = match self.family {
             GameFamily::DP => 382,
@@ -93,24 +104,59 @@ impl Workspace {
             GameFamily::HGSS => 279,
         };
 
-        if self.project_type == ProjectType::Dspre {
-            let archive_path = self
-                .project_path
-                .join(format!("unpacked/textArchives/{:04}", location_text_id));
-            if archive_path.exists() {
-                let mut file = std::fs::File::open(archive_path)?;
-                let charmap = chatot::get_default_charmap();
-                if let Ok(archive) = chatot::decode_archive(charmap, &mut file, false) {
-                    self.location_names = Some(archive.messages);
+        let location_names = match self.project_type {
+            ProjectType::Dspre => {
+                let archive_path = self
+                    .project_path
+                    .join(format!("unpacked/textArchives/{:04}", location_text_id));
+                if archive_path.exists() {
+                    let mut file = std::fs::File::open(&archive_path)?;
+                    let charmap = chatot::get_default_charmap();
+                    let archive =
+                        chatot::decode_archive(charmap, &mut file, false).map_err(|e| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!(
+                                    "Failed to decode location names archive {}: {e}",
+                                    archive_path.display()
+                                ),
+                            )
+                        })?;
+                    Some(archive.messages)
+                } else {
+                    None
                 }
             }
-        } else {
-            let location_json = self.project_path.join("res/text/location_names.json");
-            if location_json.exists() {
-                let content = std::fs::read_to_string(location_json)?;
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(messages) = json.get("messages").and_then(|m| m.as_array()) {
-                        let names: Vec<String> = messages
+            ProjectType::Decomp => {
+                let location_json = self.project_path.join("res/text/location_names.json");
+                if location_json.exists() {
+                    let content = std::fs::read_to_string(&location_json)?;
+                    let json =
+                        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| {
+                            std::io::Error::new(
+                                std::io::ErrorKind::InvalidData,
+                                format!(
+                                    "Failed to parse location names JSON {}: {e}",
+                                    location_json.display()
+                                ),
+                            )
+                        })?;
+
+                    let messages =
+                        json.get("messages")
+                            .and_then(|m| m.as_array())
+                            .ok_or_else(|| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    format!(
+                                        "Location names JSON {} is missing a 'messages' array",
+                                        location_json.display()
+                                    ),
+                                )
+                            })?;
+
+                    Some(
+                        messages
                             .iter()
                             .map(|m| {
                                 m.get("en_US")
@@ -119,13 +165,15 @@ impl Workspace {
                                     .unwrap_or("Unknown")
                                     .to_string()
                             })
-                            .collect();
-                        self.location_names = Some(names);
-                    }
+                            .collect(),
+                    )
+                } else {
+                    None
                 }
             }
-        }
+        };
 
+        self.location_names = location_names;
         Ok(())
     }
 
