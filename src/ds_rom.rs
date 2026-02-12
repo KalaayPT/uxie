@@ -322,6 +322,32 @@ impl DsRomToolProject {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+
+    fn test_header_with_code(game_code: String) -> RomHeader {
+        RomHeader {
+            game_title: "TEST".into(),
+            game_code,
+            maker_code: "01".into(),
+            unit_code: 0,
+            rom_version: 0,
+            secure_area_delay: 0,
+            arm9_rom_offset: None,
+            arm9_entry_address: None,
+            arm9_ram_address: None,
+            arm9_size: None,
+            arm7_rom_offset: None,
+            arm7_entry_address: None,
+            arm7_ram_address: None,
+            arm7_size: None,
+            fnt_offset: None,
+            fnt_size: None,
+            fat_offset: None,
+            fat_size: None,
+            header_crc: None,
+            source: crate::rom_header::RomHeaderSource::DsRomTool,
+        }
+    }
 
     #[test]
     fn test_parse_arm9_config() {
@@ -333,5 +359,96 @@ sdk_version: 67269937
         let config: DsRomArm9Config = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.base_address, 0x02000000);
         assert_eq!(config.sdk_version_string(), "4.2.30001");
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_sdk_version_string_matches_bit_layout(sdk_version in any::<u32>()) {
+            let config = DsRomArm9Config {
+                base_address: 0,
+                entry_function: 0,
+                build_info: 0,
+                autoload_callback: 0,
+                overlay_signatures: 0,
+                encrypted: false,
+                compressed: false,
+                bss_start: 0,
+                bss_end: 0,
+                sdk_version,
+            };
+
+            let expected = format!(
+                "{}.{}.{}",
+                (sdk_version >> 24) & 0xFF,
+                (sdk_version >> 16) & 0xFF,
+                sdk_version & 0xFFFF
+            );
+            prop_assert_eq!(config.sdk_version_string(), expected);
+        }
+
+        #[test]
+        fn prop_ds_rom_tool_project_game_passthrough(code in prop::sample::select(vec![
+            "ADAE", "APAE", "CPUE", "IPKE", "IPGE", "ZZZZ"
+        ])) {
+            let header = test_header_with_code(code.to_string());
+            let expected_game = header.detect_game();
+            let expected_family = header.detect_game_family();
+
+            let project = DsRomToolProject {
+                root: std::env::temp_dir(),
+                header,
+                arm9_config: DsRomArm9Config {
+                    base_address: 0,
+                    entry_function: 0,
+                    build_info: 0,
+                    autoload_callback: 0,
+                    overlay_signatures: 0,
+                    encrypted: false,
+                    compressed: false,
+                    bss_start: 0,
+                    bss_end: 0,
+                    sdk_version: 0,
+                },
+                arm7_config: DsRomArm7Config {
+                    base_address: 0,
+                    entry_function: 0,
+                    encrypted: false,
+                    compressed: false,
+                    bss_start: 0,
+                    bss_end: 0,
+                },
+                itcm_config: None,
+                dtcm_config: None,
+                arm9_bin_path: std::env::temp_dir().join("arm9.bin"),
+                arm7_bin_path: std::env::temp_dir().join("arm7.bin"),
+                files_dir: std::env::temp_dir().join("files"),
+            };
+
+            prop_assert_eq!(project.game(), expected_game);
+            prop_assert_eq!(project.game_family(), expected_family);
+        }
+
+        #[test]
+        fn prop_dspre_id_paths_format_padded_names(id in any::<u16>()) {
+            let project = DspreProject {
+                root: std::env::temp_dir(),
+            };
+            let expected = format!("{:04}", id);
+
+            let script = project.script_file_path(id);
+            let text = project.text_archive_path(id);
+            let event = project.event_file_path(id);
+            let dynamic = project.dynamic_header_path(id);
+
+            prop_assert_eq!(script.file_name().and_then(|n| n.to_str()), Some(expected.as_str()));
+            prop_assert_eq!(text.file_name().and_then(|n| n.to_str()), Some(expected.as_str()));
+            prop_assert_eq!(event.file_name().and_then(|n| n.to_str()), Some(expected.as_str()));
+            prop_assert_eq!(dynamic.file_name().and_then(|n| n.to_str()), Some(expected.as_str()));
+        }
     }
 }
