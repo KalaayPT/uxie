@@ -41,26 +41,19 @@ pub fn resolve_includes(
     file_path: &Path,
     include_dirs: &[PathBuf],
     visited: &mut HashSet<PathBuf>,
-) -> Vec<PathBuf> {
-    let mut resolved = Vec::new();
-
-    let canonical = match file_path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return resolved,
-    };
+) -> std::io::Result<Vec<PathBuf>> {
+    let canonical = file_path.canonicalize()?;
 
     if visited.contains(&canonical) {
-        return resolved;
+        return Ok(Vec::new());
     }
     visited.insert(canonical);
 
-    let source = match std::fs::read_to_string(file_path) {
-        Ok(s) => s,
-        Err(_) => return resolved,
-    };
-
+    let source = std::fs::read_to_string(file_path)?;
     let includes = parse_includes(&source);
     let parent_dir = file_path.parent().unwrap_or(Path::new("."));
+
+    let mut resolved = Vec::new();
 
     for inc in includes {
         if inc.is_system {
@@ -86,12 +79,11 @@ pub fn resolve_includes(
 
         if let Some(path) = found_path {
             resolved.push(path.clone());
-            let nested = resolve_includes(&path, include_dirs, visited);
-            resolved.extend(nested);
+            resolved.extend(resolve_includes(&path, include_dirs, visited)?);
         }
     }
 
-    resolved
+    Ok(resolved)
 }
 
 #[cfg(test)]
