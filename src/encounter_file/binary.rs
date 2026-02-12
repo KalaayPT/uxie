@@ -39,7 +39,8 @@ pub struct BinaryEncounterFile {
     pub swarm_encounters: [u32; HGSS_SWARM_COUNT],
     pub day_encounters: [u32; HGSS_WALKING_COUNT],
     pub night_encounters: [u32; HGSS_WALKING_COUNT],
-    pub radar_encounters: [u32; HGSS_MUSIC_COUNT],
+    pub radar_encounters: [u32; DPPT_RADAR_COUNT],
+    pub music_encounters: [u32; HGSS_MUSIC_COUNT],
     pub form_encounter_rates: [u32; DPPT_FORM_RATE_COUNT],
     pub unown_table_id: u32,
     pub dual_slot_ruby: [u32; DPPT_DUAL_SLOT_COUNT],
@@ -214,6 +215,7 @@ impl BinaryEncounterFile {
             day_encounters: [day_pair[0], day_pair[1], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             night_encounters: [night_pair[0], night_pair[1], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             radar_encounters,
+            music_encounters: [0; HGSS_MUSIC_COUNT],
             form_encounter_rates,
             unown_table_id,
             dual_slot_ruby,
@@ -281,8 +283,8 @@ impl BinaryEncounterFile {
             *slot = reader.read_u16::<LittleEndian>()? as u32;
         }
 
-        let mut radar_encounters = [0u32; HGSS_MUSIC_COUNT];
-        for slot in &mut radar_encounters {
+        let mut music_encounters = [0u32; HGSS_MUSIC_COUNT];
+        for slot in &mut music_encounters {
             *slot = reader.read_u16::<LittleEndian>()? as u32;
         }
 
@@ -372,7 +374,8 @@ impl BinaryEncounterFile {
             swarm_encounters,
             day_encounters,
             night_encounters,
-            radar_encounters,
+            radar_encounters: [0; DPPT_RADAR_COUNT],
+            music_encounters,
             form_encounter_rates: [0; DPPT_FORM_RATE_COUNT],
             unown_table_id: 0,
             dual_slot_ruby: [0; DPPT_DUAL_SLOT_COUNT],
@@ -458,8 +461,8 @@ impl BinaryEncounterFile {
         for (idx, species) in self.swarm_encounters.iter().enumerate() {
             ensure_species_u16("swarm_encounters", idx, *species)?;
         }
-        for (idx, species) in self.radar_encounters.iter().enumerate() {
-            ensure_species_u16("radar_encounters", idx, *species)?;
+        for (idx, species) in self.music_encounters.iter().enumerate() {
+            ensure_species_u16("music_encounters", idx, *species)?;
         }
         validate_water_species_u16("surf_encounters", &self.surf_encounters)?;
         validate_water_species_u16("rock_smash_encounters", &self.rock_smash_encounters)?;
@@ -568,7 +571,7 @@ impl BinaryEncounterFile {
         for &s in &self.swarm_encounters {
             writer.write_u16::<LittleEndian>(s as u16)?;
         }
-        for &s in &self.radar_encounters {
+        for &s in &self.music_encounters {
             writer.write_u16::<LittleEndian>(s as u16)?;
         }
 

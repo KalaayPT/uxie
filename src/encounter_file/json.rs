@@ -46,6 +46,8 @@ pub struct JsonEncounterFile {
 
     // HGSS specific
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub music: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub rock_smash_rate: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rock_smash_encounters: Option<Vec<WaterEncounterEntryJson>>,
@@ -125,7 +127,7 @@ fn water_entries_to_json(
 }
 
 impl JsonEncounterFile {
-    pub fn to_binary(&self, symbols: &SymbolTable, _family: GameFamily) -> BinaryEncounterFile {
+    pub fn to_binary(&self, symbols: &SymbolTable, family: GameFamily) -> BinaryEncounterFile {
         let resolve = |name: &str| {
             symbols
                 .resolve_constant(name)
@@ -145,6 +147,17 @@ impl JsonEncounterFile {
             .map(|r| collect_water_array(r, &resolve))
             .unwrap_or_default();
 
+        let music_encounters = match family {
+            GameFamily::HGSS => {
+                if let Some(music) = self.music.as_ref() {
+                    collect_species_array(music, &resolve)
+                } else {
+                    collect_species_array(&self.radar, &resolve)
+                }
+            }
+            _ => Default::default(),
+        };
+
         BinaryEncounterFile {
             walking_rate: self.land_rate,
             grass_encounters: collect_encounter_array(&self.land_encounters, &resolve),
@@ -152,6 +165,7 @@ impl JsonEncounterFile {
             day_encounters: collect_species_array(&self.day, &resolve),
             night_encounters: collect_species_array(&self.night, &resolve),
             radar_encounters: collect_species_array(&self.radar, &resolve),
+            music_encounters,
             form_encounter_rates: [
                 self.rate_form0,
                 self.rate_form1,
@@ -216,12 +230,14 @@ impl JsonEncounterFile {
             good_rod_encounters: water_entries_to_json(&bin.good_rod_encounters, &resolve),
             super_rod_rate: bin.super_rod_rate,
             super_rod_encounters: water_entries_to_json(&bin.super_rod_encounters, &resolve),
+            music: None,
             rock_smash_rate: None,
             rock_smash_encounters: None,
             morning: None,
         };
 
         if family == GameFamily::HGSS {
+            res.music = Some(species_to_json(&bin.music_encounters, &resolve));
             res.rock_smash_rate = Some(bin.rock_smash_rate);
             res.rock_smash_encounters =
                 Some(water_entries_to_json(&bin.rock_smash_encounters, &resolve));
