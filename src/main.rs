@@ -277,26 +277,28 @@ fn cmd_encounter(
         GameFamily::HGSS => project_path.join("data/a/0/3/7"),
     };
 
-    let bin_data = if narc_path.exists() {
+    let bin = if narc_path.exists() {
         let mut file = std::fs::File::open(narc_path)?;
         let narc = uxie::narc::Narc::from_binary(&mut file)?;
-        narc.members
+        let data = narc
+            .members
             .get(id as usize)
-            .cloned()
-            .ok_or("Encounter ID out of range in NARC")?
+            .ok_or("Encounter ID out of range in NARC")?;
+        let mut reader = std::io::Cursor::new(data.as_slice());
+        BinaryEncounterFile::from_binary(&mut reader, ws.family)?
     } else {
         let unpacked_path = project_path
             .join("unpacked/encounters")
             .join(format!("{:04}", id));
-        if unpacked_path.exists() {
+        let bin_data = if unpacked_path.exists() {
             std::fs::read(unpacked_path)?
         } else {
             return Err("Encounter data not found (tried NARC and unpacked/encounters)".into());
-        }
+        };
+        let mut reader = std::io::Cursor::new(bin_data.as_slice());
+        BinaryEncounterFile::from_binary(&mut reader, ws.family)?
     };
 
-    let mut reader = std::io::Cursor::new(bin_data);
-    let bin = BinaryEncounterFile::from_binary(&mut reader, ws.family)?;
     let encounter = JsonEncounterFile::from_binary(&bin, &ws.symbols, ws.family);
 
     if json {
