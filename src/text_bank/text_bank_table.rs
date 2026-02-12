@@ -45,7 +45,7 @@ impl TextBankTable {
         self.name_to_id.get(name).copied()
     }
 
-    pub fn get_all_names(&self) -> &Vec<String> {
+    pub fn get_all_names(&self) -> &[String] {
         &self.names
     }
 }
@@ -89,7 +89,7 @@ mod tests {
 
         assert_eq!(
             table.get_all_names(),
-            &vec!["TEXT_BANK_COMMON".to_string(), "TEXT_BANK_CITY".to_string()]
+            vec!["TEXT_BANK_COMMON".to_string(), "TEXT_BANK_CITY".to_string()].as_slice()
         );
         assert_eq!(table.get_id("TEXT_BANK_COMMON"), Some(0));
         assert_eq!(table.get_id("TEXT_BANK_CITY"), Some(1));
@@ -137,7 +137,7 @@ mod tests {
             let mut table = TextBankTable::new();
             table.load_list_str(&content).unwrap();
 
-            prop_assert_eq!(table.get_all_names(), &names);
+            prop_assert_eq!(table.get_all_names(), names.as_slice());
             for (idx, name) in names.iter().enumerate() {
                 prop_assert_eq!(table.get_id(name), Some(idx));
             }
@@ -161,7 +161,7 @@ mod tests {
                 }
             }
 
-            prop_assert_eq!(table.get_all_names(), &unique_names);
+            prop_assert_eq!(table.get_all_names(), unique_names.as_slice());
             for (unique_idx, name) in unique_names.iter().enumerate() {
                 prop_assert_eq!(table.get_id(name), Some(unique_idx));
             }

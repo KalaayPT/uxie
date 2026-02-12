@@ -77,7 +77,7 @@ impl ScriptTable {
     }
 
     /// Returns all script names in order by file ID.
-    pub fn get_all_names(&self) -> &Vec<String> {
+    pub fn get_all_names(&self) -> &[String] {
         &self.names
     }
 }
@@ -172,7 +172,7 @@ mod tests {
             let mut table = ScriptTable::new();
             table.load_order_str(&content).unwrap();
 
-            prop_assert_eq!(table.get_all_names(), &names);
+            prop_assert_eq!(table.get_all_names(), names.as_slice());
         }
 
         #[test]
