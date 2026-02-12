@@ -112,4 +112,20 @@ mod tests {
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
     }
+
+    #[test]
+    fn test_load_recursive_propagates_events_json_parse_errors() {
+        let dir = tempdir().unwrap();
+        let sm = SourceManager::new();
+
+        let main_path = create_file(dir.path(), "main.h", "#include \"res/field/events/test.h\"");
+        let events_json_path = dir.path().join("res/field/events/test.json");
+        std::fs::create_dir_all(events_json_path.parent().unwrap()).unwrap();
+        std::fs::write(&events_json_path, "{ this is not valid json }").unwrap();
+
+        let mut table = SymbolTable::with_source_manager(sm);
+        let err = table.load_recursive(&main_path, &[]).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
 }

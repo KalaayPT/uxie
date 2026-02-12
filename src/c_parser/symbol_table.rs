@@ -224,12 +224,12 @@ impl SymbolTable {
                 let json_path_str = inc.path.replace(".h", ".json");
                 let json_rel = parent_dir.join(&json_path_str);
                 if json_rel.exists() {
-                    let _ = self.load_events_json(&json_rel);
+                    self.load_events_json(&json_rel)?;
                 } else {
                     for dir in include_dirs {
                         let json_p = dir.join(&json_path_str);
                         if json_p.exists() {
-                            let _ = self.load_events_json(&json_p);
+                            self.load_events_json(&json_p)?;
                             break;
                         }
                     }
