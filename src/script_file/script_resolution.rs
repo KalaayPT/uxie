@@ -307,17 +307,7 @@ pub fn find_maps_for_script_file(
     script_file_id: u16,
     provider: &dyn DataProvider,
 ) -> Result<Vec<u16>> {
-    let count = provider.get_map_header_count()?;
-    let mut maps = Vec::new();
-
-    for map_id in 0..count as u16 {
-        let header = provider.get_map_header(map_id)?;
-        if header.script_file_id() == script_file_id {
-            maps.push(map_id);
-        }
-    }
-
-    Ok(maps)
+    provider.find_maps_by_script_file_id(script_file_id)
 }
 
 /// Finds all maps that use a given level script file.
@@ -328,17 +318,7 @@ pub fn find_maps_for_level_script_file(
     level_script_file_id: u16,
     provider: &dyn DataProvider,
 ) -> Result<Vec<u16>> {
-    let count = provider.get_map_header_count()?;
-    let mut maps = Vec::new();
-
-    for map_id in 0..count as u16 {
-        let header = provider.get_map_header(map_id)?;
-        if header.level_script_id() == level_script_file_id {
-            maps.push(map_id);
-        }
-    }
-
-    Ok(maps)
+    provider.find_maps_by_level_script_file_id(level_script_file_id)
 }
 
 #[cfg(test)]
