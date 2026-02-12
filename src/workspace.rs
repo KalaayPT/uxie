@@ -217,13 +217,10 @@ impl Workspace {
             (GameFamily::HGSS, _) => (0xF6BE0, 540),
         };
 
-        let game_strings = GameStrings::load_from_dspre(&path, family, header.detect_language())
-            .unwrap_or_default();
+        let game_strings = GameStrings::load_from_dspre(&path, family, header.detect_language())?;
 
         let global_script_table = match family {
-            GameFamily::HGSS => {
-                GlobalScriptTable::from_hgss_binary_file(&arm9_path).unwrap_or_default()
-            }
+            GameFamily::HGSS => GlobalScriptTable::from_hgss_binary_file(&arm9_path)?,
             GameFamily::Platinum | GameFamily::DP => GlobalScriptTable::platinum_hardcoded(),
         };
 
