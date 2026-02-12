@@ -8,114 +8,96 @@ mod tests {
     use std::io::Cursor;
 
     fn build_dppt_fixture() -> BinaryEncounterFile {
-        let mut grass = Vec::new();
-        for i in 0..12 {
-            grass.push(EncounterEntry {
-                level: i as u8,
-                species: i as u32 + 1,
-            });
-        }
+        let grass = core::array::from_fn(|i| EncounterEntry {
+            level: i as u8,
+            species: i as u32 + 1,
+        });
 
-        let mut water = Vec::new();
-        for i in 0..5 {
-            water.push(WaterEncounterEntry {
-                min_level: i as u8,
-                max_level: i as u8 + 5,
-                species: i as u32 + 100,
-            });
-        }
+        let water: [WaterEncounterEntry; 5] = core::array::from_fn(|i| WaterEncounterEntry {
+            min_level: i as u8,
+            max_level: i as u8 + 5,
+            species: i as u32 + 100,
+        });
 
         BinaryEncounterFile {
             walking_rate: 30,
             grass_encounters: grass,
-            swarm_encounters: vec![1, 2],
-            day_encounters: vec![3, 4],
-            night_encounters: vec![5, 6],
-            radar_encounters: vec![7, 8, 9, 10],
-            form_encounter_rates: vec![0, 0, 0, 0, 0],
+            swarm_encounters: [1, 2, 0, 0],
+            day_encounters: [3, 4, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            night_encounters: [5, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            radar_encounters: [7, 8, 9, 10],
+            form_encounter_rates: [0, 0, 0, 0, 0],
             unown_table_id: 0,
-            dual_slot_ruby: vec![11, 12],
-            dual_slot_sapphire: vec![13, 14],
-            dual_slot_emerald: vec![15, 16],
-            dual_slot_firered: vec![17, 18],
-            dual_slot_leafgreen: vec![19, 20],
+            dual_slot_ruby: [11, 12],
+            dual_slot_sapphire: [13, 14],
+            dual_slot_emerald: [15, 16],
+            dual_slot_firered: [17, 18],
+            dual_slot_leafgreen: [19, 20],
             surf_rate: 10,
-            surf_encounters: water.clone(),
+            surf_encounters: water,
             old_rod_rate: 5,
-            old_rod_encounters: water.clone(),
+            old_rod_encounters: water,
             good_rod_rate: 15,
-            good_rod_encounters: water.clone(),
+            good_rod_encounters: water,
             super_rod_rate: 20,
             super_rod_encounters: water,
             rock_smash_rate: 0,
-            rock_smash_encounters: Vec::new(),
-            morning_encounters: Vec::new(),
+            rock_smash_encounters: [WaterEncounterEntry::default(); 2],
+            morning_encounters: [EncounterEntry::default(); 12],
         }
     }
 
     fn build_hgss_fixture() -> BinaryEncounterFile {
-        let morning: Vec<EncounterEntry> = (0..12)
-            .map(|i| EncounterEntry {
-                level: (i + 2) as u8,
-                species: (i + 1) as u32,
-            })
-            .collect();
+        let morning: [EncounterEntry; 12] = core::array::from_fn(|i| EncounterEntry {
+            level: (i + 2) as u8,
+            species: (i + 1) as u32,
+        });
 
-        let day: Vec<u32> = (0..12).map(|i| (i + 20) as u32).collect();
-        let night: Vec<u32> = (0..12).map(|i| (i + 40) as u32).collect();
-        let swarm = vec![100, 101, 102, 103];
-        let radar = vec![200, 201, 202, 203];
+        let day: [u32; 12] = core::array::from_fn(|i| (i + 20) as u32);
+        let night: [u32; 12] = core::array::from_fn(|i| (i + 40) as u32);
+        let swarm = [100, 101, 102, 103];
+        let radar = [200, 201, 202, 203];
 
-        let surf: Vec<WaterEncounterEntry> = (0..5)
-            .map(|i| WaterEncounterEntry {
-                min_level: (i + 1) as u8,
-                max_level: (i + 6) as u8,
-                species: (300 + i) as u32,
-            })
-            .collect();
-        let rock: Vec<WaterEncounterEntry> = (0..2)
-            .map(|i| WaterEncounterEntry {
-                min_level: (i + 1) as u8,
-                max_level: (i + 4) as u8,
-                species: (400 + i) as u32,
-            })
-            .collect();
-        let old_rod: Vec<WaterEncounterEntry> = (0..5)
-            .map(|i| WaterEncounterEntry {
-                min_level: (i + 2) as u8,
-                max_level: (i + 5) as u8,
-                species: (500 + i) as u32,
-            })
-            .collect();
-        let good_rod: Vec<WaterEncounterEntry> = (0..5)
-            .map(|i| WaterEncounterEntry {
-                min_level: (i + 3) as u8,
-                max_level: (i + 6) as u8,
-                species: (600 + i) as u32,
-            })
-            .collect();
-        let super_rod: Vec<WaterEncounterEntry> = (0..5)
-            .map(|i| WaterEncounterEntry {
-                min_level: (i + 4) as u8,
-                max_level: (i + 7) as u8,
-                species: (700 + i) as u32,
-            })
-            .collect();
+        let surf: [WaterEncounterEntry; 5] = core::array::from_fn(|i| WaterEncounterEntry {
+            min_level: (i + 1) as u8,
+            max_level: (i + 6) as u8,
+            species: (300 + i) as u32,
+        });
+        let rock: [WaterEncounterEntry; 2] = core::array::from_fn(|i| WaterEncounterEntry {
+            min_level: (i + 1) as u8,
+            max_level: (i + 4) as u8,
+            species: (400 + i) as u32,
+        });
+        let old_rod: [WaterEncounterEntry; 5] = core::array::from_fn(|i| WaterEncounterEntry {
+            min_level: (i + 2) as u8,
+            max_level: (i + 5) as u8,
+            species: (500 + i) as u32,
+        });
+        let good_rod: [WaterEncounterEntry; 5] = core::array::from_fn(|i| WaterEncounterEntry {
+            min_level: (i + 3) as u8,
+            max_level: (i + 6) as u8,
+            species: (600 + i) as u32,
+        });
+        let super_rod: [WaterEncounterEntry; 5] = core::array::from_fn(|i| WaterEncounterEntry {
+            min_level: (i + 4) as u8,
+            max_level: (i + 7) as u8,
+            species: (700 + i) as u32,
+        });
 
         BinaryEncounterFile {
             walking_rate: 20,
-            grass_encounters: morning.clone(),
+            grass_encounters: morning,
             swarm_encounters: swarm,
             day_encounters: day,
             night_encounters: night,
             radar_encounters: radar,
-            form_encounter_rates: Vec::new(),
+            form_encounter_rates: [0; 5],
             unown_table_id: 0,
-            dual_slot_ruby: Vec::new(),
-            dual_slot_sapphire: Vec::new(),
-            dual_slot_emerald: Vec::new(),
-            dual_slot_firered: Vec::new(),
-            dual_slot_leafgreen: Vec::new(),
+            dual_slot_ruby: [0; 2],
+            dual_slot_sapphire: [0; 2],
+            dual_slot_emerald: [0; 2],
+            dual_slot_firered: [0; 2],
+            dual_slot_leafgreen: [0; 2],
             surf_rate: 10,
             surf_encounters: surf,
             old_rod_rate: 5,
@@ -154,20 +136,6 @@ mod tests {
         let decoded = BinaryEncounterFile::from_binary(&mut reader, GameFamily::HGSS).unwrap();
 
         assert_eq!(file, decoded);
-    }
-
-    #[test]
-    fn test_encounter_binary_rejects_invalid_dppt_shape() {
-        let mut file = build_dppt_fixture();
-        file.grass_encounters.pop();
-
-        let mut buffer = Vec::new();
-        let err = file
-            .to_binary(&mut buffer, GameFamily::Platinum)
-            .unwrap_err();
-
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("grass_encounters"));
     }
 
     #[test]
@@ -228,31 +196,49 @@ mod tests {
         })
     }
 
+    fn encounter_array_strategy<const N: usize>(
+        species: impl Strategy<Value = u32> + Clone,
+    ) -> impl Strategy<Value = [EncounterEntry; N]> {
+        proptest::array::uniform(encounter_entry_strategy(species))
+    }
+
+    fn water_array_strategy<const N: usize>(
+        species: impl Strategy<Value = u32> + Clone,
+    ) -> impl Strategy<Value = [WaterEncounterEntry; N]> {
+        proptest::array::uniform(water_entry_strategy(species))
+    }
+
+    fn species_array_strategy<const N: usize>(
+        species: impl Strategy<Value = u32> + Clone,
+    ) -> impl Strategy<Value = [u32; N]> {
+        proptest::array::uniform(species)
+    }
+
     fn dppt_encounter_strategy() -> impl Strategy<Value = BinaryEncounterFile> {
         let part1 = (
             any::<u32>(),
-            proptest::collection::vec(encounter_entry_strategy(any::<u32>()), 12),
-            proptest::collection::vec(any::<u32>(), 2),
-            proptest::collection::vec(any::<u32>(), 2),
-            proptest::collection::vec(any::<u32>(), 2),
-            proptest::collection::vec(any::<u32>(), 4),
-            proptest::collection::vec(any::<u32>(), 5),
+            encounter_array_strategy::<12>(any::<u32>()),
+            species_array_strategy::<2>(any::<u32>()),
+            species_array_strategy::<2>(any::<u32>()),
+            species_array_strategy::<2>(any::<u32>()),
+            species_array_strategy::<4>(any::<u32>()),
+            species_array_strategy::<5>(any::<u32>()),
             any::<u32>(),
-            proptest::collection::vec(any::<u32>(), 2),
-            proptest::collection::vec(any::<u32>(), 2),
-            proptest::collection::vec(any::<u32>(), 2),
+            species_array_strategy::<2>(any::<u32>()),
+            species_array_strategy::<2>(any::<u32>()),
+            species_array_strategy::<2>(any::<u32>()),
         );
         let part2 = (
-            proptest::collection::vec(any::<u32>(), 2),
-            proptest::collection::vec(any::<u32>(), 2),
+            species_array_strategy::<2>(any::<u32>()),
+            species_array_strategy::<2>(any::<u32>()),
             any::<u32>(),
-            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            water_array_strategy::<5>(any::<u32>()),
             any::<u32>(),
-            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            water_array_strategy::<5>(any::<u32>()),
             any::<u32>(),
-            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            water_array_strategy::<5>(any::<u32>()),
             any::<u32>(),
-            proptest::collection::vec(water_entry_strategy(any::<u32>()), 5),
+            water_array_strategy::<5>(any::<u32>()),
         );
 
         (part1, part2).prop_map(
@@ -260,9 +246,9 @@ mod tests {
                 (
                     walking_rate,
                     grass_encounters,
-                    swarm_encounters,
-                    day_encounters,
-                    night_encounters,
+                    swarm_pair,
+                    day_pair,
+                    night_pair,
                     radar_encounters,
                     form_encounter_rates,
                     unown_table_id,
@@ -286,9 +272,9 @@ mod tests {
                 BinaryEncounterFile {
                     walking_rate,
                     grass_encounters,
-                    swarm_encounters,
-                    day_encounters,
-                    night_encounters,
+                    swarm_encounters: [swarm_pair[0], swarm_pair[1], 0, 0],
+                    day_encounters: [day_pair[0], day_pair[1], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                    night_encounters: [night_pair[0], night_pair[1], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
                     radar_encounters,
                     form_encounter_rates,
                     unown_table_id,
@@ -306,8 +292,8 @@ mod tests {
                     super_rod_rate,
                     super_rod_encounters,
                     rock_smash_rate: 0,
-                    rock_smash_encounters: Vec::new(),
-                    morning_encounters: Vec::new(),
+                    rock_smash_encounters: [WaterEncounterEntry::default(); 2],
+                    morning_encounters: [EncounterEntry::default(); 12],
                 }
             },
         )
@@ -321,18 +307,18 @@ mod tests {
             0u32..=255,
             0u32..=255,
             0u32..=255,
-            proptest::collection::vec(encounter_entry_strategy(0u32..=65535), 12),
-            proptest::collection::vec(0u32..=65535, 12),
+            encounter_array_strategy::<12>(0u32..=65535),
+            species_array_strategy::<12>(0u32..=65535),
         );
         let part2 = (
-            proptest::collection::vec(0u32..=65535, 12),
-            proptest::collection::vec(0u32..=65535, 4),
-            proptest::collection::vec(0u32..=65535, 4),
-            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
-            proptest::collection::vec(water_entry_strategy(0u32..=65535), 2),
-            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
-            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
-            proptest::collection::vec(water_entry_strategy(0u32..=65535), 5),
+            species_array_strategy::<12>(0u32..=65535),
+            species_array_strategy::<4>(0u32..=65535),
+            species_array_strategy::<4>(0u32..=65535),
+            water_array_strategy::<5>(0u32..=65535),
+            water_array_strategy::<2>(0u32..=65535),
+            water_array_strategy::<5>(0u32..=65535),
+            water_array_strategy::<5>(0u32..=65535),
+            water_array_strategy::<5>(0u32..=65535),
         );
 
         (part1, part2).prop_map(
@@ -360,18 +346,18 @@ mod tests {
             )| {
                 BinaryEncounterFile {
                     walking_rate,
-                    grass_encounters: morning_encounters.clone(),
+                    grass_encounters: morning_encounters,
                     swarm_encounters,
                     day_encounters,
                     night_encounters,
                     radar_encounters,
-                    form_encounter_rates: Vec::new(),
+                    form_encounter_rates: [0; 5],
                     unown_table_id: 0,
-                    dual_slot_ruby: Vec::new(),
-                    dual_slot_sapphire: Vec::new(),
-                    dual_slot_emerald: Vec::new(),
-                    dual_slot_firered: Vec::new(),
-                    dual_slot_leafgreen: Vec::new(),
+                    dual_slot_ruby: [0; 2],
+                    dual_slot_sapphire: [0; 2],
+                    dual_slot_emerald: [0; 2],
+                    dual_slot_firered: [0; 2],
+                    dual_slot_leafgreen: [0; 2],
                     surf_rate,
                     surf_encounters,
                     old_rod_rate,

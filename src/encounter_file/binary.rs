@@ -19,13 +19,13 @@ const HGSS_OLD_ROD_COUNT: usize = 5;
 const HGSS_GOOD_ROD_COUNT: usize = 5;
 const HGSS_SUPER_ROD_COUNT: usize = 5;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct EncounterEntry {
     pub level: u8,
     pub species: u32,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WaterEncounterEntry {
     pub min_level: u8,
     pub max_level: u8,
