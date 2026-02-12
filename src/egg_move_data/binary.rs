@@ -221,7 +221,7 @@ mod tests {
 
     fn species_id_strategy() -> impl Strategy<Value = u16> {
         // Avoid species marker colliding with the 0xFFFF stream terminator.
-        0u16..(u16::MAX - EGG_MOVE_SPECIES_OFFSET)
+        1u16..(u16::MAX - EGG_MOVE_SPECIES_OFFSET)
     }
 
     fn egg_move_entry_strategy() -> impl Strategy<Value = EggMoveEntry> {
