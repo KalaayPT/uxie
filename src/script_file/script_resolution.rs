@@ -364,7 +364,7 @@ mod tests {
             Ok(self.headers.len())
         }
 
-        fn get_text_archive_for_script(&self, script_file_id: u16) -> Result<Option<u16>> {
+        fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
             for header in &self.headers {
                 if header.script_file_id() == script_file_id {
                     return Ok(Some(header.text_archive_id()));

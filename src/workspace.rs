@@ -682,9 +682,9 @@ mod tests {
             Ok(0)
         }
 
-        fn get_text_archive_for_script(
+        fn get_text_archive_for_script_file(
             &self,
-            _script_id: u16,
+            _script_file_id: u16,
         ) -> crate::error::Result<Option<u16>> {
             Ok(None)
         }

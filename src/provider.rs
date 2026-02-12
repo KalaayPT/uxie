@@ -24,7 +24,7 @@ pub trait DataProvider {
     /// Get the total number of map headers
     fn get_map_header_count(&self) -> Result<usize>;
     /// Get the text archive ID associated with a script file
-    fn get_text_archive_for_script(&self, script_id: u16) -> Result<Option<u16>>;
+    fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>>;
     /// Find the map ID for a given script file ID
     ///
     /// Returns the first map ID that uses the specified script file ID,
@@ -131,9 +131,9 @@ impl DataProvider for Arm9Provider {
         Ok(self.header_count)
     }
 
-    fn get_text_archive_for_script(&self, script_id: u16) -> Result<Option<u16>> {
+    fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
         let headers = self.read_all_headers()?;
-        find_text_archive_in_headers(&headers, script_id)
+        find_text_archive_in_headers(&headers, script_file_id)
     }
 
     fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
@@ -259,9 +259,9 @@ impl DataProvider for DecompProvider {
         Ok(headers.len())
     }
 
-    fn get_text_archive_for_script(&self, script_id: u16) -> Result<Option<u16>> {
+    fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
         let headers = self.load_all_headers()?;
-        find_text_archive_in_headers(&headers, script_id)
+        find_text_archive_in_headers(&headers, script_file_id)
     }
 
     fn find_map_by_script_file_id(&self, script_file_id: u16) -> Result<Option<u16>> {
@@ -275,9 +275,9 @@ impl DataProvider for DecompProvider {
     }
 }
 
-fn find_text_archive_in_headers(headers: &[MapHeader], script_id: u16) -> Result<Option<u16>> {
+fn find_text_archive_in_headers(headers: &[MapHeader], script_file_id: u16) -> Result<Option<u16>> {
     for header in headers {
-        if header.script_file_id() == script_id {
+        if header.script_file_id() == script_file_id {
             return Ok(Some(header.text_archive_id()));
         }
     }
@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn test_arm9_provider_get_text_archive_for_script() {
+    fn test_arm9_provider_get_text_archive_for_script_file() {
         let headers = vec![
             create_test_pt_header(10, 100),
             create_test_pt_header(20, 200),
@@ -429,8 +429,14 @@ mod tests {
 
         let provider = Arm9Provider::new(file.path(), 0, 3, GameFamily::Platinum);
 
-        assert_eq!(provider.get_text_archive_for_script(20).unwrap(), Some(200));
-        assert_eq!(provider.get_text_archive_for_script(999).unwrap(), None);
+        assert_eq!(
+            provider.get_text_archive_for_script_file(20).unwrap(),
+            Some(200)
+        );
+        assert_eq!(
+            provider.get_text_archive_for_script_file(999).unwrap(),
+            None
+        );
     }
 
     #[test]
