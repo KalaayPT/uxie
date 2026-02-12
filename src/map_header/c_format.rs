@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_parse_single_header() {
-        let source = r#"
+        let source = r"
     [MAP_HEADER_JUBILIFE_CITY] = {
         .areaDataArchiveID = 0x6,
         .unk_01 = 0x0,
@@ -276,7 +276,7 @@ mod tests {
         .isBikeAllowed = TRUE,
         .isRunningAllowed = TRUE,
     },
-        "#;
+        ";
 
         let headers = parse_map_headers_from_c(source);
         assert_eq!(headers.len(), 1);

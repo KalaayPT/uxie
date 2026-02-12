@@ -114,7 +114,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_dspre_event_eterna_dp_gym() {
         use crate::ds_rom::DspreProject;
         let Some(dspre_path) = crate::test_env::existing_path_from_env(

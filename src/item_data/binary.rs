@@ -468,7 +468,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires a real DSPRE project with pl_item_data.narc via UXIE_TEST_PLATINUM_DSPRE_PATH"]
     fn test_real_rom_roundtrip() {
         use std::fs::File;
         use std::io::BufReader;

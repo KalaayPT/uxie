@@ -506,14 +506,14 @@ mod tests {
 
     #[test]
     fn test_from_ds_rom_yaml() {
-        let yaml = r#"
+        let yaml = r"
 title: POKEMON PL
 gamecode: CPUE
 makercode: '01'
 unitcode: 0
 rom_version: 1
 secure_area_delay: 3454
-"#;
+";
         let temp = std::env::temp_dir().join("test_header.yaml");
         std::fs::write(&temp, yaml).unwrap();
 

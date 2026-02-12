@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn test_parse_enum() {
-        let source = r#"
+        let source = r"
 enum MapHeader {
     MAP_HEADER_EVERYWHERE = 0,
     MAP_HEADER_NOTHING,
@@ -104,7 +104,7 @@ enum MapHeader {
     MAP_HEADER_JUBILIFE_CITY,
     MAP_HEADER_COUNT = 593,
 }
-        "#;
+        ";
 
         let e = parse_enum(source).unwrap();
         assert_eq!(e.name, Some("MapHeader".to_string()));

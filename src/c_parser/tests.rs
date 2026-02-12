@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod c_parser_tests {
     use crate::c_parser::{SourceManager, SymbolTable};
     use std::io::Write;
     use std::path::{Path, PathBuf};

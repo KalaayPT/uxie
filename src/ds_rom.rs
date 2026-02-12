@@ -351,13 +351,13 @@ mod tests {
 
     #[test]
     fn test_parse_arm9_config() {
-        let yaml = r#"
+        let yaml = r"
 base_address: 33554432
 entry_function: 33556480
 sdk_version: 67269937
-"#;
+";
         let config: DsRomArm9Config = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(config.base_address, 0x02000000);
+        assert_eq!(config.base_address, 0x0200_0000);
         assert_eq!(config.sdk_version_string(), "4.2.30001");
     }
 

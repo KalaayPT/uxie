@@ -36,7 +36,7 @@ const HGSS_TABLE_POINTER_OFFSET: u64 = 0x40164;
 const HGSS_TABLE_ENTRY_COUNT: usize = 30;
 
 /// HGSS memory base address (subtracted to get arm9 offset)
-const HGSS_MEMORY_BASE: u32 = 0x02000000;
+const HGSS_MEMORY_BASE: u32 = 0x0200_0000;
 
 /// Platinum table entry count
 #[cfg(test)]
@@ -379,12 +379,12 @@ mod tests {
         symbols.insert_define("NARC_scr_seq_scr_seq_0003_bin".to_string(), 3);
         symbols.insert_define("NARC_msg_msg_0040_bin".to_string(), 0x28);
 
-        let content = r#"
+        let content = r"
 const struct ScriptBankMapping sScriptBankMapping[30] = {
     { _std_scratch_card, NARC_scr_seq_scr_seq_0263_bin, NARC_msg_msg_0433_bin },
     { _std_misc, NARC_scr_seq_scr_seq_0003_bin, NARC_msg_msg_0040_bin },
 };
-"#;
+";
 
         let table = GlobalScriptTable::from_hgss_decomp(content, &symbols).unwrap();
         assert_eq!(table.len(), 2);
@@ -408,13 +408,13 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         symbols.insert_define("TEXT_BANK_COMMON_STRINGS".to_string(), 0x0D5);
         symbols.insert_define("SCRIPT_ID_OFFSET_COMMON_SCRIPTS".to_string(), 2000);
 
-        let content = r#"
+        let content = r"
 // clang-format off
 #define SCRIPT_RANGE_TABLE(Entry) \
     Entry(10490,                                    scripts_unk_0499,                       TEXT_BANK_SCRATCH_OFF_CARDS) \
     Entry(SCRIPT_ID_OFFSET_COMMON_SCRIPTS,          scripts_common,                         TEXT_BANK_COMMON_STRINGS)
 // clang-format on
-"#;
+";
 
         let table = GlobalScriptTable::from_platinum_decomp(content, &symbols).unwrap();
         assert_eq!(table.len(), 2);
@@ -431,7 +431,7 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires a real HGSS arm9.bin path via UXIE_TEST_HGSS_ARM9_PATH/HGSS_ARM9_PATH"]
     fn test_hgss_binary_real_file() {
         let Some(path) = crate::test_env::existing_path_from_env_with_fallback(
             "UXIE_TEST_HGSS_ARM9_PATH",

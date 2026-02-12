@@ -109,14 +109,14 @@ mod tests {
         let mut table = ScriptTable::new();
         table
             .load_order_str(
-                r#"
+                r"
                 # comment
                 scripts_unk_0000
 
                     scripts_jubilife_city
                 # another comment
                 scripts_oreburgh_city
-                "#,
+                ",
             )
             .unwrap();
 

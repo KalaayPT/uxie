@@ -77,13 +77,13 @@ mod tests {
         let mut table = TextBankTable::new();
         table
             .load_list_str(
-                r#"
+                r"
                 # hash comment
                 // slash comment
 
                 TEXT_BANK_COMMON = 0x0D5
                 TEXT_BANK_CITY
-                "#,
+                ",
             )
             .unwrap();
 

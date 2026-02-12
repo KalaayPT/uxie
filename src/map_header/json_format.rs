@@ -156,7 +156,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
+    #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_dspre_map_header_jubilife() {
         use crate::GameFamily;
         use crate::provider::{Arm9Provider, DataProvider};

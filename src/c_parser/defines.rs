@@ -593,8 +593,8 @@ pub fn parse_and_resolve_defines(source: &str) -> Vec<CDefine> {
         .collect();
     let cache = DashMap::new();
     let res = FxHashMap::default();
-    for i in 0..defines.len() {
-        defines[i].resolved = eval_expr_with_context(&defines[i].value, &exprs, &res, &cache);
+    for def in &mut defines {
+        def.resolved = eval_expr_with_context(&def.value, &exprs, &res, &cache);
     }
     defines
 }
@@ -615,11 +615,11 @@ mod tests {
 
     #[test]
     fn test_parse_simple_defines() {
-        let source = r#"
+        let source = r"
 #define ENCOUNTERS_NONE 0xFFFF
 #define MAX_HEADERS 593
 #define SOME_VALUE 0x10
-        "#;
+        ";
         let defines = parse_defines(source);
         assert_eq!(defines.len(), 3);
         assert_eq!(defines[0].name, "ENCOUNTERS_NONE");
@@ -628,11 +628,11 @@ mod tests {
 
     #[test]
     fn test_resolve_defines() {
-        let source = r#"
+        let source = r"
 #define A 10
 #define B A + 5
 #define C (A | B)
-        "#;
+        ";
         let defines = parse_and_resolve_defines(source);
         assert_eq!(
             defines
