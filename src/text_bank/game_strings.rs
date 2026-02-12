@@ -262,6 +262,7 @@ fn build_lookup_table(names: &[String]) -> FxHashMap<String, u16> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn test_normalize_name() {
@@ -269,5 +270,129 @@ mod tests {
         assert_eq!(normalize_name("MR. MIME"), "mr.mime");
         assert_eq!(normalize_name("Poké Ball"), "pokeball");
         assert_eq!(normalize_name("Ho-Oh"), "hooh");
+    }
+
+    fn language_strategy() -> impl Strategy<Value = GameLanguage> {
+        prop_oneof![
+            Just(GameLanguage::English),
+            Just(GameLanguage::Japanese),
+            Just(GameLanguage::French),
+            Just(GameLanguage::German),
+            Just(GameLanguage::Italian),
+            Just(GameLanguage::Spanish),
+            Just(GameLanguage::Korean),
+        ]
+    }
+
+    fn raw_name_strategy() -> impl Strategy<Value = String> {
+        (any::<u16>(), 0u8..6).prop_map(|(id, variant)| {
+            let base = format!("Poke Name {}", id % 24);
+            match variant {
+                0 => base.clone(),
+                1 => base.replace(' ', ""),
+                2 => base.to_lowercase(),
+                3 => base.to_uppercase(),
+                4 => base.replace(' ', "-"),
+                _ => format!(" {} ", base),
+            }
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_normalize_name_idempotent(name in any::<String>()) {
+            let normalized = normalize_name(&name);
+            prop_assert_eq!(normalize_name(&normalized), normalized);
+        }
+
+        #[test]
+        fn prop_normalize_name_removes_spaces_and_hyphens(name in any::<String>()) {
+            let normalized = normalize_name(&name);
+            prop_assert!(!normalized.contains(' '));
+            prop_assert!(!normalized.contains('-'));
+            let lower = normalized.to_lowercase();
+            prop_assert_eq!(normalized, lower);
+        }
+
+        #[test]
+        fn prop_build_lookup_table_matches_first_normalized_occurrence(names in prop::collection::vec(raw_name_strategy(), 0..96)) {
+            let actual = build_lookup_table(&names);
+
+            let mut expected = FxHashMap::default();
+            for (idx, name) in names.iter().enumerate() {
+                let normalized = normalize_name(name);
+                if !normalized.is_empty() && !expected.contains_key(&normalized) {
+                    expected.insert(normalized, idx as u16);
+                }
+            }
+
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_text_bank_ids_family_language_rules(lang in language_strategy()) {
+            let dp = TextBankIds::for_game(GameFamily::DP, lang);
+            let dp_jp = TextBankIds::for_game(GameFamily::DP, GameLanguage::Japanese);
+            let dp_en = TextBankIds::for_game(GameFamily::DP, GameLanguage::English);
+
+            prop_assert_eq!(dp.species, 362);
+            prop_assert_eq!(dp.moves, 588);
+            prop_assert_eq!(dp.abilities, 552);
+            prop_assert_eq!(dp.types, 565);
+            if lang.is_japanese() {
+                prop_assert_eq!(dp.items, dp_jp.items);
+            } else {
+                prop_assert_eq!(dp.items, dp_en.items);
+            }
+
+            let pt = TextBankIds::for_game(GameFamily::Platinum, lang);
+            let pt_en = TextBankIds::for_game(GameFamily::Platinum, GameLanguage::English);
+            prop_assert_eq!(pt.species, pt_en.species);
+            prop_assert_eq!(pt.items, pt_en.items);
+            prop_assert_eq!(pt.moves, pt_en.moves);
+            prop_assert_eq!(pt.abilities, pt_en.abilities);
+            prop_assert_eq!(pt.types, pt_en.types);
+
+            let hgss = TextBankIds::for_game(GameFamily::HGSS, lang);
+            let hgss_jp = TextBankIds::for_game(GameFamily::HGSS, GameLanguage::Japanese);
+            let hgss_en = TextBankIds::for_game(GameFamily::HGSS, GameLanguage::English);
+
+            if lang.is_japanese() {
+                prop_assert_eq!(hgss.species, hgss_jp.species);
+                prop_assert_eq!(hgss.items, hgss_jp.items);
+                prop_assert_eq!(hgss.moves, hgss_jp.moves);
+            } else {
+                prop_assert_eq!(hgss.species, hgss_en.species);
+                prop_assert_eq!(hgss.items, hgss_en.items);
+                prop_assert_eq!(hgss.moves, hgss_en.moves);
+            }
+            prop_assert_eq!(hgss.abilities, hgss_en.abilities);
+            prop_assert_eq!(hgss.types, hgss_en.types);
+        }
+
+        #[test]
+        fn prop_game_strings_species_lookup_consistency(names in prop::collection::vec(raw_name_strategy(), 0..96)) {
+            let species_to_id = build_lookup_table(&names);
+            let gs = GameStrings {
+                species: names.clone(),
+                species_to_id: species_to_id.clone(),
+                ..GameStrings::default()
+            };
+
+            for (idx, name) in names.iter().enumerate() {
+                prop_assert_eq!(gs.get_species_name(idx as u16), Some(name.as_str()));
+                let normalized = normalize_name(name);
+                if normalized.is_empty() {
+                    prop_assert_eq!(gs.get_species_id(name), None);
+                } else {
+                    prop_assert_eq!(gs.get_species_id(name), species_to_id.get(&normalized).copied());
+                }
+            }
+        }
     }
 }
