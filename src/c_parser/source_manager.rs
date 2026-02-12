@@ -25,13 +25,7 @@ impl SourceManager {
 
     pub fn get_or_parse(&self, path: impl AsRef<Path>) -> std::io::Result<Arc<FileEntry>> {
         let path = path.as_ref();
-        let canonical = if let Some(cached) = self.canonical_cache.get(path) {
-            cached.clone()
-        } else {
-            let res = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-            self.canonical_cache.insert(path.to_path_buf(), res.clone());
-            res
-        };
+        let canonical = self.canonicalize_strict(path)?;
 
         if let Some(entry) = self.files.get(&canonical) {
             return Ok(Arc::clone(&entry));
@@ -50,13 +44,21 @@ impl SourceManager {
 
     pub fn canonicalize(&self, path: impl AsRef<Path>) -> PathBuf {
         let path = path.as_ref();
+        self.canonicalize_strict(path)
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+
+    pub fn canonicalize_strict(&self, path: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+        let path = path.as_ref();
+
         if let Some(cached) = self.canonical_cache.get(path) {
-            cached.clone()
-        } else {
-            let res = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-            self.canonical_cache.insert(path.to_path_buf(), res.clone());
-            res
+            return Ok(cached.clone());
         }
+
+        let canonical = path.canonicalize()?;
+        self.canonical_cache
+            .insert(path.to_path_buf(), canonical.clone());
+        Ok(canonical)
     }
 
     pub fn len(&self) -> usize {
