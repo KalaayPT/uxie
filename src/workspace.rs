@@ -278,8 +278,7 @@ impl Workspace {
             GameFamily::HGSS => {
                 let fieldmap_path = root.join("src/fieldmap.c");
                 if fieldmap_path.exists() {
-                    let content = std::fs::read_to_string(&fieldmap_path)?;
-                    GlobalScriptTable::from_hgss_decomp(&content, &symbols).unwrap_or_default()
+                    GlobalScriptTable::from_hgss_decomp_file(&fieldmap_path, &symbols)?
                 } else {
                     GlobalScriptTable::new()
                 }
