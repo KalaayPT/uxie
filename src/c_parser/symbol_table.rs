@@ -558,7 +558,6 @@ impl SymbolTable {
                     .entry(name)
                     .or_default()
                     .insert(tag.clone());
-                current_index += 1;
             } else {
                 // Strip inline comments (e.g., "CONSTANT  # comment")
                 let name = if let Some(comment_pos) = line.find('#') {
@@ -581,8 +580,8 @@ impl SymbolTable {
                     .entry(name)
                     .or_default()
                     .insert(tag.clone());
-                current_index += 1;
             }
+            current_index += 1;
         }
         Ok(())
     }
@@ -657,7 +656,7 @@ impl SymbolTable {
 
     pub fn load_headers_from_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<usize> {
         let mut files = Vec::new();
-        self.collect_header_files(dir.as_ref(), &mut files)?;
+        Self::collect_header_files(dir.as_ref(), &mut files)?;
         let count = files.len();
 
         let sm = self
@@ -684,7 +683,7 @@ impl SymbolTable {
                         table.load_text_bank_json(&path)?;
                     }
                     _ => {}
-                };
+                }
                 Ok(table)
             })
             .collect::<Vec<std::io::Result<SymbolTable>>>()
@@ -698,7 +697,7 @@ impl SymbolTable {
         Ok(count)
     }
 
-    fn collect_header_files(&self, dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    fn collect_header_files(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
         if !dir.is_dir() {
             return Ok(());
         }
@@ -706,7 +705,7 @@ impl SymbolTable {
             let path = entry?.path();
             if path.is_dir() {
                 if path.file_name().and_then(|s| s.to_str()) != Some(".git") {
-                    self.collect_header_files(&path, files)?;
+                    Self::collect_header_files(&path, files)?;
                 }
             } else {
                 files.push(path);

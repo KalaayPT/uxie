@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod event_file_tests {
     use crate::c_parser::SymbolTable;
     use crate::event_file::binary::{
         BgEventBinary, BinaryEventFile, CoordEventBinary, ObjectEventBinary, WarpEventBinary,

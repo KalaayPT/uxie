@@ -288,14 +288,14 @@ impl RomHeader {
         let _encryption_seed = reader.read_u8()?;
         let _device_capacity = reader.read_u8()?;
 
-        let mut _reserved = [0u8; 7];
-        reader.read_exact(&mut _reserved)?;
+        let mut reserved = [0u8; 7];
+        reader.read_exact(&mut reserved)?;
 
         let rom_version = reader.read_u8()?;
         let _autostart = reader.read_u8()?;
 
-        let mut _padding = [0u8; 2];
-        reader.read_exact(&mut _padding)?;
+        let mut padding = [0u8; 2];
+        reader.read_exact(&mut padding)?;
 
         let arm9_rom_offset = reader.read_u32::<LittleEndian>()?;
         let arm9_entry_address = reader.read_u32::<LittleEndian>()?;
@@ -314,8 +314,8 @@ impl RomHeader {
         let _arm7_overlay_offset = reader.read_u32::<LittleEndian>()?;
         let _arm7_overlay_size = reader.read_u32::<LittleEndian>()?;
 
-        let mut _port_settings = [0u8; 8];
-        reader.read_exact(&mut _port_settings)?;
+        let mut port_settings = [0u8; 8];
+        reader.read_exact(&mut port_settings)?;
 
         let _icon_title_offset = reader.read_u32::<LittleEndian>()?;
         let _secure_area_crc = reader.read_u16::<LittleEndian>()?;

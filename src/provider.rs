@@ -149,7 +149,7 @@ impl DataProvider for Arm9Provider {
 
     fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
         let headers = self.read_all_headers()?;
-        find_text_archive_in_headers(&headers, script_file_id)
+        Ok(find_text_archive_in_headers(&headers, script_file_id))
     }
 
     fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>> {
@@ -283,7 +283,7 @@ impl DataProvider for DecompProvider {
 
     fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
         let headers = self.load_all_headers()?;
-        find_text_archive_in_headers(&headers, script_file_id)
+        Ok(find_text_archive_in_headers(&headers, script_file_id))
     }
 
     fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>> {
@@ -303,13 +303,13 @@ impl DataProvider for DecompProvider {
     }
 }
 
-fn find_text_archive_in_headers(headers: &[MapHeader], script_file_id: u16) -> Result<Option<u16>> {
+fn find_text_archive_in_headers(headers: &[MapHeader], script_file_id: u16) -> Option<u16> {
     for header in headers {
         if header.script_file_id() == script_file_id {
-            return Ok(Some(header.text_archive_id()));
+            return Some(header.text_archive_id());
         }
     }
-    Ok(None)
+    None
 }
 
 fn find_maps_by_script_file_in_headers(headers: &[MapHeader], script_file_id: u16) -> Vec<u16> {

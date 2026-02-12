@@ -29,7 +29,7 @@ mod c_parser_tests {
             "#include \"b.h\"\n#include \"c.h\"\n#define VAL_A 100",
         );
 
-        let mut table = SymbolTable::with_source_manager(sm.clone());
+        let mut table = SymbolTable::with_source_manager(sm);
         table.load_recursive(&a_path, &[]).unwrap();
 
         assert_eq!(table.resolve_constant("VAL_A"), Some(100));
@@ -37,7 +37,7 @@ mod c_parser_tests {
         assert_eq!(table.resolve_constant("VAL_C"), Some(300));
         assert_eq!(table.resolve_constant("VAL_D"), Some(400));
 
-        assert_eq!(sm.len(), 4);
+        assert_eq!(table.get_source_manager().len(), 4);
     }
 
     #[test]
@@ -48,7 +48,7 @@ mod c_parser_tests {
         let a_path = create_file(dir.path(), "a.h", "#include \"b.h\"\n#define VAL_A 1");
         create_file(dir.path(), "b.h", "#include \"a.h\"\n#define VAL_B 2");
 
-        let mut table = SymbolTable::with_source_manager(sm.clone());
+        let mut table = SymbolTable::with_source_manager(sm);
         table.load_recursive(&a_path, &[]).unwrap();
 
         assert_eq!(table.resolve_constant("VAL_A"), Some(1));
@@ -85,7 +85,7 @@ mod c_parser_tests {
             "#include \"consts.h\"\n#define DERIVED (BASE + 5)",
         );
 
-        let mut table = SymbolTable::with_source_manager(sm.clone());
+        let mut table = SymbolTable::with_source_manager(sm);
         table.load_recursive(&main_path, &[]).unwrap();
 
         assert_eq!(table.resolve_constant("DERIVED"), Some(15));

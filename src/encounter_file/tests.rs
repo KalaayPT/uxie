@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod tests {
+mod encounter_tests {
     use crate::c_parser::SymbolTable;
     use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
     use crate::encounter_file::json::JsonEncounterFile;

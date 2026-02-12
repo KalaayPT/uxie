@@ -1,5 +1,6 @@
 use regex::Regex;
 use std::collections::HashSet;
+use std::hash::BuildHasher;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -37,10 +38,10 @@ pub fn parse_includes(source: &str) -> Vec<CInclude> {
     includes
 }
 
-pub fn resolve_includes(
+pub fn resolve_includes<S: BuildHasher>(
     file_path: &Path,
     include_dirs: &[PathBuf],
-    visited: &mut HashSet<PathBuf>,
+    visited: &mut HashSet<PathBuf, S>,
 ) -> std::io::Result<Vec<PathBuf>> {
     let canonical = file_path.canonicalize()?;
 

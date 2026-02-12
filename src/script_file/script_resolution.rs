@@ -140,7 +140,7 @@ pub fn resolve_script_id(
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
     if is_common_script_id(script_id) {
-        resolve_common_script(script_id, global_table)
+        Ok(resolve_common_script(script_id, global_table))
     } else {
         resolve_map_script(script_id, map_id, provider)
     }
@@ -161,7 +161,7 @@ pub fn resolve_script_id_by_file(
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
     if is_common_script_id(script_id) {
-        resolve_common_script(script_id, global_table)
+        Ok(resolve_common_script(script_id, global_table))
     } else {
         let map_id = provider.find_map_by_script_file_id(script_file_id)?;
         resolve_map_script(script_id, map_id, provider)
@@ -184,7 +184,7 @@ pub fn resolve_script_id_by_level_script_file(
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
     if is_common_script_id(script_id) {
-        resolve_common_script(script_id, global_table)
+        Ok(resolve_common_script(script_id, global_table))
     } else {
         let map_id = provider.find_map_by_level_script_file_id(level_script_file_id)?;
         resolve_map_script(script_id, map_id, provider)
@@ -194,13 +194,14 @@ pub fn resolve_script_id_by_level_script_file(
 fn resolve_common_script(
     script_id: u16,
     global_table: &GlobalScriptTable,
-) -> Result<Option<ScriptResolution>> {
-    let entry = global_table.lookup(script_id);
-    Ok(entry.map(|e| ScriptResolution::CommonScript {
-        script_id,
-        script_file_id: e.script_file_id,
-        text_archive_id: e.text_archive_id,
-    }))
+) -> Option<ScriptResolution> {
+    global_table
+        .lookup(script_id)
+        .map(|e| ScriptResolution::CommonScript {
+            script_id,
+            script_file_id: e.script_file_id,
+            text_archive_id: e.text_archive_id,
+        })
 }
 
 fn resolve_map_script(
@@ -235,7 +236,7 @@ pub fn resolve_level_script(
     let level_script_id = header.level_script_id();
 
     if is_common_script_id(level_script_id) {
-        resolve_common_script(level_script_id, global_table)
+        Ok(resolve_common_script(level_script_id, global_table))
     } else {
         Ok(Some(ScriptResolution::MapScript {
             script_id: level_script_id,
@@ -429,7 +430,7 @@ mod tests {
             GlobalScriptEntry::new(2500, 212, 214),
         ]);
 
-        let result = resolve_common_script(2018, &table).unwrap();
+        let result = resolve_common_script(2018, &table);
         assert!(result.is_some());
 
         let resolution = result.unwrap();
@@ -841,9 +842,9 @@ mod tests {
                 &provider,
             ).unwrap();
 
-            prop_assert_eq!(&direct, &expected);
-            prop_assert_eq!(&by_file, &expected);
-            prop_assert_eq!(&by_level_file, &expected);
+            prop_assert_eq!(&direct, &Some(expected.clone()));
+            prop_assert_eq!(&by_file, &Some(expected.clone()));
+            prop_assert_eq!(&by_level_file, &Some(expected));
         }
 
         #[test]

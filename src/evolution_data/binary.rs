@@ -64,8 +64,7 @@ mod tests {
             target_species: 3,
         };
 
-        let active: Vec<_> = evo.active_evolutions().collect();
-        assert_eq!(active.len(), 2);
+        assert_eq!(evo.active_evolutions().count(), 2);
     }
 
     fn evolution_entry_strategy() -> impl Strategy<Value = EvolutionEntry> {
