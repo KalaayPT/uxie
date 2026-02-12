@@ -35,29 +35,29 @@ pub struct WaterEncounterEntry {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinaryEncounterFile {
     pub walking_rate: u32,
-    pub grass_encounters: Vec<EncounterEntry>,
-    pub swarm_encounters: Vec<u32>,
-    pub day_encounters: Vec<u32>,
-    pub night_encounters: Vec<u32>,
-    pub radar_encounters: Vec<u32>,
-    pub form_encounter_rates: Vec<u32>,
+    pub grass_encounters: [EncounterEntry; DPPT_GRASS_COUNT],
+    pub swarm_encounters: [u32; HGSS_SWARM_COUNT],
+    pub day_encounters: [u32; HGSS_WALKING_COUNT],
+    pub night_encounters: [u32; HGSS_WALKING_COUNT],
+    pub radar_encounters: [u32; HGSS_MUSIC_COUNT],
+    pub form_encounter_rates: [u32; DPPT_FORM_RATE_COUNT],
     pub unown_table_id: u32,
-    pub dual_slot_ruby: Vec<u32>,
-    pub dual_slot_sapphire: Vec<u32>,
-    pub dual_slot_emerald: Vec<u32>,
-    pub dual_slot_firered: Vec<u32>,
-    pub dual_slot_leafgreen: Vec<u32>,
+    pub dual_slot_ruby: [u32; DPPT_DUAL_SLOT_COUNT],
+    pub dual_slot_sapphire: [u32; DPPT_DUAL_SLOT_COUNT],
+    pub dual_slot_emerald: [u32; DPPT_DUAL_SLOT_COUNT],
+    pub dual_slot_firered: [u32; DPPT_DUAL_SLOT_COUNT],
+    pub dual_slot_leafgreen: [u32; DPPT_DUAL_SLOT_COUNT],
     pub surf_rate: u32,
-    pub surf_encounters: Vec<WaterEncounterEntry>,
+    pub surf_encounters: [WaterEncounterEntry; DPPT_WATER_SLOT_COUNT],
     pub old_rod_rate: u32,
-    pub old_rod_encounters: Vec<WaterEncounterEntry>,
+    pub old_rod_encounters: [WaterEncounterEntry; DPPT_WATER_SLOT_COUNT],
     pub good_rod_rate: u32,
-    pub good_rod_encounters: Vec<WaterEncounterEntry>,
+    pub good_rod_encounters: [WaterEncounterEntry; DPPT_WATER_SLOT_COUNT],
     pub super_rod_rate: u32,
-    pub super_rod_encounters: Vec<WaterEncounterEntry>,
+    pub super_rod_encounters: [WaterEncounterEntry; DPPT_WATER_SLOT_COUNT],
     pub rock_smash_rate: u32,
-    pub rock_smash_encounters: Vec<WaterEncounterEntry>,
-    pub morning_encounters: Vec<EncounterEntry>,
+    pub rock_smash_encounters: [WaterEncounterEntry; HGSS_ROCK_SMASH_COUNT],
+    pub morning_encounters: [EncounterEntry; HGSS_WALKING_COUNT],
 }
 
 impl BinaryEncounterFile {
@@ -70,129 +70,149 @@ impl BinaryEncounterFile {
 
     fn from_binary_dppt<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
         let walking_rate = reader.read_u32::<LittleEndian>()?;
-        let mut grass_encounters = Vec::with_capacity(12);
-        for _ in 0..12 {
+
+        let mut grass_encounters = [EncounterEntry {
+            level: 0,
+            species: 0,
+        }; DPPT_GRASS_COUNT];
+        for slot in &mut grass_encounters {
             let level = reader.read_u32::<LittleEndian>()? as u8;
             let species = reader.read_u32::<LittleEndian>()?;
-            grass_encounters.push(EncounterEntry { level, species });
+            *slot = EncounterEntry { level, species };
         }
 
-        let mut swarm_encounters = Vec::with_capacity(2);
-        for _ in 0..2 {
-            swarm_encounters.push(reader.read_u32::<LittleEndian>()?);
+        let mut swarm_pair = [0u32; DPPT_SWARM_COUNT];
+        for slot in &mut swarm_pair {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut day_encounters = Vec::with_capacity(2);
-        for _ in 0..2 {
-            day_encounters.push(reader.read_u32::<LittleEndian>()?);
+        let mut day_pair = [0u32; DPPT_DAY_NIGHT_COUNT];
+        for slot in &mut day_pair {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut night_encounters = Vec::with_capacity(2);
-        for _ in 0..2 {
-            night_encounters.push(reader.read_u32::<LittleEndian>()?);
+        let mut night_pair = [0u32; DPPT_DAY_NIGHT_COUNT];
+        for slot in &mut night_pair {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut radar_encounters = Vec::with_capacity(4);
-        for _ in 0..4 {
-            radar_encounters.push(reader.read_u32::<LittleEndian>()?);
+        let mut radar_encounters = [0u32; DPPT_RADAR_COUNT];
+        for slot in &mut radar_encounters {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut form_encounter_rates = Vec::with_capacity(5);
-        for _ in 0..5 {
-            form_encounter_rates.push(reader.read_u32::<LittleEndian>()?);
+        let mut form_encounter_rates = [0u32; DPPT_FORM_RATE_COUNT];
+        for slot in &mut form_encounter_rates {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
         let unown_table_id = reader.read_u32::<LittleEndian>()?;
 
-        let mut dual_slot_ruby = Vec::with_capacity(2);
-        for _ in 0..2 {
-            dual_slot_ruby.push(reader.read_u32::<LittleEndian>()?);
+        let mut dual_slot_ruby = [0u32; DPPT_DUAL_SLOT_COUNT];
+        for slot in &mut dual_slot_ruby {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut dual_slot_sapphire = Vec::with_capacity(2);
-        for _ in 0..2 {
-            dual_slot_sapphire.push(reader.read_u32::<LittleEndian>()?);
+        let mut dual_slot_sapphire = [0u32; DPPT_DUAL_SLOT_COUNT];
+        for slot in &mut dual_slot_sapphire {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut dual_slot_emerald = Vec::with_capacity(2);
-        for _ in 0..2 {
-            dual_slot_emerald.push(reader.read_u32::<LittleEndian>()?);
+        let mut dual_slot_emerald = [0u32; DPPT_DUAL_SLOT_COUNT];
+        for slot in &mut dual_slot_emerald {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut dual_slot_firered = Vec::with_capacity(2);
-        for _ in 0..2 {
-            dual_slot_firered.push(reader.read_u32::<LittleEndian>()?);
+        let mut dual_slot_firered = [0u32; DPPT_DUAL_SLOT_COUNT];
+        for slot in &mut dual_slot_firered {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
-        let mut dual_slot_leafgreen = Vec::with_capacity(2);
-        for _ in 0..2 {
-            dual_slot_leafgreen.push(reader.read_u32::<LittleEndian>()?);
+        let mut dual_slot_leafgreen = [0u32; DPPT_DUAL_SLOT_COUNT];
+        for slot in &mut dual_slot_leafgreen {
+            *slot = reader.read_u32::<LittleEndian>()?;
         }
 
         let surf_rate = reader.read_u32::<LittleEndian>()?;
-        let mut surf_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut surf_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; DPPT_WATER_SLOT_COUNT];
+        for slot in &mut surf_encounters {
             let max_level = reader.read_u8()?;
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            surf_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
         reader.seek(SeekFrom::Start(0x124))?;
 
         let old_rod_rate = reader.read_u32::<LittleEndian>()?;
-        let mut old_rod_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut old_rod_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; DPPT_WATER_SLOT_COUNT];
+        for slot in &mut old_rod_encounters {
             let max_level = reader.read_u8()?;
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            old_rod_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
         let good_rod_rate = reader.read_u32::<LittleEndian>()?;
-        let mut good_rod_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut good_rod_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; DPPT_WATER_SLOT_COUNT];
+        for slot in &mut good_rod_encounters {
             let max_level = reader.read_u8()?;
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            good_rod_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
         let super_rod_rate = reader.read_u32::<LittleEndian>()?;
-        let mut super_rod_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut super_rod_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; DPPT_WATER_SLOT_COUNT];
+        for slot in &mut super_rod_encounters {
             let max_level = reader.read_u8()?;
             let min_level = reader.read_u8()?;
             reader.seek(SeekFrom::Current(2))?;
             let species = reader.read_u32::<LittleEndian>()?;
-            super_rod_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
         Ok(Self {
             walking_rate,
             grass_encounters,
-            swarm_encounters,
-            day_encounters,
-            night_encounters,
+            swarm_encounters: [swarm_pair[0], swarm_pair[1], 0, 0],
+            day_encounters: [day_pair[0], day_pair[1], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            night_encounters: [night_pair[0], night_pair[1], 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             radar_encounters,
             form_encounter_rates,
             unown_table_id,
@@ -210,8 +230,15 @@ impl BinaryEncounterFile {
             super_rod_rate,
             super_rod_encounters,
             rock_smash_rate: 0,
-            rock_smash_encounters: Vec::new(),
-            morning_encounters: Vec::new(),
+            rock_smash_encounters: [WaterEncounterEntry {
+                min_level: 0,
+                max_level: 0,
+                species: 0,
+            }; HGSS_ROCK_SMASH_COUNT],
+            morning_encounters: [EncounterEntry {
+                level: 0,
+                species: 0,
+            }; HGSS_WALKING_COUNT],
         })
     }
 
@@ -224,122 +251,135 @@ impl BinaryEncounterFile {
         let super_rod_rate = reader.read_u8()? as u32;
         reader.seek(SeekFrom::Current(2))?;
 
-        let mut walking_levels = [0u8; 12];
+        let mut walking_levels = [0u8; HGSS_WALKING_COUNT];
         reader.read_exact(&mut walking_levels)?;
 
-        let mut morning_encounters = Vec::with_capacity(12);
-        for i in 0..12 {
+        let mut morning_encounters = [EncounterEntry {
+            level: 0,
+            species: 0,
+        }; HGSS_WALKING_COUNT];
+        for (index, slot) in morning_encounters.iter_mut().enumerate() {
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            morning_encounters.push(EncounterEntry {
-                level: walking_levels[i],
+            *slot = EncounterEntry {
+                level: walking_levels[index],
                 species,
-            });
+            };
         }
 
-        let mut day_encounters = Vec::with_capacity(12);
-        for _ in 0..12 {
-            let species = reader.read_u16::<LittleEndian>()? as u32;
-            day_encounters.push(species);
+        let mut day_encounters = [0u32; HGSS_WALKING_COUNT];
+        for slot in &mut day_encounters {
+            *slot = reader.read_u16::<LittleEndian>()? as u32;
         }
 
-        let mut night_encounters = Vec::with_capacity(12);
-        for _ in 0..12 {
-            let species = reader.read_u16::<LittleEndian>()? as u32;
-            night_encounters.push(species);
+        let mut night_encounters = [0u32; HGSS_WALKING_COUNT];
+        for slot in &mut night_encounters {
+            *slot = reader.read_u16::<LittleEndian>()? as u32;
         }
 
-        let mut swarm_encounters = Vec::with_capacity(4);
-        for _ in 0..4 {
-            swarm_encounters.push(reader.read_u16::<LittleEndian>()? as u32);
+        let mut swarm_encounters = [0u32; HGSS_SWARM_COUNT];
+        for slot in &mut swarm_encounters {
+            *slot = reader.read_u16::<LittleEndian>()? as u32;
         }
 
-        let mut hoenn_music = Vec::with_capacity(2);
-        for _ in 0..2 {
-            hoenn_music.push(reader.read_u16::<LittleEndian>()? as u32);
+        let mut radar_encounters = [0u32; HGSS_MUSIC_COUNT];
+        for slot in &mut radar_encounters {
+            *slot = reader.read_u16::<LittleEndian>()? as u32;
         }
 
-        let mut sinnoh_music = Vec::with_capacity(2);
-        for _ in 0..2 {
-            sinnoh_music.push(reader.read_u16::<LittleEndian>()? as u32);
-        }
-
-        let mut surf_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut surf_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; HGSS_SURF_COUNT];
+        for slot in &mut surf_encounters {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            surf_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
-        let mut rock_smash_encounters = Vec::with_capacity(2);
-        for _ in 0..2 {
+        let mut rock_smash_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; HGSS_ROCK_SMASH_COUNT];
+        for slot in &mut rock_smash_encounters {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            rock_smash_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
-        let mut old_rod_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut old_rod_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; HGSS_OLD_ROD_COUNT];
+        for slot in &mut old_rod_encounters {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            old_rod_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
-        let mut good_rod_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut good_rod_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; HGSS_GOOD_ROD_COUNT];
+        for slot in &mut good_rod_encounters {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            good_rod_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
 
-        let mut super_rod_encounters = Vec::with_capacity(5);
-        for _ in 0..5 {
+        let mut super_rod_encounters = [WaterEncounterEntry {
+            min_level: 0,
+            max_level: 0,
+            species: 0,
+        }; HGSS_SUPER_ROD_COUNT];
+        for slot in &mut super_rod_encounters {
             let min_level = reader.read_u8()?;
             let max_level = reader.read_u8()?;
             let species = reader.read_u16::<LittleEndian>()? as u32;
-            super_rod_encounters.push(WaterEncounterEntry {
+            *slot = WaterEncounterEntry {
                 min_level,
                 max_level,
                 species,
-            });
+            };
         }
-
-        let mut special = hoenn_music;
-        special.extend(sinnoh_music);
 
         Ok(Self {
             walking_rate,
-            grass_encounters: morning_encounters.clone(),
+            grass_encounters: morning_encounters,
             swarm_encounters,
             day_encounters,
             night_encounters,
-            radar_encounters: special,
-            form_encounter_rates: Vec::new(),
+            radar_encounters,
+            form_encounter_rates: [0; DPPT_FORM_RATE_COUNT],
             unown_table_id: 0,
-            dual_slot_ruby: Vec::new(),
-            dual_slot_sapphire: Vec::new(),
-            dual_slot_emerald: Vec::new(),
-            dual_slot_firered: Vec::new(),
-            dual_slot_leafgreen: Vec::new(),
+            dual_slot_ruby: [0; DPPT_DUAL_SLOT_COUNT],
+            dual_slot_sapphire: [0; DPPT_DUAL_SLOT_COUNT],
+            dual_slot_emerald: [0; DPPT_DUAL_SLOT_COUNT],
+            dual_slot_firered: [0; DPPT_DUAL_SLOT_COUNT],
+            dual_slot_leafgreen: [0; DPPT_DUAL_SLOT_COUNT],
             surf_rate,
             surf_encounters,
             old_rod_rate,
@@ -370,82 +410,31 @@ impl BinaryEncounterFile {
     }
 
     fn validate_dppt_shape(&self) -> io::Result<()> {
-        ensure_len(
-            "grass_encounters",
-            self.grass_encounters.len(),
-            DPPT_GRASS_COUNT,
-        )?;
-        ensure_len(
-            "swarm_encounters",
-            self.swarm_encounters.len(),
-            DPPT_SWARM_COUNT,
-        )?;
-        ensure_len(
-            "day_encounters",
-            self.day_encounters.len(),
-            DPPT_DAY_NIGHT_COUNT,
-        )?;
-        ensure_len(
-            "night_encounters",
-            self.night_encounters.len(),
-            DPPT_DAY_NIGHT_COUNT,
-        )?;
-        ensure_len(
-            "radar_encounters",
-            self.radar_encounters.len(),
-            DPPT_RADAR_COUNT,
-        )?;
-        ensure_len(
-            "form_encounter_rates",
-            self.form_encounter_rates.len(),
-            DPPT_FORM_RATE_COUNT,
-        )?;
-        ensure_len(
-            "dual_slot_ruby",
-            self.dual_slot_ruby.len(),
-            DPPT_DUAL_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "dual_slot_sapphire",
-            self.dual_slot_sapphire.len(),
-            DPPT_DUAL_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "dual_slot_emerald",
-            self.dual_slot_emerald.len(),
-            DPPT_DUAL_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "dual_slot_firered",
-            self.dual_slot_firered.len(),
-            DPPT_DUAL_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "dual_slot_leafgreen",
-            self.dual_slot_leafgreen.len(),
-            DPPT_DUAL_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "surf_encounters",
-            self.surf_encounters.len(),
-            DPPT_WATER_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "old_rod_encounters",
-            self.old_rod_encounters.len(),
-            DPPT_WATER_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "good_rod_encounters",
-            self.good_rod_encounters.len(),
-            DPPT_WATER_SLOT_COUNT,
-        )?;
-        ensure_len(
-            "super_rod_encounters",
-            self.super_rod_encounters.len(),
-            DPPT_WATER_SLOT_COUNT,
-        )?;
+        for (idx, entry) in self.grass_encounters.iter().enumerate() {
+            ensure_level_u8("grass_encounters", idx, entry.level)?;
+            ensure_species_u32("grass_encounters", idx, entry.species)?;
+        }
 
+        for (idx, species) in self.swarm_encounters[..DPPT_SWARM_COUNT].iter().enumerate() {
+            ensure_species_u32("swarm_encounters", idx, *species)?;
+        }
+        for (idx, species) in self.day_encounters[..DPPT_DAY_NIGHT_COUNT]
+            .iter()
+            .enumerate()
+        {
+            ensure_species_u32("day_encounters", idx, *species)?;
+        }
+        for (idx, species) in self.night_encounters[..DPPT_DAY_NIGHT_COUNT]
+            .iter()
+            .enumerate()
+        {
+            ensure_species_u32("night_encounters", idx, *species)?;
+        }
+
+        validate_water_species_u32("surf_encounters", &self.surf_encounters)?;
+        validate_water_species_u32("old_rod_encounters", &self.old_rod_encounters)?;
+        validate_water_species_u32("good_rod_encounters", &self.good_rod_encounters)?;
+        validate_water_species_u32("super_rod_encounters", &self.super_rod_encounters)?;
         Ok(())
     }
 
@@ -456,57 +445,6 @@ impl BinaryEncounterFile {
         ensure_u8_range("old_rod_rate", self.old_rod_rate)?;
         ensure_u8_range("good_rod_rate", self.good_rod_rate)?;
         ensure_u8_range("super_rod_rate", self.super_rod_rate)?;
-
-        ensure_len(
-            "morning_encounters",
-            self.morning_encounters.len(),
-            HGSS_WALKING_COUNT,
-        )?;
-        ensure_len(
-            "day_encounters",
-            self.day_encounters.len(),
-            HGSS_WALKING_COUNT,
-        )?;
-        ensure_len(
-            "night_encounters",
-            self.night_encounters.len(),
-            HGSS_WALKING_COUNT,
-        )?;
-        ensure_len(
-            "swarm_encounters",
-            self.swarm_encounters.len(),
-            HGSS_SWARM_COUNT,
-        )?;
-        ensure_len(
-            "radar_encounters",
-            self.radar_encounters.len(),
-            HGSS_MUSIC_COUNT,
-        )?;
-        ensure_len(
-            "surf_encounters",
-            self.surf_encounters.len(),
-            HGSS_SURF_COUNT,
-        )?;
-        ensure_len(
-            "rock_smash_encounters",
-            self.rock_smash_encounters.len(),
-            HGSS_ROCK_SMASH_COUNT,
-        )?;
-        ensure_len(
-            "old_rod_encounters",
-            self.old_rod_encounters.len(),
-            HGSS_OLD_ROD_COUNT,
-        )?;
-        ensure_len(
-            "good_rod_encounters",
-            self.good_rod_encounters.len(),
-            HGSS_GOOD_ROD_COUNT,
-        )?;
-        ensure_len(
-            "super_rod_encounters",
-            self.super_rod_encounters.len(),
-            HGSS_SUPER_ROD_COUNT,
-        )?;
 
         for (idx, e) in self.morning_encounters.iter().enumerate() {
             ensure_species_u16("morning_encounters", idx, e.species)?;
@@ -528,7 +466,6 @@ impl BinaryEncounterFile {
         validate_water_species_u16("old_rod_encounters", &self.old_rod_encounters)?;
         validate_water_species_u16("good_rod_encounters", &self.good_rod_encounters)?;
         validate_water_species_u16("super_rod_encounters", &self.super_rod_encounters)?;
-
         Ok(())
     }
 
@@ -538,13 +475,13 @@ impl BinaryEncounterFile {
             writer.write_u32::<LittleEndian>(e.level as u32)?;
             writer.write_u32::<LittleEndian>(e.species)?;
         }
-        for &s in &self.swarm_encounters {
+        for &s in &self.swarm_encounters[..DPPT_SWARM_COUNT] {
             writer.write_u32::<LittleEndian>(s)?;
         }
-        for &s in &self.day_encounters {
+        for &s in &self.day_encounters[..DPPT_DAY_NIGHT_COUNT] {
             writer.write_u32::<LittleEndian>(s)?;
         }
-        for &s in &self.night_encounters {
+        for &s in &self.night_encounters[..DPPT_DAY_NIGHT_COUNT] {
             writer.write_u32::<LittleEndian>(s)?;
         }
         for &s in &self.radar_encounters {
@@ -631,14 +568,8 @@ impl BinaryEncounterFile {
         for &s in &self.swarm_encounters {
             writer.write_u16::<LittleEndian>(s as u16)?;
         }
-
-        // hoenn/sinnoh music
-        for i in 0..4 {
-            if let Some(&s) = self.radar_encounters.get(i) {
-                writer.write_u16::<LittleEndian>(s as u16)?;
-            } else {
-                writer.write_u16::<LittleEndian>(0)?;
-            }
+        for &s in &self.radar_encounters {
+            writer.write_u16::<LittleEndian>(s as u16)?;
         }
 
         for e in &self.surf_encounters {
@@ -674,19 +605,6 @@ impl BinaryEncounterFile {
     }
 }
 
-fn ensure_len(field: &str, actual: usize, expected: usize) -> io::Result<()> {
-    if actual != expected {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "Encounter field '{}' has {} entries, expected {}",
-                field, actual, expected
-            ),
-        ));
-    }
-    Ok(())
-}
-
 fn ensure_u8_range(field: &str, value: u32) -> io::Result<()> {
     if value > u8::MAX as u32 {
         return Err(io::Error::new(
@@ -699,6 +617,26 @@ fn ensure_u8_range(field: &str, value: u32) -> io::Result<()> {
             ),
         ));
     }
+    Ok(())
+}
+
+fn ensure_level_u8(field: &str, index: usize, level: u8) -> io::Result<()> {
+    if level > u8::MAX {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Encounter field '{}' index {} level {} exceeds u8 max {}",
+                field,
+                index,
+                level,
+                u8::MAX
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_species_u32(_field: &str, _index: usize, _species: u32) -> io::Result<()> {
     Ok(())
 }
 
@@ -715,6 +653,10 @@ fn ensure_species_u16(field: &str, index: usize, species: u32) -> io::Result<()>
             ),
         ));
     }
+    Ok(())
+}
+
+fn validate_water_species_u32(_field: &str, _values: &[WaterEncounterEntry]) -> io::Result<()> {
     Ok(())
 }
 
