@@ -9,13 +9,13 @@ mod tests {
 
     fn build_dppt_fixture() -> BinaryEncounterFile {
         let grass = core::array::from_fn(|i| EncounterEntry {
-            level: i as u8,
+            level: (i + 1) as u8,
             species: i as u32 + 1,
         });
 
         let water: [WaterEncounterEntry; 5] = core::array::from_fn(|i| WaterEncounterEntry {
-            min_level: i as u8,
-            max_level: i as u8 + 5,
+            min_level: (i + 1) as u8,
+            max_level: (i + 6) as u8,
             species: i as u32 + 100,
         });
 
@@ -183,13 +183,14 @@ mod tests {
     fn encounter_entry_strategy(
         species: impl Strategy<Value = u32>,
     ) -> impl Strategy<Value = EncounterEntry> {
-        (any::<u8>(), species).prop_map(|(level, species)| EncounterEntry { level, species })
+        (1u8..=100u8, species).prop_map(|(level, species)| EncounterEntry { level, species })
     }
 
     fn water_entry_strategy(
         species: impl Strategy<Value = u32>,
     ) -> impl Strategy<Value = WaterEncounterEntry> {
-        (any::<u8>(), any::<u8>(), species).prop_map(|(min_level, max_level, species)| {
+        (1u8..=100u8, 1u8..=100u8, species).prop_map(|(a, b, species)| {
+            let (min_level, max_level) = if a <= b { (a, b) } else { (b, a) };
             WaterEncounterEntry {
                 min_level,
                 max_level,
@@ -217,13 +218,16 @@ mod tests {
     }
 
     fn dppt_encounter_strategy() -> impl Strategy<Value = BinaryEncounterFile> {
+        let rate = 0u32..=255u32;
+        let species_u16 = 0u32..=65535u32;
+
         let part1 = (
-            any::<u32>(),
-            encounter_array_strategy::<12>(any::<u32>()),
-            species_array_strategy::<2>(any::<u32>()),
-            species_array_strategy::<2>(any::<u32>()),
-            species_array_strategy::<2>(any::<u32>()),
-            species_array_strategy::<4>(any::<u32>()),
+            rate.clone(),
+            encounter_array_strategy::<12>(species_u16.clone()),
+            species_array_strategy::<2>(species_u16.clone()),
+            species_array_strategy::<2>(species_u16.clone()),
+            species_array_strategy::<2>(species_u16.clone()),
+            species_array_strategy::<4>(species_u16.clone()),
             species_array_strategy::<5>(any::<u32>()),
             any::<u32>(),
             species_array_strategy::<2>(any::<u32>()),
@@ -233,14 +237,14 @@ mod tests {
         let part2 = (
             species_array_strategy::<2>(any::<u32>()),
             species_array_strategy::<2>(any::<u32>()),
-            any::<u32>(),
-            water_array_strategy::<5>(any::<u32>()),
-            any::<u32>(),
-            water_array_strategy::<5>(any::<u32>()),
-            any::<u32>(),
-            water_array_strategy::<5>(any::<u32>()),
-            any::<u32>(),
-            water_array_strategy::<5>(any::<u32>()),
+            rate.clone(),
+            water_array_strategy::<5>(species_u16.clone()),
+            rate.clone(),
+            water_array_strategy::<5>(species_u16.clone()),
+            rate.clone(),
+            water_array_strategy::<5>(species_u16.clone()),
+            rate,
+            water_array_strategy::<5>(species_u16),
         );
 
         (part1, part2).prop_map(

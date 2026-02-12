@@ -2,6 +2,9 @@ use crate::game::GameFamily;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
+const ENCOUNTER_LEVEL_MIN: u8 = 1;
+const ENCOUNTER_LEVEL_MAX: u8 = 100;
+
 const DPPT_GRASS_COUNT: usize = 12;
 const DPPT_SWARM_COUNT: usize = 2;
 const DPPT_DAY_NIGHT_COUNT: usize = 2;
@@ -407,41 +410,67 @@ impl BinaryEncounterFile {
 
     fn validate_for_family(&self, family: GameFamily) -> io::Result<()> {
         match family {
-            GameFamily::DP | GameFamily::Platinum => self.validate_dppt_shape(),
-            GameFamily::HGSS => self.validate_hgss_shape(),
+            GameFamily::DP | GameFamily::Platinum => self.validate_dppt_constraints(),
+            GameFamily::HGSS => self.validate_hgss_constraints(),
         }
     }
 
-    fn validate_dppt_shape(&self) -> io::Result<()> {
+    fn validate_dppt_constraints(&self) -> io::Result<()> {
+        ensure_u8_range("walking_rate", self.walking_rate)?;
+        ensure_u8_range("surf_rate", self.surf_rate)?;
+        ensure_u8_range("old_rod_rate", self.old_rod_rate)?;
+        ensure_u8_range("good_rod_rate", self.good_rod_rate)?;
+        ensure_u8_range("super_rod_rate", self.super_rod_rate)?;
+
         for (idx, entry) in self.grass_encounters.iter().enumerate() {
-            ensure_level_u8("grass_encounters", idx, entry.level)?;
-            ensure_species_u32("grass_encounters", idx, entry.species)?;
+            ensure_level_range("grass_encounters.level", idx, entry.level)?;
+            ensure_species_u16("grass_encounters.species", idx, entry.species)?;
         }
 
         for (idx, species) in self.swarm_encounters[..DPPT_SWARM_COUNT].iter().enumerate() {
-            ensure_species_u32("swarm_encounters", idx, *species)?;
+            ensure_species_u16("swarm_encounters", idx, *species)?;
         }
+
         for (idx, species) in self.day_encounters[..DPPT_DAY_NIGHT_COUNT]
             .iter()
             .enumerate()
         {
-            ensure_species_u32("day_encounters", idx, *species)?;
+            ensure_species_u16("day_encounters", idx, *species)?;
         }
+
         for (idx, species) in self.night_encounters[..DPPT_DAY_NIGHT_COUNT]
             .iter()
             .enumerate()
         {
-            ensure_species_u32("night_encounters", idx, *species)?;
+            ensure_species_u16("night_encounters", idx, *species)?;
         }
 
-        validate_water_species_u32("surf_encounters", &self.surf_encounters)?;
-        validate_water_species_u32("old_rod_encounters", &self.old_rod_encounters)?;
-        validate_water_species_u32("good_rod_encounters", &self.good_rod_encounters)?;
-        validate_water_species_u32("super_rod_encounters", &self.super_rod_encounters)?;
+        for (idx, species) in self.radar_encounters.iter().enumerate() {
+            ensure_species_u16("radar_encounters", idx, *species)?;
+        }
+
+        validate_water_levels("surf_encounters", &self.surf_encounters)?;
+        validate_water_levels("old_rod_encounters", &self.old_rod_encounters)?;
+        validate_water_levels("good_rod_encounters", &self.good_rod_encounters)?;
+        validate_water_levels("super_rod_encounters", &self.super_rod_encounters)?;
+
+        for (idx, entry) in self.surf_encounters.iter().enumerate() {
+            ensure_species_u16("surf_encounters.species", idx, entry.species)?;
+        }
+        for (idx, entry) in self.old_rod_encounters.iter().enumerate() {
+            ensure_species_u16("old_rod_encounters.species", idx, entry.species)?;
+        }
+        for (idx, entry) in self.good_rod_encounters.iter().enumerate() {
+            ensure_species_u16("good_rod_encounters.species", idx, entry.species)?;
+        }
+        for (idx, entry) in self.super_rod_encounters.iter().enumerate() {
+            ensure_species_u16("super_rod_encounters.species", idx, entry.species)?;
+        }
+
         Ok(())
     }
 
-    fn validate_hgss_shape(&self) -> io::Result<()> {
+    fn validate_hgss_constraints(&self) -> io::Result<()> {
         ensure_u8_range("walking_rate", self.walking_rate)?;
         ensure_u8_range("surf_rate", self.surf_rate)?;
         ensure_u8_range("rock_smash_rate", self.rock_smash_rate)?;
@@ -450,7 +479,8 @@ impl BinaryEncounterFile {
         ensure_u8_range("super_rod_rate", self.super_rod_rate)?;
 
         for (idx, e) in self.morning_encounters.iter().enumerate() {
-            ensure_species_u16("morning_encounters", idx, e.species)?;
+            ensure_level_range("morning_encounters.level", idx, e.level)?;
+            ensure_species_u16("morning_encounters.species", idx, e.species)?;
         }
         for (idx, species) in self.day_encounters.iter().enumerate() {
             ensure_species_u16("day_encounters", idx, *species)?;
@@ -623,23 +653,34 @@ fn ensure_u8_range(field: &str, value: u32) -> io::Result<()> {
     Ok(())
 }
 
-fn ensure_level_u8(field: &str, index: usize, level: u8) -> io::Result<()> {
-    if level > u8::MAX {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "Encounter field '{}' index {} level {} exceeds u8 max {}",
-                field,
-                index,
-                level,
-                u8::MAX
-            ),
-        ));
+fn ensure_level_range(field: &str, index: usize, level: u8) -> io::Result<()> {
+    if (ENCOUNTER_LEVEL_MIN..=ENCOUNTER_LEVEL_MAX).contains(&level) {
+        return Ok(());
     }
-    Ok(())
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "Encounter field '{}' index {} level {} is outside allowed range {}..={}",
+            field, index, level, ENCOUNTER_LEVEL_MIN, ENCOUNTER_LEVEL_MAX
+        ),
+    ))
 }
 
-fn ensure_species_u32(_field: &str, _index: usize, _species: u32) -> io::Result<()> {
+fn validate_water_levels(field: &str, values: &[WaterEncounterEntry]) -> io::Result<()> {
+    for (idx, entry) in values.iter().enumerate() {
+        ensure_level_range(&format!("{field}.min_level"), idx, entry.min_level)?;
+        ensure_level_range(&format!("{field}.max_level"), idx, entry.max_level)?;
+        if entry.min_level > entry.max_level {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Encounter field '{}' index {} has min_level {} > max_level {}",
+                    field, idx, entry.min_level, entry.max_level
+                ),
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -656,10 +697,6 @@ fn ensure_species_u16(field: &str, index: usize, species: u32) -> io::Result<()>
             ),
         ));
     }
-    Ok(())
-}
-
-fn validate_water_species_u32(_field: &str, _values: &[WaterEncounterEntry]) -> io::Result<()> {
     Ok(())
 }
 
