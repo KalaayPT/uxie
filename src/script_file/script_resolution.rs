@@ -346,6 +346,7 @@ mod tests {
     use super::*;
     use crate::map_header::{MapHeader, MapHeaderPt};
     use crate::script_file::GlobalScriptEntry;
+    use proptest::prelude::*;
 
     struct MockProvider {
         headers: Vec<MapHeader>,
@@ -394,12 +395,17 @@ mod tests {
         }
     }
 
-    fn create_pt_header(script_file: u16, text_archive: u16, event_file: u16) -> MapHeader {
+    fn create_pt_header(
+        script_file: u16,
+        text_archive: u16,
+        event_file: u16,
+        level_script_id: u16,
+    ) -> MapHeader {
         MapHeader::Pt(MapHeaderPt {
             script_file_id: script_file,
             text_archive_id: text_archive,
             event_file_id: event_file,
-            level_script_id: 1,
+            level_script_id,
             ..Default::default()
         })
     }
@@ -441,7 +447,7 @@ mod tests {
     #[test]
     fn test_resolve_map_script_with_map_id() {
         let provider = MockProvider {
-            headers: vec![create_pt_header(100, 200, 50)],
+            headers: vec![create_pt_header(100, 200, 50, 1)],
         };
 
         let result = resolve_map_script(5, Some(0), &provider).unwrap();
@@ -459,7 +465,7 @@ mod tests {
     fn test_resolve_script_id_routes_correctly() {
         let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2000, 211, 213)]);
         let provider = MockProvider {
-            headers: vec![create_pt_header(100, 200, 50)],
+            headers: vec![create_pt_header(100, 200, 50, 1)],
         };
 
         let common_result = resolve_script_id(2050, None, &table, &provider).unwrap();
@@ -478,10 +484,10 @@ mod tests {
     fn test_find_maps_for_script_file() {
         let provider = MockProvider {
             headers: vec![
-                create_pt_header(100, 200, 50),
-                create_pt_header(101, 201, 51),
-                create_pt_header(100, 202, 52),
-                create_pt_header(102, 203, 53),
+                create_pt_header(100, 200, 50, 1),
+                create_pt_header(101, 201, 51, 1),
+                create_pt_header(100, 202, 52, 1),
+                create_pt_header(102, 203, 53, 1),
             ],
         };
 
@@ -555,7 +561,7 @@ mod tests {
     fn test_resolve_script_id_by_file_common() {
         let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2000, 211, 213)]);
         let provider = MockProvider {
-            headers: vec![create_pt_header(100, 200, 50)],
+            headers: vec![create_pt_header(100, 200, 50, 1)],
         };
 
         let result = resolve_script_id_by_file(2000, 211, &table, &provider).unwrap();
@@ -572,8 +578,8 @@ mod tests {
         let table = GlobalScriptTable::new();
         let provider = MockProvider {
             headers: vec![
-                create_pt_header(100, 200, 50),
-                create_pt_header(101, 201, 51),
+                create_pt_header(100, 200, 50, 1),
+                create_pt_header(101, 201, 51, 1),
             ],
         };
 
@@ -592,7 +598,7 @@ mod tests {
     fn test_resolve_script_id_by_file_not_found() {
         let table = GlobalScriptTable::new();
         let provider = MockProvider {
-            headers: vec![create_pt_header(100, 200, 50)],
+            headers: vec![create_pt_header(100, 200, 50, 1)],
         };
 
         let result = resolve_script_id_by_file(5, 999, &table, &provider).unwrap();
@@ -742,5 +748,164 @@ mod tests {
 
         let result = resolve_script_id_by_level_script_file(5, 999, &table, &provider).unwrap();
         assert!(result.is_none());
+    }
+
+    fn map_header_strategy() -> impl Strategy<Value = MapHeader> {
+        (any::<u16>(), any::<u16>(), any::<u16>(), any::<u16>()).prop_map(
+            |(script_file, text_archive, event_file, level_script_id)| {
+                create_pt_header(script_file, text_archive, event_file, level_script_id)
+            },
+        )
+    }
+
+    fn headers_strategy() -> impl Strategy<Value = Vec<MapHeader>> {
+        prop::collection::vec(map_header_strategy(), 0..64)
+    }
+
+    fn global_entries_strategy() -> impl Strategy<Value = Vec<GlobalScriptEntry>> {
+        prop::collection::btree_map(
+            COMMON_SCRIPT_THRESHOLD..=u16::MAX,
+            (any::<u16>(), any::<u16>()),
+            0..32,
+        )
+        .prop_map(|mapping| {
+            mapping
+                .into_iter()
+                .map(|(min_script_id, (script_file_id, text_archive_id))| {
+                    GlobalScriptEntry::new(min_script_id, script_file_id, text_archive_id)
+                })
+                .collect()
+        })
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_find_maps_for_script_file_matches_manual(
+            headers in headers_strategy(),
+            script_file_id in any::<u16>()
+        ) {
+            let provider = MockProvider {
+                headers: headers.clone(),
+            };
+            let expected: Vec<u16> = headers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, h)| (h.script_file_id() == script_file_id).then_some(idx as u16))
+                .collect();
+            let actual = find_maps_for_script_file(script_file_id, &provider).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_find_maps_for_level_script_file_matches_manual(
+            headers in headers_strategy(),
+            level_script_file_id in any::<u16>()
+        ) {
+            let provider = MockProvider {
+                headers: headers.clone(),
+            };
+            let expected: Vec<u16> = headers
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, h)| (h.level_script_id() == level_script_file_id).then_some(idx as u16))
+                .collect();
+            let actual = find_maps_for_level_script_file(level_script_file_id, &provider).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_common_resolution_apis_consistent(
+            headers in headers_strategy(),
+            entries in global_entries_strategy(),
+            common_script_id in COMMON_SCRIPT_THRESHOLD..=u16::MAX,
+            script_file_id in any::<u16>(),
+            level_script_file_id in any::<u16>()
+        ) {
+            let provider = MockProvider { headers };
+            let table = GlobalScriptTable::from_entries(entries);
+
+            let expected = resolve_common_script(common_script_id, &table).unwrap();
+            let direct = resolve_script_id(common_script_id, None, &table, &provider).unwrap();
+            let by_file = resolve_script_id_by_file(common_script_id, script_file_id, &table, &provider).unwrap();
+            let by_level_file = resolve_script_id_by_level_script_file(
+                common_script_id,
+                level_script_file_id,
+                &table,
+                &provider,
+            ).unwrap();
+
+            prop_assert_eq!(&direct, &expected);
+            prop_assert_eq!(&by_file, &expected);
+            prop_assert_eq!(&by_level_file, &expected);
+        }
+
+        #[test]
+        fn prop_local_resolution_by_file_matches_direct_map_resolution(
+            headers in headers_strategy(),
+            entries in global_entries_strategy(),
+            local_script_id in 0u16..COMMON_SCRIPT_THRESHOLD,
+            script_file_id in any::<u16>()
+        ) {
+            let table = GlobalScriptTable::from_entries(entries);
+            let map_id = headers
+                .iter()
+                .enumerate()
+                .find_map(|(idx, h)| (h.script_file_id() == script_file_id).then_some(idx as u16));
+            let provider = MockProvider { headers };
+
+            let expected = resolve_script_id(local_script_id, map_id, &table, &provider).unwrap();
+            let actual = resolve_script_id_by_file(local_script_id, script_file_id, &table, &provider).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_local_resolution_by_level_file_matches_direct_map_resolution(
+            headers in headers_strategy(),
+            entries in global_entries_strategy(),
+            local_script_id in 0u16..COMMON_SCRIPT_THRESHOLD,
+            level_script_file_id in any::<u16>()
+        ) {
+            let table = GlobalScriptTable::from_entries(entries);
+            let map_id = headers
+                .iter()
+                .enumerate()
+                .find_map(|(idx, h)| (h.level_script_id() == level_script_file_id).then_some(idx as u16));
+            let provider = MockProvider { headers };
+
+            let expected = resolve_script_id(local_script_id, map_id, &table, &provider).unwrap();
+            let actual = resolve_script_id_by_level_script_file(
+                local_script_id,
+                level_script_file_id,
+                &table,
+                &provider,
+            ).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
+
+        #[test]
+        fn prop_resolve_level_script_by_file_matches_resolve_level_script(
+            headers in headers_strategy(),
+            entries in global_entries_strategy(),
+            level_script_file_id in any::<u16>()
+        ) {
+            let table = GlobalScriptTable::from_entries(entries);
+            let map_id = headers
+                .iter()
+                .enumerate()
+                .find_map(|(idx, h)| (h.level_script_id() == level_script_file_id).then_some(idx as u16));
+            let provider = MockProvider { headers };
+
+            let expected = match map_id {
+                Some(id) => resolve_level_script(id, &table, &provider).unwrap(),
+                None => None,
+            };
+            let actual = resolve_level_script_by_file(level_script_file_id, &table, &provider).unwrap();
+            prop_assert_eq!(actual, expected);
+        }
     }
 }
