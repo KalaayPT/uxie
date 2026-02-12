@@ -81,3 +81,133 @@ impl ScriptTable {
         &self.names
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn unique_names_strategy() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec(any::<u16>(), 0..64).prop_map(|ids| {
+            ids.into_iter()
+                .enumerate()
+                .map(|(idx, value)| format!("scripts_{}_{}", idx, value))
+                .collect()
+        })
+    }
+
+    fn names_with_duplicates_strategy() -> impl Strategy<Value = Vec<String>> {
+        prop::collection::vec(any::<u8>(), 0..64).prop_map(|ids| {
+            ids.into_iter()
+                .map(|value| format!("scripts_dup_{}", value % 16))
+                .collect()
+        })
+    }
+
+    #[test]
+    fn test_load_order_skips_comments_and_blank_lines() {
+        let mut table = ScriptTable::new();
+        table
+            .load_order_str(
+                r#"
+                # comment
+                scripts_unk_0000
+
+                    scripts_jubilife_city
+                # another comment
+                scripts_oreburgh_city
+                "#,
+            )
+            .unwrap();
+
+        assert_eq!(table.get_all_names().len(), 3);
+        assert_eq!(table.get_name(0), Some("scripts_unk_0000"));
+        assert_eq!(table.get_name(1), Some("scripts_jubilife_city"));
+        assert_eq!(table.get_name(2), Some("scripts_oreburgh_city"));
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 64,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn prop_unique_names_roundtrip(names in unique_names_strategy()) {
+            let mut content = String::new();
+            for name in &names {
+                content.push_str(name);
+                content.push('\n');
+            }
+
+            let mut table = ScriptTable::new();
+            table.load_order_str(&content).unwrap();
+
+            prop_assert_eq!(table.get_all_names().len(), names.len());
+            for (idx, name) in names.iter().enumerate() {
+                prop_assert_eq!(table.get_name(idx), Some(name.as_str()));
+                prop_assert_eq!(table.get_id(name), Some(idx));
+            }
+        }
+
+        #[test]
+        fn prop_trimmed_lines_and_comments_preserve_order(
+            names in unique_names_strategy(),
+            add_comment_before in prop::collection::vec(any::<bool>(), 0..64),
+            add_blank_before in prop::collection::vec(any::<bool>(), 0..64)
+        ) {
+            let mut content = String::new();
+            for (idx, name) in names.iter().enumerate() {
+                if add_comment_before.get(idx).copied().unwrap_or(false) {
+                    content.push_str("   # synthetic comment\n");
+                }
+                if add_blank_before.get(idx).copied().unwrap_or(false) {
+                    content.push('\n');
+                }
+                content.push_str("   ");
+                content.push_str(name);
+                content.push_str("   \n");
+            }
+
+            let mut table = ScriptTable::new();
+            table.load_order_str(&content).unwrap();
+
+            prop_assert_eq!(table.get_all_names(), &names);
+        }
+
+        #[test]
+        fn prop_duplicate_name_lookup_is_last_wins(names in names_with_duplicates_strategy()) {
+            let mut content = String::new();
+            for name in &names {
+                content.push_str(name);
+                content.push('\n');
+            }
+
+            let mut table = ScriptTable::new();
+            table.load_order_str(&content).unwrap();
+
+            for (idx, name) in names.iter().enumerate() {
+                let expected_last = names.iter().rposition(|n| n == name).unwrap();
+                prop_assert_eq!(table.get_name(idx), Some(name.as_str()));
+                prop_assert_eq!(table.get_id(name), Some(expected_last));
+            }
+        }
+
+        #[test]
+        fn prop_unknown_or_oob_queries_return_none(names in unique_names_strategy()) {
+            let mut content = String::new();
+            for name in &names {
+                content.push_str(name);
+                content.push('\n');
+            }
+
+            let mut table = ScriptTable::new();
+            table.load_order_str(&content).unwrap();
+
+            let unknown = "scripts_definitely_missing";
+            prop_assert_eq!(table.get_id(unknown), None);
+            prop_assert_eq!(table.get_name(names.len()), None);
+            prop_assert_eq!(table.get_name(names.len().saturating_add(100)), None);
+        }
+    }
+}
