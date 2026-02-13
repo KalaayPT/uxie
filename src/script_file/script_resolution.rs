@@ -832,7 +832,7 @@ mod tests {
             let provider = MockProvider { headers };
             let table = GlobalScriptTable::from_entries(entries);
 
-            let expected = resolve_common_script(common_script_id, &table).unwrap();
+            let expected = resolve_common_script(common_script_id, &table);
             let direct = resolve_script_id(common_script_id, None, &table, &provider).unwrap();
             let by_file = resolve_script_id_by_file(common_script_id, script_file_id, &table, &provider).unwrap();
             let by_level_file = resolve_script_id_by_level_script_file(
@@ -842,9 +842,9 @@ mod tests {
                 &provider,
             ).unwrap();
 
-            prop_assert_eq!(&direct, &Some(expected.clone()));
-            prop_assert_eq!(&by_file, &Some(expected.clone()));
-            prop_assert_eq!(&by_level_file, &Some(expected));
+            prop_assert_eq!(direct, expected.clone());
+            prop_assert_eq!(by_file, expected.clone());
+            prop_assert_eq!(by_level_file, expected);
         }
 
         #[test]
