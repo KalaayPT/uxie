@@ -163,7 +163,7 @@ pub fn resolve_script_id_by_file(
     if is_common_script_id(script_id) {
         Ok(resolve_common_script(script_id, global_table))
     } else {
-        let map_id = provider.find_map_by_script_file_id(script_file_id)?;
+        let map_id = first_map_for_script_file(script_file_id, provider)?;
         resolve_map_script(script_id, map_id, provider)
     }
 }
@@ -186,7 +186,7 @@ pub fn resolve_script_id_by_level_script_file(
     if is_common_script_id(script_id) {
         Ok(resolve_common_script(script_id, global_table))
     } else {
-        let map_id = provider.find_map_by_level_script_file_id(level_script_file_id)?;
+        let map_id = first_map_for_level_script_file(level_script_file_id, provider)?;
         resolve_map_script(script_id, map_id, provider)
     }
 }
@@ -202,6 +202,26 @@ fn resolve_common_script(
             script_file_id: e.script_file_id,
             text_archive_id: e.text_archive_id,
         })
+}
+
+fn first_map_for_script_file(
+    script_file_id: u16,
+    provider: &dyn DataProvider,
+) -> Result<Option<u16>> {
+    Ok(provider
+        .find_maps_by_script_file_id(script_file_id)?
+        .into_iter()
+        .next())
+}
+
+fn first_map_for_level_script_file(
+    level_script_file_id: u16,
+    provider: &dyn DataProvider,
+) -> Result<Option<u16>> {
+    Ok(provider
+        .find_maps_by_level_script_file_id(level_script_file_id)?
+        .into_iter()
+        .next())
 }
 
 fn resolve_map_script(
@@ -257,7 +277,7 @@ pub fn resolve_level_script_by_file(
     global_table: &GlobalScriptTable,
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
-    let map_id = provider.find_map_by_level_script_file_id(level_script_file_id)?;
+    let map_id = first_map_for_level_script_file(level_script_file_id, provider)?;
     let map_id = match map_id {
         Some(id) => id,
         None => return Ok(None),
