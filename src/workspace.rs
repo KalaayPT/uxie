@@ -334,9 +334,7 @@ impl Workspace {
             GameFamily::Platinum | GameFamily::DP => {
                 let script_manager_path = root.join("src/script_manager.c");
                 if script_manager_path.exists() {
-                    let content = std::fs::read_to_string(&script_manager_path)?;
-                    GlobalScriptTable::from_platinum_decomp(&content, &symbols)
-                        .unwrap_or_else(GlobalScriptTable::platinum_hardcoded)
+                    GlobalScriptTable::from_platinum_decomp_file(&script_manager_path, &symbols)?
                 } else {
                     GlobalScriptTable::platinum_hardcoded()
                 }
@@ -713,6 +711,40 @@ mod tests {
 
         assert_eq!(ws.scripts.get_name(0), Some("script_main"));
         assert_eq!(ws.scripts.get_name(1), Some("script_event"));
+    }
+
+    #[test]
+    fn test_open_decomp_missing_script_manager_uses_hardcoded_global_script_table() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+
+        let ws = Workspace::open(root).unwrap();
+        let hardcoded = GlobalScriptTable::platinum_hardcoded();
+
+        assert_eq!(ws.global_script_table.len(), hardcoded.len());
+        assert_eq!(ws.global_script_table.lookup(2000), hardcoded.lookup(2000));
+    }
+
+    #[test]
+    fn test_open_decomp_invalid_script_manager_returns_invalid_data() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+
+        let mut script_manager = fs::File::create(root.join("src/script_manager.c")).unwrap();
+        writeln!(script_manager, "not a SCRIPT_RANGE_TABLE file").unwrap();
+
+        match Workspace::open(root) {
+            Ok(_) => panic!("Expected open to fail for invalid script_manager.c"),
+            Err(err) => {
+                assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+                assert!(err.to_string().contains("SCRIPT_RANGE_TABLE"));
+            }
+        }
     }
 
     struct MockProvider;
