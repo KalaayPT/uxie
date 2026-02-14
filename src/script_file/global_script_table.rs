@@ -431,12 +431,12 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
     }
 
     #[test]
-    #[ignore = "requires a real HGSS arm9.bin path via UXIE_TEST_HGSS_ARM9_PATH/HGSS_ARM9_PATH"]
+    #[ignore = "requires a real HGSS DSPRE project path via UXIE_TEST_HGSS_DSPRE_PATH"]
     fn test_hgss_binary_real_file() {
-        let Some(path) = crate::test_env::existing_path_from_env_with_fallback(
-            "UXIE_TEST_HGSS_ARM9_PATH",
-            "HGSS_ARM9_PATH",
-            "HGSS arm9 integration test",
+        let Some(path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["arm9.bin", "unpacked/arm9.bin", "arm9/arm9.bin"],
+            "HGSS arm9 integration test (from DSPRE project root)",
         ) else {
             return;
         };
