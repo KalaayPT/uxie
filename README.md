@@ -13,6 +13,7 @@ ROM data from DSPRE projects and decompilation sources.
 - [Install](#install)
 - [CLI Usage](#cli-usage)
 - [Library Usage](#library-usage)
+- [Contributing](#contributing)
 - [Supported Games](#supported-games)
 - [License](#license)
 <!--toc:end-->
@@ -139,6 +140,10 @@ let header = RomHeader::open("path/to/header.bin")?;
 println!("Game: {:?}", header.detect_game());   // Some(Platinum)
 println!("Region: {:?}", header.region());      // Some("USA")
 ```
+
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, fixture-based integration testing setup, lint/test expectations, and documentation update policy.
 
 ## Supported Games
 
