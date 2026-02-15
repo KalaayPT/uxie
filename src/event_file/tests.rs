@@ -114,6 +114,63 @@ mod event_file_tests {
     }
 
     #[test]
+    fn test_json_from_binary_coordinate_wrapping_examples() {
+        let file = BinaryEventFile {
+            bg_events: vec![BgEventBinary {
+                script: 1,
+                event_type: 0,
+                x: 65,
+                z: -33,
+                y: 0,
+                player_facing_dir: 0,
+            }],
+            object_events: vec![ObjectEventBinary {
+                local_id: 1,
+                graphics_id: 1,
+                movement_type: 0,
+                trainer_type: 0,
+                hidden_flag: 0,
+                script: 1,
+                dir: 0,
+                data: [0, 0, 0],
+                movement_range_x: 0,
+                movement_range_z: 0,
+                x: 95,
+                z: 64,
+                y: 0,
+            }],
+            warp_events: vec![WarpEventBinary {
+                x: 63,
+                z: 32,
+                dest_header_id: 0,
+                dest_warp_id: 0,
+            }],
+            coord_events: vec![CoordEventBinary {
+                script: 1,
+                x: 33,
+                z: 96,
+                width: 1,
+                length: 1,
+                y: 0,
+                value: 0,
+                var: 0,
+            }],
+        };
+
+        let symbols = SymbolTable::new();
+        let json = JsonEventFile::from_binary(&file, &symbols);
+
+        assert_eq!(json.bg_events[0].x, 1);
+        assert_eq!(json.bg_events[0].z, -1);
+        assert_eq!(json.object_events[0].x, 31);
+        assert_eq!(json.object_events[0].z, 0);
+        assert_eq!(json.warp_events[0].x, 31);
+        assert_eq!(json.warp_events[0].z, 0);
+        assert_eq!(json.coord_events[0].x, 1);
+        assert_eq!(json.coord_events[0].z, 0);
+    }
+
+    #[test]
     #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_dspre_event_eterna_dp_gym() {
         use crate::ds_rom::DspreProject;

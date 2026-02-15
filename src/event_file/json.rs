@@ -1,9 +1,23 @@
 //! JSON event file structures matching pokeplatinum format
+//!
+//! Note on coordinates:
+//! During binary -> JSON conversion, x/z coordinates are normalized to the
+//! local 32x32 map block with `% 32` to match decomp JSON expectations.
 
 use serde::{Deserialize, Serialize};
 use std::io;
 
 pub use crate::c_parser::symbol_table::SymbolTable;
+
+#[inline]
+fn normalize_event_coord_i32(value: i32) -> i32 {
+    value % 32
+}
+
+#[inline]
+fn normalize_event_coord_u16(value: u16) -> u16 {
+    value % 32
+}
 
 /// Background event (spawnable)
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -141,8 +155,8 @@ impl JsonEventFile {
                 event_type: symbols
                     .resolve_name(bg.event_type as i64, "BG_EVENT_TYPE_")
                     .unwrap_or_else(|| bg.event_type.to_string()),
-                x: (bg.x % 32) as i32,
-                z: (bg.z % 32) as i32,
+                x: normalize_event_coord_i32(bg.x),
+                z: normalize_event_coord_i32(bg.z),
                 y: bg.y,
                 player_facing_dir: symbols
                     .resolve_name(bg.player_facing_dir as i64, "BG_EVENT_DIR_"),
@@ -176,8 +190,8 @@ impl JsonEventFile {
                 data: obj.data.to_vec(),
                 movement_range_x: obj.movement_range_x,
                 movement_range_z: obj.movement_range_z,
-                x: (obj.x % 32) as u16,
-                z: (obj.z % 32) as u16,
+                x: normalize_event_coord_u16(obj.x),
+                z: normalize_event_coord_u16(obj.z),
                 y: obj.y,
                 clone_id: None,
             });
@@ -186,8 +200,8 @@ impl JsonEventFile {
         let mut warp_events = Vec::new();
         for warp in &bin.warp_events {
             warp_events.push(WarpEventJson {
-                x: (warp.x % 32) as u16,
-                z: (warp.z % 32) as u16,
+                x: normalize_event_coord_u16(warp.x),
+                z: normalize_event_coord_u16(warp.z),
                 dest_header_id: symbols
                     .resolve_name(warp.dest_header_id as i64, "MAP_HEADER_")
                     .or_else(|| symbols.resolve_name(warp.dest_header_id as i64, "MAP_"))
@@ -200,8 +214,8 @@ impl JsonEventFile {
         for coord in &bin.coord_events {
             coord_events.push(CoordEventJson {
                 script: coord.script,
-                x: (coord.x % 32) as u16,
-                z: (coord.z % 32) as u16,
+                x: normalize_event_coord_u16(coord.x),
+                z: normalize_event_coord_u16(coord.z),
                 width: coord.width,
                 length: coord.length,
                 y: coord.y,
