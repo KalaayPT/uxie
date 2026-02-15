@@ -880,6 +880,75 @@ mod tests {
         );
     }
 
+    #[test]
+    #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_platinum_provider_alignment_real_fixtures() {
+        let Some(arm9_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &["arm9.bin", "unpacked/arm9.bin", "arm9/arm9.bin"],
+            "provider alignment integration test",
+        ) else {
+            return;
+        };
+
+        let Some(decomp_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "provider alignment integration test",
+        ) else {
+            return;
+        };
+
+        let dspre_provider = Arm9Provider::new(&arm9_path, 0xE601C, 559, GameFamily::Platinum);
+        let decomp_provider =
+            DecompProvider::new(&decomp_path, SymbolTable::new(), GameFamily::Platinum);
+
+        let dspre_count = dspre_provider.get_map_header_count().unwrap();
+        let decomp_count = decomp_provider.get_map_header_count().unwrap();
+        assert_eq!(dspre_count, 559);
+        assert_eq!(decomp_count, dspre_count);
+
+        let sample_ids = [0_u16, 3, 67, 150, (dspre_count.saturating_sub(1)) as u16];
+        for map_id in sample_ids {
+            let dspre = dspre_provider.get_map_header(map_id).unwrap();
+            let decomp = decomp_provider.get_map_header(map_id).unwrap();
+
+            assert_eq!(
+                decomp.script_file_id(),
+                dspre.script_file_id(),
+                "script_file_id mismatch for map {}",
+                map_id
+            );
+            assert_eq!(
+                decomp.level_script_id(),
+                dspre.level_script_id(),
+                "level_script_id mismatch for map {}",
+                map_id
+            );
+            assert_eq!(
+                decomp.text_archive_id(),
+                dspre.text_archive_id(),
+                "text_archive_id mismatch for map {}",
+                map_id
+            );
+            assert_eq!(
+                decomp.event_file_id(),
+                dspre.event_file_id(),
+                "event_file_id mismatch for map {}",
+                map_id
+            );
+        }
+
+        let script_file_id = dspre_provider.get_map_header(3).unwrap().script_file_id();
+        assert_eq!(
+            decomp_provider
+                .find_map_by_script_file_id(script_file_id)
+                .unwrap(),
+            dspre_provider
+                .find_map_by_script_file_id(script_file_id)
+                .unwrap()
+        );
+    }
+
     fn pt_headers_strategy() -> impl Strategy<Value = Vec<MapHeader>> {
         prop::collection::vec((any::<u16>(), any::<u16>(), any::<u16>()), 0..64).prop_map(
             |triples| {
