@@ -311,6 +311,16 @@ impl Workspace {
         let scripts_order = root.join("res/field/scripts/scripts.order");
         if scripts_order.exists() {
             scripts.load_order_file(scripts_order)?;
+        } else if family == GameFamily::HGSS {
+            let hgss_script_dirs = [
+                root.join("files/fielddata/script/scr_seq"),
+                root.join("files/fielddata/script"),
+            ];
+            for script_dir in hgss_script_dirs {
+                if script_dir.exists() {
+                    scripts.load_hgss_script_dir(script_dir)?;
+                }
+            }
         }
 
         let mut text_banks = TextBankTable::new();
@@ -678,6 +688,30 @@ mod tests {
     }
 
     #[test]
+    fn test_get_script_file_for_map_hgss_decomp_missing_name_returns_none() {
+        let sm = SourceManager::new();
+        let symbols = SymbolTable::with_source_manager(sm.clone());
+
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::HeartGold,
+            family: GameFamily::HGSS,
+            provider: Box::new(HgssScriptProvider { script_file_id: 81 }),
+            symbols: Arc::new(symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+        };
+
+        assert_eq!(ws.get_script_file_for_map(0), None);
+    }
+
+    #[test]
     fn test_open_decomp_detection() {
         let dir = tempdir().unwrap();
         let root = dir.path();
@@ -711,6 +745,32 @@ mod tests {
 
         assert_eq!(ws.scripts.get_name(0), Some("script_main"));
         assert_eq!(ws.scripts.get_name(1), Some("script_event"));
+    }
+
+    #[test]
+    fn test_open_decomp_hgss_loads_id_named_script_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
+        fs::write(
+            root.join("files/fielddata/script/scr_seq/scr_seq_0003_D01R0101.s"),
+            "",
+        )
+        .unwrap();
+        fs::write(
+            root.join("files/fielddata/script/scr_seq/scr_seq_0081_D32R0102.s"),
+            "",
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.scripts.get_name(3), Some("scr_seq_0003_D01R0101"));
+        assert_eq!(ws.scripts.get_name(81), Some("scr_seq_0081_D32R0102"));
+        assert_eq!(ws.scripts.get_name(4), None);
     }
 
     #[test]
@@ -749,6 +809,10 @@ mod tests {
 
     struct MockProvider;
 
+    struct HgssScriptProvider {
+        script_file_id: u16,
+    }
+
     impl DataProvider for MockProvider {
         fn get_map_header(&self, _id: u16) -> crate::error::Result<crate::map_header::MapHeader> {
             Err(crate::error::UxieError::not_found("Map header", "mock"))
@@ -784,6 +848,53 @@ mod tests {
             _level_script_file_id: u16,
         ) -> crate::error::Result<Option<u16>> {
             Ok(None)
+        }
+
+        fn find_maps_by_level_script_file_id(
+            &self,
+            _level_script_file_id: u16,
+        ) -> crate::error::Result<Vec<u16>> {
+            Ok(Vec::new())
+        }
+    }
+
+    impl DataProvider for HgssScriptProvider {
+        fn get_map_header(&self, id: u16) -> crate::error::Result<crate::map_header::MapHeader> {
+            if id != 0 {
+                return Err(crate::error::UxieError::not_found(
+                    "Map header",
+                    id.to_string(),
+                ));
+            }
+
+            let header = crate::map_header::MapHeaderHGSS {
+                script_file_id: self.script_file_id,
+                ..crate::map_header::MapHeaderHGSS::default()
+            };
+
+            Ok(crate::map_header::MapHeader::HGSS(header))
+        }
+
+        fn get_map_header_count(&self) -> crate::error::Result<usize> {
+            Ok(1)
+        }
+
+        fn get_text_archive_for_script_file(
+            &self,
+            _script_file_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(None)
+        }
+
+        fn find_maps_by_script_file_id(
+            &self,
+            script_file_id: u16,
+        ) -> crate::error::Result<Vec<u16>> {
+            if script_file_id == self.script_file_id {
+                Ok(vec![0])
+            } else {
+                Ok(Vec::new())
+            }
         }
 
         fn find_maps_by_level_script_file_id(

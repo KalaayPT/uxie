@@ -2,6 +2,11 @@
 //!
 //! Parses `scripts.order` files from decompilation projects to map
 //! symbolic script names to their numeric file IDs.
+//!
+//! HGSS decomp projects don't use `scripts.order`; script files are named by
+//! NARC index in `files/fielddata/script` (for example,
+//! `scr_seq_0081_D32R0102.s`). Those names can be loaded with
+//! [`ScriptTable::load_hgss_script_dir`].
 
 use rustc_hash::FxHashMap;
 use std::path::Path;
@@ -27,6 +32,7 @@ use std::path::Path;
 pub struct ScriptTable {
     pub(crate) names: Vec<String>,
     pub(crate) name_to_id: FxHashMap<String, usize>,
+    pub(crate) sparse_names: FxHashMap<usize, String>,
 }
 
 impl ScriptTable {
@@ -62,11 +68,60 @@ impl ScriptTable {
         Ok(())
     }
 
+    /// Loads HGSS script names from an ID-based script directory.
+    ///
+    /// The expected filename format is `scr_seq_XXXX*.s`, where `XXXX` is the
+    /// script file ID in decimal. IDs are used directly as table indices.
+    pub fn load_hgss_script_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<()> {
+        let mut parsed = Vec::new();
+
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+
+            let Some(file_name) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+
+            if let Some((id, script_name)) = parse_hgss_script_filename(&file_name) {
+                parsed.push((id, script_name));
+            }
+        }
+
+        parsed.sort_by_key(|(id, _)| *id);
+
+        for (id, script_name) in parsed {
+            if let Some(old_name) = self.sparse_names.get(&id) {
+                if old_name != &script_name {
+                    self.name_to_id.remove(old_name);
+                }
+            } else if let Some(old_name) = self.names.get(id) {
+                if old_name != &script_name {
+                    self.name_to_id.remove(old_name);
+                }
+            }
+
+            if let Some(old_name) = self.sparse_names.insert(id, script_name.clone()) {
+                if old_name != script_name {
+                    self.name_to_id.remove(&old_name);
+                }
+            }
+            self.name_to_id.insert(script_name, id);
+        }
+
+        Ok(())
+    }
+
     /// Returns the script name for a given file ID.
     ///
     /// Returns `None` if the ID is out of range.
     pub fn get_name(&self, id: usize) -> Option<&str> {
-        self.names.get(id).map(|s| s.as_str())
+        self.sparse_names
+            .get(&id)
+            .map(String::as_str)
+            .or_else(|| self.names.get(id).map(String::as_str))
     }
 
     /// Returns the file ID for a given script name.
@@ -82,10 +137,29 @@ impl ScriptTable {
     }
 }
 
+fn parse_hgss_script_filename(file_name: &str) -> Option<(usize, String)> {
+    let stem = file_name.strip_suffix(".s")?;
+    let mut parts = stem.split('_');
+
+    if parts.next()? != "scr" || parts.next()? != "seq" {
+        return None;
+    }
+
+    let id_part = parts.next()?;
+    if id_part.len() != 4 || !id_part.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    let id = id_part.parse::<usize>().ok()?;
+    Some((id, stem.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     fn unique_names_strategy() -> impl Strategy<Value = Vec<String>> {
         prop::collection::vec(any::<u16>(), 0..64).prop_map(|ids| {
@@ -124,6 +198,24 @@ mod tests {
         assert_eq!(table.get_name(0), Some("scripts_unk_0000"));
         assert_eq!(table.get_name(1), Some("scripts_jubilife_city"));
         assert_eq!(table.get_name(2), Some("scripts_oreburgh_city"));
+    }
+
+    #[test]
+    fn test_load_hgss_script_dir_uses_id_from_filename() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("scr_seq_0081_D32R0102.s"), "").unwrap();
+        fs::write(dir.path().join("scr_seq_0003_D01R0101.s"), "").unwrap();
+        fs::write(dir.path().join("readme.txt"), "").unwrap();
+        fs::write(dir.path().join("scr_seq_BAD_D01R0101.s"), "").unwrap();
+
+        let mut table = ScriptTable::new();
+        table.load_hgss_script_dir(dir.path()).unwrap();
+
+        assert_eq!(table.get_name(3), Some("scr_seq_0003_D01R0101"));
+        assert_eq!(table.get_name(81), Some("scr_seq_0081_D32R0102"));
+        assert_eq!(table.get_name(4), None);
+        assert_eq!(table.get_id("scr_seq_0003_D01R0101"), Some(3));
+        assert_eq!(table.get_id("scr_seq_0004"), None);
     }
 
     proptest! {
