@@ -883,32 +883,70 @@ mod tests {
     #[test]
     #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_platinum_provider_alignment_real_fixtures() {
-        let Some(arm9_path) = crate::test_env::existing_file_under_project_env(
+        assert_provider_alignment_real_fixtures(
             "UXIE_TEST_PLATINUM_DSPRE_PATH",
-            &["arm9.bin", "unpacked/arm9.bin", "arm9/arm9.bin"],
-            "provider alignment integration test",
-        ) else {
-            return;
-        };
-
-        let Some(decomp_path) = crate::test_env::existing_path_from_env(
             "UXIE_TEST_PLATINUM_DECOMP_PATH",
-            "provider alignment integration test",
+            GameFamily::Platinum,
+            0xE601C,
+            559,
+            &[0, 3, 67, 150],
+            "provider alignment integration test (Platinum)",
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_HGSS_DSPRE_PATH and UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_hgss_provider_alignment_real_fixtures() {
+        assert_provider_alignment_real_fixtures(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            GameFamily::HGSS,
+            0xF6BE0,
+            540,
+            &[0, 5, 36, 200],
+            "provider alignment integration test (HGSS)",
+        );
+    }
+
+    fn assert_provider_alignment_real_fixtures(
+        dspre_env_var: &str,
+        decomp_env_var: &str,
+        family: GameFamily,
+        arm9_offset: u64,
+        expected_map_count: usize,
+        sample_ids: &[u16],
+        context: &str,
+    ) {
+        assert!(
+            !sample_ids.is_empty(),
+            "provider alignment sample set must not be empty"
+        );
+
+        let Some(arm9_path) = crate::test_env::existing_file_under_project_env(
+            dspre_env_var,
+            &["arm9.bin", "unpacked/arm9.bin", "arm9/arm9.bin"],
+            context,
         ) else {
             return;
         };
 
-        let dspre_provider = Arm9Provider::new(&arm9_path, 0xE601C, 559, GameFamily::Platinum);
-        let decomp_provider =
-            DecompProvider::new(&decomp_path, SymbolTable::new(), GameFamily::Platinum);
+        let Some(decomp_path) = crate::test_env::existing_path_from_env(decomp_env_var, context)
+        else {
+            return;
+        };
+
+        let dspre_provider = Arm9Provider::new(&arm9_path, arm9_offset, expected_map_count, family);
+        let decomp_provider = DecompProvider::new(&decomp_path, SymbolTable::new(), family);
 
         let dspre_count = dspre_provider.get_map_header_count().unwrap();
         let decomp_count = decomp_provider.get_map_header_count().unwrap();
-        assert_eq!(dspre_count, 559);
+        assert_eq!(dspre_count, expected_map_count);
         assert_eq!(decomp_count, dspre_count);
 
-        let sample_ids = [0_u16, 3, 67, 150, (dspre_count.saturating_sub(1)) as u16];
-        for map_id in sample_ids {
+        let mut checked_ids = sample_ids.to_vec();
+        checked_ids.push((dspre_count.saturating_sub(1)) as u16);
+
+        for map_id in checked_ids {
             let dspre = dspre_provider.get_map_header(map_id).unwrap();
             let decomp = decomp_provider.get_map_header(map_id).unwrap();
 
@@ -938,7 +976,10 @@ mod tests {
             );
         }
 
-        let script_file_id = dspre_provider.get_map_header(3).unwrap().script_file_id();
+        let script_file_id = dspre_provider
+            .get_map_header(sample_ids[0])
+            .unwrap()
+            .script_file_id();
         assert_eq!(
             decomp_provider
                 .find_map_by_script_file_id(script_file_id)

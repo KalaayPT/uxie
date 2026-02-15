@@ -48,22 +48,35 @@ They exercise real DSPRE/decomp/HGSS binary data.
 
 - `UXIE_TEST_PLATINUM_DECOMP_PATH`
 - `UXIE_TEST_PLATINUM_DSPRE_PATH`
+- `UXIE_TEST_HGSS_DECOMP_PATH`
 - `UXIE_TEST_HGSS_DSPRE_PATH`
 
 ### Expected fixture types
 
 - `UXIE_TEST_PLATINUM_DECOMP_PATH`: pokeplatinum decomp root (`include/constants`, `generated`, `res/...`).
 - `UXIE_TEST_PLATINUM_DSPRE_PATH`: DSPRE unpacked project root (contains `arm9.bin` or `unpacked/arm9.bin`, plus data/unpacked assets).
+- `UXIE_TEST_HGSS_DECOMP_PATH`: pokeheartgold decomp root.
 - `UXIE_TEST_HGSS_DSPRE_PATH`: HGSS DSPRE unpacked project root.
   - arm9 is auto-resolved from common layouts: `arm9.bin`, `unpacked/arm9.bin`, `arm9/arm9.bin`.
 
 ### Run ignored integration tests
 
-PowerShell example:
+Bash example:
+
+```shell
+export UXIE_TEST_PLATINUM_DECOMP_PATH=~/dev/pokeplatinum
+export UXIE_TEST_PLATINUM_DSPRE_PATH=~/Desktop/pt_DSPRE_contents
+export UXIE_TEST_HGSS_DECOMP_PATH=~/dev/pokeheartgold
+export UXIE_TEST_HGSS_DSPRE_PATH=~/Desktop/hg_DSPRE_contents
+cargo test --all-targets -- --ignored
+```
+
+PowerShell example (equivalent):
 
 ```powershell
 $env:UXIE_TEST_PLATINUM_DECOMP_PATH="C:\dev\pokeplatinum"
 $env:UXIE_TEST_PLATINUM_DSPRE_PATH="C:\path\to\platinum_dspre_project"
+$env:UXIE_TEST_HGSS_DECOMP_PATH="C:\dev\pokeheartgold"
 $env:UXIE_TEST_HGSS_DSPRE_PATH="C:\path\to\hgss_dspre_project"
 cargo test --all-targets -- --ignored
 ```
