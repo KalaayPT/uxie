@@ -455,6 +455,7 @@ mod tests {
 
         let resolution = result.unwrap();
         assert!(resolution.is_common_script());
+        assert!(!resolution.is_map_script());
         assert_eq!(resolution.script_file_id(), 211);
         assert_eq!(resolution.text_archive_id(), 213);
     }
@@ -478,6 +479,7 @@ mod tests {
 
         let resolution = result.unwrap();
         assert!(resolution.is_map_script());
+        assert!(!resolution.is_common_script());
         assert_eq!(resolution.script_file_id(), 100);
         assert_eq!(resolution.text_archive_id(), 200);
         assert_eq!(resolution.event_file_id(), Some(50));
@@ -521,6 +523,26 @@ mod tests {
         assert_eq!(maps, vec![1]);
 
         let maps = find_maps_for_script_file(999, &provider).unwrap();
+        assert!(maps.is_empty());
+    }
+
+    #[test]
+    fn test_find_maps_for_level_script_file() {
+        let provider = MockProvider {
+            headers: vec![
+                create_pt_header(100, 200, 50, 500),
+                create_pt_header(101, 201, 51, 501),
+                create_pt_header(102, 202, 52, 500),
+            ],
+        };
+
+        let maps = find_maps_for_level_script_file(500, &provider).unwrap();
+        assert_eq!(maps, vec![0, 2]);
+
+        let maps = find_maps_for_level_script_file(501, &provider).unwrap();
+        assert_eq!(maps, vec![1]);
+
+        let maps = find_maps_for_level_script_file(999, &provider).unwrap();
         assert!(maps.is_empty());
     }
 

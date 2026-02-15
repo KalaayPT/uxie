@@ -566,6 +566,52 @@ mod tests {
     }
 
     #[test]
+    fn test_default_find_map_by_level_script_file_id_uses_first_match() {
+        struct LevelOnlyProvider;
+
+        impl DataProvider for LevelOnlyProvider {
+            fn get_map_header(&self, id: u16) -> Result<MapHeader> {
+                Err(UxieError::not_found("MapHeader", id.to_string()))
+            }
+
+            fn get_map_header_count(&self) -> Result<usize> {
+                Ok(0)
+            }
+
+            fn get_text_archive_for_script_file(
+                &self,
+                _script_file_id: u16,
+            ) -> Result<Option<u16>> {
+                Ok(None)
+            }
+
+            fn find_maps_by_script_file_id(&self, _script_file_id: u16) -> Result<Vec<u16>> {
+                Ok(Vec::new())
+            }
+
+            fn find_maps_by_level_script_file_id(
+                &self,
+                level_script_file_id: u16,
+            ) -> Result<Vec<u16>> {
+                match level_script_file_id {
+                    5 => Ok(vec![2, 7]),
+                    _ => Ok(Vec::new()),
+                }
+            }
+        }
+
+        let provider = LevelOnlyProvider;
+        assert_eq!(
+            provider.find_map_by_level_script_file_id(5).unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            provider.find_map_by_level_script_file_id(999).unwrap(),
+            None
+        );
+    }
+
+    #[test]
     fn test_decomp_provider_loads_pt_headers() {
         let dir = tempfile::tempdir().unwrap();
         let header_path = dir.path().join("include/data/map_headers.h");
@@ -739,6 +785,99 @@ mod tests {
 
         let second = provider.get_map_header(0).unwrap();
         assert_eq!(second.script_file_id(), 4);
+    }
+
+    #[test]
+    fn test_decomp_provider_query_helpers_cover_multi_match_and_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_A] = {
+            .areaDataArchiveID = 1,
+            .unk_01 = 2,
+            .mapMatrixID = 3,
+            .scriptsArchiveID = 4,
+            .initScriptsArchiveID = 5,
+            .msgArchiveID = 6,
+            .dayMusicID = 7,
+            .nightMusicID = 8,
+            .wildEncountersArchiveID = 9,
+            .eventsArchiveID = 10,
+            .mapLabelTextID = 11,
+            .mapLabelWindowID = 12,
+            .weather = 13,
+            .cameraType = 14,
+            .mapType = 15,
+            .battleBG = 16,
+            .isBikeAllowed = TRUE,
+            .isRunningAllowed = FALSE,
+            .isEscapeRopeAllowed = TRUE,
+            .isFlyAllowed = FALSE,
+        },
+        [MAP_HEADER_B] = {
+            .areaDataArchiveID = 21,
+            .unk_01 = 22,
+            .mapMatrixID = 23,
+            .scriptsArchiveID = 4,
+            .initScriptsArchiveID = 5,
+            .msgArchiveID = 60,
+            .dayMusicID = 27,
+            .nightMusicID = 28,
+            .wildEncountersArchiveID = 29,
+            .eventsArchiveID = 30,
+            .mapLabelTextID = 31,
+            .mapLabelWindowID = 32,
+            .weather = 33,
+            .cameraType = 34,
+            .mapType = 35,
+            .battleBG = 36,
+            .isBikeAllowed = TRUE,
+            .isRunningAllowed = FALSE,
+            .isEscapeRopeAllowed = TRUE,
+            .isFlyAllowed = FALSE,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+
+        assert_eq!(provider.get_map_header_count().unwrap(), 2);
+        assert_eq!(
+            provider.get_text_archive_for_script_file(4).unwrap(),
+            Some(6)
+        );
+        assert_eq!(
+            provider.get_text_archive_for_script_file(999).unwrap(),
+            None
+        );
+
+        assert_eq!(provider.find_maps_by_script_file_id(4).unwrap(), vec![0, 1]);
+        assert_eq!(
+            provider.find_maps_by_script_file_id(999).unwrap(),
+            Vec::<u16>::new()
+        );
+
+        assert_eq!(
+            provider.find_maps_by_level_script_file_id(5).unwrap(),
+            vec![0, 1]
+        );
+        assert_eq!(
+            provider.find_maps_by_level_script_file_id(999).unwrap(),
+            Vec::<u16>::new()
+        );
+
+        assert_eq!(
+            provider.find_map_by_level_script_file_id(5).unwrap(),
+            Some(0)
+        );
+        assert_eq!(
+            provider.find_map_by_level_script_file_id(999).unwrap(),
+            None
+        );
     }
 
     fn pt_headers_strategy() -> impl Strategy<Value = Vec<MapHeader>> {

@@ -27,6 +27,18 @@ Optional strict pass (recommended for touched code paths):
 cargo clippy --all-targets -- -D warnings
 ```
 
+Optional mutation testing pass for script resolution/provider logic:
+
+```shell
+cargo mutants -f src/script_file/script_resolution.rs -f src/provider.rs --cap-lints true
+```
+
+If `cargo-mutants` is not installed:
+
+```shell
+cargo install cargo-mutants
+```
+
 ## Integration Fixture Environments
 
 Some tests are real-fixture integration tests and are intentionally marked `#[ignore]`.

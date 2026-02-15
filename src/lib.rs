@@ -132,6 +132,7 @@
 //! - **Zero Configuration**: Smart auto-detection for standard project structures
 
 pub mod c_parser;
+pub mod decomp_data;
 pub mod ds_rom;
 pub mod egg_move_data;
 pub mod encounter_file;
