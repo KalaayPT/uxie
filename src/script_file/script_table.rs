@@ -158,7 +158,9 @@ fn parse_hgss_script_filename(file_name: &str) -> Option<(usize, String)> {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::collections::BTreeMap;
     use std::fs;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     fn unique_names_strategy() -> impl Strategy<Value = Vec<String>> {
@@ -216,6 +218,133 @@ mod tests {
         assert_eq!(table.get_name(4), None);
         assert_eq!(table.get_id("scr_seq_0003_D01R0101"), Some(3));
         assert_eq!(table.get_id("scr_seq_0004"), None);
+    }
+
+    fn parse_scripts_order_entries(path: &Path) -> std::io::Result<Vec<String>> {
+        let content = fs::read_to_string(path)?;
+        Ok(content
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .map(str::to_string)
+            .collect())
+    }
+
+    fn collect_hgss_script_names_with_precedence(
+        dirs: &[PathBuf],
+    ) -> std::io::Result<BTreeMap<usize, String>> {
+        let mut by_id = BTreeMap::new();
+
+        for dir in dirs {
+            if !dir.exists() {
+                continue;
+            }
+
+            let mut parsed = Vec::new();
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+
+                let Some(file_name) = entry.file_name().to_str().map(str::to_string) else {
+                    continue;
+                };
+
+                if let Some((id, script_name)) = parse_hgss_script_filename(&file_name) {
+                    parsed.push((id, script_name));
+                }
+            }
+
+            parsed.sort_by_key(|(id, _)| *id);
+            for (id, script_name) in parsed {
+                by_id.insert(id, script_name);
+            }
+        }
+
+        Ok(by_id)
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_load_order_file_platinum_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "script table integration test (Platinum decomp)",
+        ) else {
+            return;
+        };
+
+        let order_path = root.join("res/field/scripts/scripts.order");
+        if !order_path.exists() {
+            eprintln!(
+                "Skipping script table integration test (Platinum decomp): missing {}",
+                order_path.display()
+            );
+            return;
+        }
+
+        let expected = parse_scripts_order_entries(&order_path).unwrap();
+        assert!(
+            !expected.is_empty(),
+            "expected non-empty scripts.order entries from {}",
+            order_path.display()
+        );
+
+        let mut table = ScriptTable::new();
+        table.load_order_file(&order_path).unwrap();
+
+        assert_eq!(table.get_all_names().len(), expected.len());
+
+        let mut sample_indices = vec![0, expected.len() / 2, expected.len().saturating_sub(1)];
+        sample_indices.sort_unstable();
+        sample_indices.dedup();
+        for idx in sample_indices {
+            let name = &expected[idx];
+            assert_eq!(table.get_name(idx), Some(name.as_str()));
+            assert_eq!(table.get_id(name), Some(idx));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_load_hgss_script_dir_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "script table integration test (HGSS decomp)",
+        ) else {
+            return;
+        };
+
+        // Keep the same precedence as workspace decomp bootstrap.
+        let dirs = vec![
+            root.join("files/fielddata/script/scr_seq"),
+            root.join("files/fielddata/script"),
+        ];
+
+        let expected = collect_hgss_script_names_with_precedence(&dirs).unwrap();
+        if expected.is_empty() {
+            eprintln!(
+                "Skipping script table integration test (HGSS decomp): no scr_seq_XXXX*.s files under {}",
+                root.display()
+            );
+            return;
+        }
+
+        let mut table = ScriptTable::new();
+        for dir in &dirs {
+            if dir.exists() {
+                table.load_hgss_script_dir(dir).unwrap();
+            }
+        }
+
+        let (first_id, first_name) = expected.first_key_value().unwrap();
+        assert_eq!(table.get_name(*first_id), Some(first_name.as_str()));
+        assert_eq!(table.get_id(first_name), Some(*first_id));
+
+        let (last_id, last_name) = expected.last_key_value().unwrap();
+        assert_eq!(table.get_name(*last_id), Some(last_name.as_str()));
+        assert_eq!(table.get_id(last_name), Some(*last_id));
     }
 
     proptest! {
