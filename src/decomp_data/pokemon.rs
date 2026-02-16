@@ -183,14 +183,13 @@ pub fn load_all_pokemon_data(
             let data_file = path.join("data.json");
             if data_file.exists() {
                 if let Some(species_name) = path.file_name().and_then(|n| n.to_str()) {
-                    match load_pokemon_data_from_json(&data_file) {
-                        Ok(data) => {
-                            result.insert(species_name.to_lowercase(), data);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse {}: {}", data_file.display(), e);
-                        }
-                    }
+                    let data = load_pokemon_data_from_json(&data_file).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Failed to parse {}: {e}", data_file.display()),
+                        )
+                    })?;
+                    result.insert(species_name.to_lowercase(), data);
                 }
             }
         }
@@ -202,6 +201,7 @@ pub fn load_all_pokemon_data(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_parse_tm_index() {
@@ -210,5 +210,51 @@ mod tests {
         assert_eq!(parse_tm_index("TM92"), Some(91));
         assert_eq!(parse_tm_index("HM01"), Some(92));
         assert_eq!(parse_tm_index("HM08"), Some(99));
+    }
+
+    #[test]
+    fn test_load_all_pokemon_data_loads_valid_entries() {
+        let dir = tempdir().unwrap();
+        let species_dir = dir.path().join("chimchar");
+        fs::create_dir_all(&species_dir).unwrap();
+        fs::write(
+            species_dir.join("data.json"),
+            r#"{
+  "base_stats": {
+    "hp": 44, "attack": 58, "defense": 44, "speed": 61, "special_attack": 58, "special_defense": 44
+  },
+  "types": ["TYPE_FIRE", "TYPE_FIRE"],
+  "catch_rate": 45,
+  "base_exp_reward": 62,
+  "ev_yields": { "hp": 0, "attack": 0, "defense": 0, "speed": 1, "special_attack": 0, "special_defense": 0 },
+  "held_items": { "common": "ITEM_NONE", "rare": "ITEM_NONE" },
+  "gender_ratio": "MON_RATIO_MALE_87_5",
+  "hatch_cycles": 20,
+  "base_friendship": 70,
+  "exp_rate": "GROWTH_MEDIUM_SLOW",
+  "egg_groups": ["EGG_GROUP_FIELD", "EGG_GROUP_HUMAN_LIKE"],
+  "abilities": ["ABILITY_BLAZE", "ABILITY_NONE"],
+  "safari_flee_rate": 0,
+  "body_color": "BODY_COLOR_BROWN",
+  "flip_sprite": false
+}"#,
+        )
+        .unwrap();
+
+        let loaded = load_all_pokemon_data(dir.path()).unwrap();
+        assert!(loaded.contains_key("chimchar"));
+    }
+
+    #[test]
+    fn test_load_all_pokemon_data_invalid_existing_file_returns_error() {
+        let dir = tempdir().unwrap();
+        let species_dir = dir.path().join("chimchar");
+        fs::create_dir_all(&species_dir).unwrap();
+        fs::write(species_dir.join("data.json"), "{").unwrap();
+
+        let err = load_all_pokemon_data(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Failed to parse"));
+        assert!(err.to_string().contains("data.json"));
     }
 }

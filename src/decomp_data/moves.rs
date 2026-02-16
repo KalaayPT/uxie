@@ -125,18 +125,62 @@ pub fn load_all_move_data(
             let data_file = path.join("data.json");
             if data_file.exists() {
                 if let Some(move_name) = path.file_name().and_then(|n| n.to_str()) {
-                    match load_move_data_from_json(&data_file) {
-                        Ok(data) => {
-                            result.insert(move_name.to_lowercase(), data);
-                        }
-                        Err(e) => {
-                            eprintln!("Warning: Failed to parse {}: {}", data_file.display(), e);
-                        }
-                    }
+                    let data = load_move_data_from_json(&data_file).map_err(|e| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("Failed to parse {}: {e}", data_file.display()),
+                        )
+                    })?;
+                    result.insert(move_name.to_lowercase(), data);
                 }
             }
         }
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_load_all_move_data_loads_valid_entries() {
+        let dir = tempdir().unwrap();
+        let move_dir = dir.path().join("tackle");
+        fs::create_dir_all(&move_dir).unwrap();
+        fs::write(
+            move_dir.join("data.json"),
+            r#"{
+  "name": "Tackle",
+  "class": "CLASS_PHYSICAL",
+  "type": "TYPE_NORMAL",
+  "power": 40,
+  "accuracy": 100,
+  "pp": 35,
+  "effect": { "type": "MOVE_EFFECT_HIT", "chance": 0 },
+  "range": "RANGE_ADJACENT_OPPONENTS",
+  "priority": 0,
+  "flags": []
+}"#,
+        )
+        .unwrap();
+
+        let loaded = load_all_move_data(dir.path()).unwrap();
+        assert!(loaded.contains_key("tackle"));
+    }
+
+    #[test]
+    fn test_load_all_move_data_invalid_existing_file_returns_error() {
+        let dir = tempdir().unwrap();
+        let move_dir = dir.path().join("tackle");
+        fs::create_dir_all(&move_dir).unwrap();
+        fs::write(move_dir.join("data.json"), "{").unwrap();
+
+        let err = load_all_move_data(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Failed to parse"));
+        assert!(err.to_string().contains("data.json"));
+    }
 }

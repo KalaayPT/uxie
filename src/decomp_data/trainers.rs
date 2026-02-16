@@ -171,17 +171,56 @@ pub fn load_all_trainer_data(
 
         if path.extension().and_then(|e| e.to_str()) == Some("json") {
             if let Some(trainer_name) = path.file_stem().and_then(|n| n.to_str()) {
-                match load_trainer_data_from_json(&path) {
-                    Ok(data) => {
-                        result.insert(trainer_name.to_lowercase(), data);
-                    }
-                    Err(e) => {
-                        eprintln!("Warning: Failed to parse {}: {}", path.display(), e);
-                    }
-                }
+                let data = load_trainer_data_from_json(&path).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("Failed to parse {}: {e}", path.display()),
+                    )
+                })?;
+                result.insert(trainer_name.to_lowercase(), data);
             }
         }
     }
 
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_load_all_trainer_data_loads_valid_entries() {
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("rival.json"),
+            r#"{
+  "name": "Rival",
+  "class": "TRAINER_CLASS_RIVAL",
+  "items": [],
+  "ai_flags": [],
+  "double_battle": false,
+  "party": [
+    { "species": "SPECIES_CHIMCHAR", "level": 5, "form": 0, "power": 0, "ball_seal": 0 }
+  ],
+  "messages": []
+}"#,
+        )
+        .unwrap();
+
+        let loaded = load_all_trainer_data(dir.path()).unwrap();
+        assert!(loaded.contains_key("rival"));
+    }
+
+    #[test]
+    fn test_load_all_trainer_data_invalid_existing_file_returns_error() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("rival.json"), "{").unwrap();
+
+        let err = load_all_trainer_data(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Failed to parse"));
+        assert!(err.to_string().contains("rival.json"));
+    }
 }
