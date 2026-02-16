@@ -829,6 +829,73 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_open_platinum_decomp_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "workspace Platinum decomp integration test",
+        ) else {
+            return;
+        };
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.game, Game::Platinum);
+        assert_eq!(ws.family, GameFamily::Platinum);
+        assert_eq!(ws.provider.get_map_header_count().unwrap(), 559);
+
+        let scripts_order = root.join("res/field/scripts/scripts.order");
+        if scripts_order.exists() {
+            let expected_first = fs::read_to_string(&scripts_order)
+                .unwrap()
+                .lines()
+                .map(str::trim)
+                .find(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(str::to_string)
+                .expect("scripts.order exists but contains no script names");
+
+            assert_eq!(ws.scripts.get_name(0), Some(expected_first.as_str()));
+            assert_eq!(ws.scripts.get_id(&expected_first), Some(0));
+        }
+
+        let map_count = ws.provider.get_map_header_count().unwrap();
+        let sample_map_ids = [0_u16, 5, 36, 200, (map_count.saturating_sub(1)) as u16];
+        for map_id in sample_map_ids {
+            let header = ws.provider.get_map_header(map_id).unwrap();
+            let expected_name = ws
+                .scripts
+                .get_name(header.script_file_id() as usize)
+                .map(str::to_string);
+            assert_eq!(
+                ws.get_script_file_for_map(map_id),
+                expected_name,
+                "workspace script lookup mismatch for map {}",
+                map_id
+            );
+        }
+
+        if root.join("generated/maps.txt").exists() {
+            assert!(
+                ws.get_map_internal_name(0).is_some(),
+                "generated/maps.txt exists but map internal name[0] is missing"
+            );
+        }
+
+        if root.join("res/text/location_names.json").exists() {
+            let location_id = match ws.provider.get_map_header(0).unwrap() {
+                MapHeader::Pt(h) => h.location_name,
+                _ => panic!("expected Platinum map header for Platinum fixture"),
+            };
+            assert!(
+                ws.get_map_location_name(location_id).is_some(),
+                "res/text/location_names.json exists but location_name[{}] is missing",
+                location_id
+            );
+        }
+    }
+
+    #[test]
     #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
     fn integration_open_hgss_decomp_real_fixture() {
         let Some(root) = crate::test_env::existing_path_from_env(
