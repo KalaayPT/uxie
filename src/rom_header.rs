@@ -257,10 +257,17 @@ impl RomHeader {
                     entry_function: u32,
                 }
 
-                if let Ok(arm9) = serde_yaml::from_str::<Arm9Yaml>(&arm9_content) {
-                    header.arm9_ram_address = Some(arm9.base_address);
-                    header.arm9_entry_address = Some(arm9.entry_function);
-                }
+                let arm9 = serde_yaml::from_str::<Arm9Yaml>(&arm9_content).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Failed to parse arm9_config {}: {e}",
+                            arm9_config_path.display()
+                        ),
+                    )
+                })?;
+                header.arm9_ram_address = Some(arm9.base_address);
+                header.arm9_entry_address = Some(arm9.entry_function);
             }
         }
 
@@ -420,6 +427,7 @@ impl RomHeader {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use tempfile::tempdir;
 
     fn header_with_code(game_code: String) -> RomHeader {
         RomHeader {
@@ -525,6 +533,71 @@ secure_area_delay: 3454
         assert!(header.arm9_size.is_none());
 
         std::fs::remove_file(&temp).ok();
+    }
+
+    #[test]
+    fn test_from_ds_rom_tool_project_with_arm9_config() {
+        let dir = tempdir().unwrap();
+        let header_path = dir.path().join("header.yaml");
+        let config_path = dir.path().join("config.yaml");
+        let arm9_config_path = dir.path().join("arm9.yaml");
+
+        let header_yaml = r"
+title: POKEMON HG
+gamecode: IPKE
+makercode: '01'
+unitcode: 0
+rom_version: 0
+secure_area_delay: 0
+";
+        let config_yaml = r"
+header: header.yaml
+arm9_config: arm9.yaml
+";
+        let arm9_yaml = r"
+base_address: 33554432
+entry_function: 33587200
+";
+
+        std::fs::write(&header_path, header_yaml).unwrap();
+        std::fs::write(&config_path, config_yaml).unwrap();
+        std::fs::write(&arm9_config_path, arm9_yaml).unwrap();
+
+        let header = RomHeader::from_ds_rom_tool_project(dir.path()).unwrap();
+        assert_eq!(header.game_code, "IPKE");
+        assert_eq!(header.arm9_ram_address, Some(33_554_432));
+        assert_eq!(header.arm9_entry_address, Some(33_587_200));
+    }
+
+    #[test]
+    fn test_from_ds_rom_tool_project_invalid_arm9_config_returns_invalid_data() {
+        let dir = tempdir().unwrap();
+        let header_path = dir.path().join("header.yaml");
+        let config_path = dir.path().join("config.yaml");
+        let arm9_config_path = dir.path().join("arm9.yaml");
+
+        let header_yaml = r"
+title: POKEMON HG
+gamecode: IPKE
+makercode: '01'
+unitcode: 0
+rom_version: 0
+secure_area_delay: 0
+";
+        let config_yaml = r"
+header: header.yaml
+arm9_config: arm9.yaml
+";
+        let invalid_arm9_yaml = "base_address: [";
+
+        std::fs::write(&header_path, header_yaml).unwrap();
+        std::fs::write(&config_path, config_yaml).unwrap();
+        std::fs::write(&arm9_config_path, invalid_arm9_yaml).unwrap();
+
+        let err = RomHeader::from_ds_rom_tool_project(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Failed to parse arm9_config"));
+        assert!(err.to_string().contains("arm9.yaml"));
     }
 
     proptest! {
