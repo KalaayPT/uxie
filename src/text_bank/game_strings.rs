@@ -365,6 +365,78 @@ mod tests {
         assert!(gs.moves.is_empty());
     }
 
+    #[test]
+    #[ignore = "requires local Platinum DSPRE fixture via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_load_from_dspre_platinum_real_fixture() {
+        let Some(project_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "game strings integration test (Platinum DSPRE)",
+        ) else {
+            return;
+        };
+
+        let gs =
+            GameStrings::load_from_dspre(project_path, GameFamily::Platinum, GameLanguage::English)
+                .unwrap();
+
+        assert!(
+            !gs.is_empty(),
+            "expected at least one populated game-strings bank from Platinum DSPRE fixture"
+        );
+        assert!(
+            !gs.species.is_empty(),
+            "expected non-empty species names for Platinum DSPRE fixture"
+        );
+
+        let first_non_empty_species = gs.species.iter().position(|name| !name.trim().is_empty());
+        let Some(idx) = first_non_empty_species else {
+            panic!("expected at least one non-empty species name");
+        };
+        let species_name = gs.species[idx].clone();
+        assert_eq!(gs.get_species_name(idx as u16), Some(species_name.as_str()));
+        assert!(
+            gs.get_species_id(&species_name).is_some(),
+            "expected reverse lookup for non-empty species name '{}'",
+            species_name
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS DSPRE fixture via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_load_from_dspre_hgss_real_fixture() {
+        let Some(project_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            "game strings integration test (HGSS DSPRE)",
+        ) else {
+            return;
+        };
+
+        let gs =
+            GameStrings::load_from_dspre(project_path, GameFamily::HGSS, GameLanguage::English)
+                .unwrap();
+
+        assert!(
+            !gs.is_empty(),
+            "expected at least one populated game-strings bank from HGSS DSPRE fixture"
+        );
+        assert!(
+            !gs.species.is_empty(),
+            "expected non-empty species names for HGSS DSPRE fixture"
+        );
+
+        let first_non_empty_species = gs.species.iter().position(|name| !name.trim().is_empty());
+        let Some(idx) = first_non_empty_species else {
+            panic!("expected at least one non-empty species name");
+        };
+        let species_name = gs.species[idx].clone();
+        assert_eq!(gs.get_species_name(idx as u16), Some(species_name.as_str()));
+        assert!(
+            gs.get_species_id(&species_name).is_some(),
+            "expected reverse lookup for non-empty species name '{}'",
+            species_name
+        );
+    }
+
     fn language_strategy() -> impl Strategy<Value = GameLanguage> {
         prop_oneof![
             Just(GameLanguage::English),
