@@ -600,6 +600,39 @@ arm9_config: arm9.yaml
         assert!(err.to_string().contains("arm9.yaml"));
     }
 
+    #[test]
+    #[ignore = "requires a real Platinum DSPRE project path via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_open_platinum_dspre_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "Platinum RomHeader integration test",
+        ) else {
+            return;
+        };
+
+        let header = RomHeader::open(root).unwrap();
+        assert_eq!(header.detect_game(), Some(Game::Platinum));
+        assert_eq!(header.detect_game_family(), Some(GameFamily::Platinum));
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project path via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_open_hgss_dspre_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            "HGSS RomHeader integration test",
+        ) else {
+            return;
+        };
+
+        let header = RomHeader::open(root).unwrap();
+        assert_eq!(header.detect_game_family(), Some(GameFamily::HGSS));
+        assert!(matches!(
+            header.detect_game(),
+            Some(Game::HeartGold) | Some(Game::SoulSilver)
+        ));
+    }
+
     proptest! {
         #![proptest_config(ProptestConfig {
             cases: 64,
