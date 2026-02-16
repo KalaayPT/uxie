@@ -1,5 +1,6 @@
 use rustc_hash::FxHashMap;
 use serde::Deserialize;
+use std::io;
 use std::path::Path;
 
 use crate::GameFamily;
@@ -119,27 +120,33 @@ impl GameStrings {
 
         let mut gs = Self::new();
 
-        if let Ok(names) = load_text_archive(&text_archives_path, bank_ids.species) {
+        let names = load_text_archive_if_present(&text_archives_path, bank_ids.species, "species")?;
+        if !names.is_empty() {
             gs.species_to_id = build_lookup_table(&names);
             gs.species = names;
         }
 
-        if let Ok(names) = load_text_archive(&text_archives_path, bank_ids.items) {
+        let names = load_text_archive_if_present(&text_archives_path, bank_ids.items, "items")?;
+        if !names.is_empty() {
             gs.items_to_id = build_lookup_table(&names);
             gs.items = names;
         }
 
-        if let Ok(names) = load_text_archive(&text_archives_path, bank_ids.moves) {
+        let names = load_text_archive_if_present(&text_archives_path, bank_ids.moves, "moves")?;
+        if !names.is_empty() {
             gs.moves_to_id = build_lookup_table(&names);
             gs.moves = names;
         }
 
-        if let Ok(names) = load_text_archive(&text_archives_path, bank_ids.abilities) {
+        let names =
+            load_text_archive_if_present(&text_archives_path, bank_ids.abilities, "abilities")?;
+        if !names.is_empty() {
             gs.abilities_to_id = build_lookup_table(&names);
             gs.abilities = names;
         }
 
-        if let Ok(names) = load_text_archive(&text_archives_path, bank_ids.types) {
+        let names = load_text_archive_if_present(&text_archives_path, bank_ids.types, "types")?;
+        if !names.is_empty() {
             gs.types_to_id = build_lookup_table(&names);
             gs.types = names;
         }
@@ -207,6 +214,31 @@ impl GameStrings {
     }
 }
 
+fn load_text_archive_if_present(
+    base_path: &Path,
+    bank_id: u16,
+    bank_name: &str,
+) -> io::Result<Vec<String>> {
+    let json_path = base_path.join(format!("{:04}.json", bank_id));
+    if !json_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let names = load_text_archive(base_path, bank_id).map_err(|err| {
+        io::Error::new(
+            err.kind(),
+            format!(
+                "Failed to load {} text archive {:04} at {}: {}",
+                bank_name,
+                bank_id,
+                json_path.display(),
+                err
+            ),
+        )
+    })?;
+    Ok(names)
+}
+
 /// Load a text archive JSON and extract all message strings
 fn load_text_archive(base_path: &Path, bank_id: u16) -> std::io::Result<Vec<String>> {
     let json_path = base_path.join(format!("{:04}.json", bank_id));
@@ -263,6 +295,8 @@ fn build_lookup_table(names: &[String]) -> FxHashMap<String, u16> {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn test_normalize_name() {
@@ -270,6 +304,65 @@ mod tests {
         assert_eq!(normalize_name("MR. MIME"), "mr.mime");
         assert_eq!(normalize_name("Poké Ball"), "pokeball");
         assert_eq!(normalize_name("Ho-Oh"), "hooh");
+    }
+
+    #[test]
+    fn test_load_from_dspre_missing_text_archives_is_empty() {
+        let dir = tempdir().unwrap();
+        let gs =
+            GameStrings::load_from_dspre(dir.path(), GameFamily::Platinum, GameLanguage::English)
+                .unwrap();
+        assert!(gs.is_empty());
+    }
+
+    #[test]
+    fn test_load_from_dspre_invalid_existing_archive_errors() {
+        let dir = tempdir().unwrap();
+        let archives = dir.path().join("expanded/textArchives");
+        fs::create_dir_all(&archives).unwrap();
+
+        // Platinum species bank.
+        fs::write(archives.join("0412.json"), "{ invalid json ").unwrap();
+
+        let err =
+            GameStrings::load_from_dspre(dir.path(), GameFamily::Platinum, GameLanguage::English)
+                .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("species"));
+        assert!(err.to_string().contains("0412"));
+    }
+
+    #[test]
+    fn test_load_from_dspre_loads_existing_archives_and_skips_missing() {
+        let dir = tempdir().unwrap();
+        let archives = dir.path().join("expanded/textArchives");
+        fs::create_dir_all(&archives).unwrap();
+
+        // Platinum species bank.
+        fs::write(
+            archives.join("0412.json"),
+            r#"
+            {
+              "key": 0,
+              "messages": [
+                { "id": "0000", "en_US": "Bulbasaur" },
+                { "id": "0001", "en_US": "Ivysaur" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let gs =
+            GameStrings::load_from_dspre(dir.path(), GameFamily::Platinum, GameLanguage::English)
+                .unwrap();
+
+        assert_eq!(gs.get_species_name(0), Some("Bulbasaur"));
+        assert_eq!(gs.get_species_name(1), Some("Ivysaur"));
+        assert_eq!(gs.get_species_id("bulbasaur"), Some(0));
+        // Missing optional archives remain empty.
+        assert!(gs.items.is_empty());
+        assert!(gs.moves.is_empty());
     }
 
     fn language_strategy() -> impl Strategy<Value = GameLanguage> {
