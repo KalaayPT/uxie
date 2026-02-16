@@ -451,6 +451,73 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         assert!(entry.min_script_id <= 2000);
     }
 
+    #[test]
+    #[ignore = "requires real HGSS fixture roots via UXIE_TEST_HGSS_DECOMP_PATH and UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn test_hgss_decomp_real_fixture_matches_hgss_binary() {
+        let Some(fieldmap_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            &["src/fieldmap.c"],
+            "HGSS decomp global-script-table integration test",
+        ) else {
+            return;
+        };
+
+        let Some(arm9_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["arm9.bin", "unpacked/arm9.bin", "arm9/arm9.bin"],
+            "HGSS binary global-script-table integration test (from DSPRE project root)",
+        ) else {
+            return;
+        };
+
+        let decomp_root = fieldmap_path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("fieldmap.c should be under <decomp>/src");
+
+        let ws = crate::workspace::Workspace::open_decomp(decomp_root).unwrap();
+        let decomp_table =
+            GlobalScriptTable::from_hgss_decomp_file(&fieldmap_path, &ws.symbols).unwrap();
+        let binary_table = GlobalScriptTable::from_hgss_binary_file(arm9_path).unwrap();
+
+        assert_eq!(decomp_table.len(), HGSS_TABLE_ENTRY_COUNT);
+        assert_eq!(binary_table.len(), HGSS_TABLE_ENTRY_COUNT);
+
+        for entry in decomp_table.entries() {
+            assert_eq!(binary_table.lookup(entry.min_script_id), Some(entry));
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a real Platinum decomp path via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn test_platinum_decomp_real_fixture_matches_hardcoded_table() {
+        let Some(script_manager_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            &["src/script_manager.c"],
+            "Platinum decomp global-script-table integration test",
+        ) else {
+            return;
+        };
+
+        let decomp_root = script_manager_path
+            .parent()
+            .and_then(std::path::Path::parent)
+            .expect("script_manager.c should be under <decomp>/src");
+
+        let ws = crate::workspace::Workspace::open_decomp(decomp_root).unwrap();
+        let decomp_table =
+            GlobalScriptTable::from_platinum_decomp_file(&script_manager_path, &ws.symbols)
+                .unwrap();
+        let hardcoded_table = GlobalScriptTable::platinum_hardcoded();
+
+        assert_eq!(decomp_table.len(), PLATINUM_TABLE_ENTRY_COUNT);
+        assert_eq!(hardcoded_table.len(), PLATINUM_TABLE_ENTRY_COUNT);
+
+        for entry in hardcoded_table.entries() {
+            assert_eq!(decomp_table.lookup(entry.min_script_id), Some(entry));
+        }
+    }
+
     fn global_entries_strategy() -> impl Strategy<Value = Vec<GlobalScriptEntry>> {
         prop::collection::btree_map(any::<u16>(), (any::<u16>(), any::<u16>()), 0..48).prop_map(
             |mapping| {
