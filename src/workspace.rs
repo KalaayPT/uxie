@@ -502,9 +502,64 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map_header::MapHeader;
     use std::fs;
     use std::io::Write;
     use tempfile::tempdir;
+
+    fn parse_hgss_script_filename_for_test(file_name: &str) -> Option<(usize, String)> {
+        let stem = file_name.strip_suffix(".s")?;
+        let mut parts = stem.split('_');
+
+        if parts.next()? != "scr" || parts.next()? != "seq" {
+            return None;
+        }
+
+        let id_part = parts.next()?;
+        if id_part.len() != 4 || !id_part.chars().all(|c| c.is_ascii_digit()) {
+            return None;
+        }
+
+        let id = id_part.parse::<usize>().ok()?;
+        Some((id, stem.to_string()))
+    }
+
+    fn expected_hgss_script_from_fixture(root: &Path) -> std::io::Result<Option<(usize, String)>> {
+        // Workspace loads `scr_seq` first and `script` second, so `script` wins on collisions.
+        let precedence_dirs = [
+            root.join("files/fielddata/script"),
+            root.join("files/fielddata/script/scr_seq"),
+        ];
+
+        for dir in precedence_dirs {
+            if !dir.exists() {
+                continue;
+            }
+
+            let mut parsed = Vec::new();
+            for entry in fs::read_dir(dir)? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+
+                let Some(file_name) = entry.file_name().to_str().map(str::to_string) else {
+                    continue;
+                };
+
+                if let Some((id, script_name)) = parse_hgss_script_filename_for_test(&file_name) {
+                    parsed.push((id, script_name));
+                }
+            }
+
+            parsed.sort_by_key(|(id, _)| *id);
+            if let Some(first) = parsed.into_iter().next() {
+                return Ok(Some(first));
+            }
+        }
+
+        Ok(None)
+    }
 
     #[test]
     fn test_project_type_equality() {
@@ -771,6 +826,69 @@ mod tests {
         assert_eq!(ws.scripts.get_name(3), Some("scr_seq_0003_D01R0101"));
         assert_eq!(ws.scripts.get_name(81), Some("scr_seq_0081_D32R0102"));
         assert_eq!(ws.scripts.get_name(4), None);
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_open_hgss_decomp_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "workspace HGSS decomp integration test",
+        ) else {
+            return;
+        };
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.provider.get_map_header_count().unwrap(), 540);
+
+        let Some((script_id, script_name)) = expected_hgss_script_from_fixture(&root).unwrap()
+        else {
+            panic!(
+                "expected at least one scr_seq_XXXX*.s script file under {}",
+                root.display()
+            );
+        };
+
+        assert_eq!(ws.scripts.get_name(script_id), Some(script_name.as_str()));
+        assert_eq!(ws.scripts.get_id(&script_name), Some(script_id));
+
+        let map_count = ws.provider.get_map_header_count().unwrap();
+        let sample_map_ids = [0_u16, 5, 36, 200, (map_count.saturating_sub(1)) as u16];
+        for map_id in sample_map_ids {
+            let header = ws.provider.get_map_header(map_id).unwrap();
+            let expected_name = ws
+                .scripts
+                .get_name(header.script_file_id() as usize)
+                .map(str::to_string);
+            assert_eq!(
+                ws.get_script_file_for_map(map_id),
+                expected_name,
+                "workspace script lookup mismatch for map {}",
+                map_id
+            );
+        }
+
+        if root.join("generated/maps.txt").exists() {
+            assert!(
+                ws.get_map_internal_name(0).is_some(),
+                "generated/maps.txt exists but map internal name[0] is missing"
+            );
+        }
+
+        if root.join("res/text/location_names.json").exists() {
+            let location_id = match ws.provider.get_map_header(0).unwrap() {
+                MapHeader::HGSS(h) => h.location_name,
+                _ => panic!("expected HGSS map header for HGSS fixture"),
+            };
+            assert!(
+                ws.get_map_location_name(location_id).is_some(),
+                "res/text/location_names.json exists but location_name[{}] is missing",
+                location_id
+            );
+        }
     }
 
     #[test]
