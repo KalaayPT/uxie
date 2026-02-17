@@ -51,7 +51,7 @@ static RE_HGSS_ENTRY: LazyLock<Regex> = LazyLock::new(|| {
 /// Regex to match SCRIPT_RANGE_TABLE macro entries:
 /// `Entry(10490, scripts_unk_0499, TEXT_BANK_SCRATCH_OFF_CARDS) \`
 static RE_PLATINUM_TABLE_ENTRY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"Entry\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)")
+    Regex::new(r"\bEntry\s*\(\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*,\s*([A-Za-z0-9_]+)\s*\)")
         .unwrap()
 });
 
@@ -167,9 +167,9 @@ impl GlobalScriptTable {
             let script_file_sym = caps.get(2)?.as_str();
             let text_archive_sym = caps.get(3)?.as_str();
 
-            let min_script_id = symbols.resolve_constant(script_id_sym)? as u16;
-            let script_file_id = symbols.resolve_constant(script_file_sym)? as u16;
-            let text_archive_id = symbols.resolve_constant(text_archive_sym)? as u16;
+            let min_script_id = resolve_value(script_id_sym, symbols)? as u16;
+            let script_file_id = resolve_value(script_file_sym, symbols)? as u16;
+            let text_archive_id = resolve_value(text_archive_sym, symbols)? as u16;
 
             entries.push(GlobalScriptEntry::new(
                 min_script_id,
@@ -397,6 +397,27 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         let entry = table.lookup(2000).unwrap();
         assert_eq!(entry.min_script_id, 2000);
         assert_eq!(entry.script_file_id, 3);
+    }
+
+    #[test]
+    fn test_hgss_decomp_parsing_accepts_numeric_script_id_literal() {
+        let mut symbols = SymbolTable::new();
+        symbols.insert_define("NARC_scr_seq_scr_seq_0734_bin".to_string(), 734);
+        symbols.insert_define("NARC_msg_msg_0444_bin".to_string(), 444);
+
+        let content = r"
+const struct ScriptBankMapping sScriptBankMapping[30] = {
+    { 10300, NARC_scr_seq_scr_seq_0734_bin, NARC_msg_msg_0444_bin },
+};
+";
+
+        let table = GlobalScriptTable::from_hgss_decomp(content, &symbols).unwrap();
+        assert_eq!(table.len(), 1);
+
+        let entry = table.lookup(10300).unwrap();
+        assert_eq!(entry.min_script_id, 10300);
+        assert_eq!(entry.script_file_id, 734);
+        assert_eq!(entry.text_archive_id, 444);
     }
 
     #[test]
