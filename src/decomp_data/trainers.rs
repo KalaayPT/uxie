@@ -3,7 +3,7 @@
 //! Parses `res/trainers/data/{trainer}.json` files and converts to `TrainerData`.
 
 use crate::trainer_data::{AiFlags, PartyPokemon, TrainerData, TrainerFlags, TrainerProperties};
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -45,8 +45,32 @@ pub struct DecompPartyMember {
 pub struct TrainerMessage {
     #[serde(rename = "type")]
     pub msg_type: String,
-    #[serde(default, rename = "en_US")]
+    #[serde(
+        default,
+        rename = "en_US",
+        deserialize_with = "deserialize_optional_string_or_vec"
+    )]
     pub en_us: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum OneOrManyStrings {
+    One(String),
+    Many(Vec<String>),
+}
+
+fn deserialize_optional_string_or_vec<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<OneOrManyStrings>::deserialize(deserializer)?;
+    Ok(value.map(|value| match value {
+        OneOrManyStrings::One(s) => vec![s],
+        OneOrManyStrings::Many(v) => v,
+    }))
 }
 
 impl DecompTrainerData {
@@ -222,5 +246,50 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("Failed to parse"));
         assert!(err.to_string().contains("rival.json"));
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_load_all_trainer_data_platinum_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "decomp_data trainers integration test",
+        ) else {
+            return;
+        };
+
+        let trainers_dir = root.join("res/trainers/data");
+        if !trainers_dir.exists() {
+            eprintln!(
+                "Skipping decomp_data trainers integration test: trainers directory does not exist: {}",
+                trainers_dir.display()
+            );
+            return;
+        }
+
+        let loaded = load_all_trainer_data(&trainers_dir).unwrap();
+        assert!(
+            !loaded.is_empty(),
+            "expected at least one trainer from {}",
+            trainers_dir.display()
+        );
+
+        let expected_name = fs::read_dir(&trainers_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("json"))
+            .find_map(|path| {
+                path.file_stem()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_lowercase)
+            })
+            .expect("expected at least one trainer json file");
+
+        assert!(
+            loaded.contains_key(&expected_name),
+            "expected loaded trainer table to contain '{}'",
+            expected_name
+        );
     }
 }
