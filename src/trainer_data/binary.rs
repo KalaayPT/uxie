@@ -58,8 +58,14 @@ impl PartyPokemon {
         flags: TrainerFlags,
         family: GameFamily,
     ) -> io::Result<Self> {
-        let difficulty = reader.read_u8()?;
-        let gender_ability = reader.read_u8()?;
+        let (difficulty, gender_ability_override) = match family {
+            GameFamily::DP | GameFamily::Platinum => (reader.read_u16::<LittleEndian>()?, 0),
+            GameFamily::HGSS => {
+                let difficulty = reader.read_u8()?;
+                let gender_ability_override = reader.read_u8()?;
+                (u16::from(difficulty), gender_ability_override)
+            }
+        };
         let level = reader.read_u16::<LittleEndian>()?;
         let species_form = reader.read_u16::<LittleEndian>()?;
         let species = species_form & 0x3FF;
@@ -89,7 +95,7 @@ impl PartyPokemon {
 
         Ok(Self {
             difficulty,
-            gender_ability,
+            gender_ability_override,
             level,
             species,
             form,
@@ -105,8 +111,24 @@ impl PartyPokemon {
         flags: TrainerFlags,
         family: GameFamily,
     ) -> io::Result<()> {
-        writer.write_u8(self.difficulty)?;
-        writer.write_u8(self.gender_ability)?;
+        match family {
+            GameFamily::DP | GameFamily::Platinum => {
+                writer.write_u16::<LittleEndian>(self.difficulty)?;
+            }
+            GameFamily::HGSS => {
+                let difficulty = u8::try_from(self.difficulty).map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "HGSS trainer difficulty {} does not fit in u8",
+                            self.difficulty
+                        ),
+                    )
+                })?;
+                writer.write_u8(difficulty)?;
+                writer.write_u8(self.gender_ability_override)?;
+            }
+        }
         writer.write_u16::<LittleEndian>(self.level)?;
         let species_form = (self.species & 0x3FF) | ((self.form as u16 & 0x3F) << 10);
         writer.write_u16::<LittleEndian>(species_form)?;
@@ -130,7 +152,7 @@ impl PartyPokemon {
     }
 
     pub fn binary_size(flags: TrainerFlags, family: GameFamily) -> usize {
-        let mut size = 6; // base: difficulty(1) + gender_ability(1) + level(2) + species_form(2)
+        let mut size = 6; // base: DP/PT difficulty(2) or HGSS difficulty(1)+override(1), plus level(2) + species_form(2)
         if flags.contains(TrainerFlags::HAS_ITEMS) {
             size += 2;
         }
@@ -209,7 +231,7 @@ mod tests {
 
         let pokemon = PartyPokemon {
             difficulty: 8,
-            gender_ability: 0x10,
+            gender_ability_override: 0,
             level: 25,
             species: 25,
             form: 0,
@@ -235,7 +257,7 @@ mod tests {
 
         let pokemon = PartyPokemon {
             difficulty: 31,
-            gender_ability: 0x21,
+            gender_ability_override: 0,
             level: 50,
             species: 150,
             form: 1,
@@ -258,6 +280,33 @@ mod tests {
     }
 
     #[test]
+    fn test_party_pokemon_hgss_base_roundtrip_preserves_overrides() {
+        let flags = TrainerFlags::empty();
+        let family = GameFamily::HGSS;
+
+        let pokemon = PartyPokemon {
+            difficulty: 30,
+            gender_ability_override: 0x21,
+            level: 14,
+            species: 92,
+            form: 0,
+            held_item: None,
+            moves: None,
+            ball_seal: Some(0),
+        };
+
+        let mut buf = Vec::new();
+        pokemon.to_binary(&mut buf, flags, family).unwrap();
+        assert_eq!(buf.len(), PartyPokemon::binary_size(flags, family));
+
+        let mut cursor = Cursor::new(buf);
+        let parsed = PartyPokemon::from_binary(&mut cursor, flags, family).unwrap();
+        assert_eq!(pokemon, parsed);
+        assert_eq!(parsed.gender_override(), 1);
+        assert_eq!(parsed.ability_override(), 2);
+    }
+
+    #[test]
     fn test_full_trainer_roundtrip() {
         let trainer = TrainerData {
             properties: TrainerProperties {
@@ -275,7 +324,7 @@ mod tests {
             party: vec![
                 PartyPokemon {
                     difficulty: 15,
-                    gender_ability: 0,
+                    gender_ability_override: 0,
                     level: 30,
                     species: 6,
                     form: 0,
@@ -285,7 +334,7 @@ mod tests {
                 },
                 PartyPokemon {
                     difficulty: 15,
-                    gender_ability: 0,
+                    gender_ability_override: 0,
                     level: 32,
                     species: 9,
                     form: 0,
@@ -367,6 +416,18 @@ mod tests {
         flags: TrainerFlags,
         family: GameFamily,
     ) -> BoxedStrategy<PartyPokemon> {
+        let difficulty = if family == GameFamily::HGSS {
+            (0u16..=u16::from(u8::MAX)).boxed()
+        } else {
+            any::<u16>().boxed()
+        };
+
+        let gender_ability_override = if family == GameFamily::HGSS {
+            any::<u8>().boxed()
+        } else {
+            Just(0u8).boxed()
+        };
+
         let held_item = if flags.contains(TrainerFlags::HAS_ITEMS) {
             any::<u16>().prop_map(Some).boxed()
         } else {
@@ -386,8 +447,8 @@ mod tests {
         };
 
         (
-            any::<u8>(),
-            any::<u8>(),
+            difficulty,
+            gender_ability_override,
             any::<u16>(),
             0u16..1024,
             0u8..64,
@@ -398,7 +459,7 @@ mod tests {
             .prop_map(
                 |(
                     difficulty,
-                    gender_ability,
+                    gender_ability_override,
                     level,
                     species,
                     form,
@@ -407,7 +468,7 @@ mod tests {
                     ball_seal,
                 )| PartyPokemon {
                     difficulty,
-                    gender_ability,
+                    gender_ability_override,
                     level,
                     species,
                     form,

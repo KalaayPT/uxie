@@ -35,10 +35,14 @@ pub struct DecompPartyMember {
     pub item: Option<String>,
     #[serde(default)]
     pub moves: Option<Vec<String>>,
-    #[serde(default)]
-    pub power: u8,
-    #[serde(default)]
-    pub ball_seal: u16,
+    #[serde(default, alias = "iv_scale", alias = "power")]
+    pub difficulty: u16,
+    #[serde(default, rename = "genderOverride")]
+    pub gender_override: Option<String>,
+    #[serde(default, rename = "abilityOverride")]
+    pub ability_override: Option<String>,
+    #[serde(default, alias = "ball_seal", alias = "capsule")]
+    pub capsule: u16,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -71,6 +75,60 @@ where
         OneOrManyStrings::One(s) => vec![s],
         OneOrManyStrings::Many(v) => v,
     }))
+}
+
+fn resolve_override_symbol<F>(value: &str, resolve_constant: &F, known: &[(&str, u8)]) -> u8
+where
+    F: Fn(&str) -> Option<i64>,
+{
+    if let Some(resolved) = resolve_constant(value) {
+        return resolved as u8;
+    }
+    known
+        .iter()
+        .find_map(|(name, value_id)| (*name == value).then_some(*value_id))
+        .unwrap_or(0)
+}
+
+fn pack_gender_ability_override<F>(
+    gender_override: Option<&str>,
+    ability_override: Option<&str>,
+    resolve_constant: &F,
+) -> u8
+where
+    F: Fn(&str) -> Option<i64>,
+{
+    let gender = gender_override
+        .map(|value| {
+            resolve_override_symbol(
+                value,
+                resolve_constant,
+                &[
+                    ("TRPOKE_GENDER_OVERRIDE_OFF", 0),
+                    ("TRPOKE_GENDER_OVERRIDE_MALE", 1),
+                    ("TRPOKE_GENDER_OVERRIDE_FEMALE", 2),
+                ],
+            )
+        })
+        .unwrap_or(0)
+        & 0x0F;
+
+    let ability = ability_override
+        .map(|value| {
+            resolve_override_symbol(
+                value,
+                resolve_constant,
+                &[
+                    ("TRPOKE_ABILITY_OVERRIDE_OFF", 0),
+                    ("TRPOKE_ABILITY_OVERRIDE_FIRST", 1),
+                    ("TRPOKE_ABILITY_OVERRIDE_SECOND", 2),
+                ],
+            )
+        })
+        .unwrap_or(0)
+        & 0x0F;
+
+    gender | (ability << 4)
 }
 
 impl DecompTrainerData {
@@ -158,15 +216,19 @@ impl DecompPartyMember {
         });
 
         PartyPokemon {
-            difficulty: self.power,
-            gender_ability: 0,
+            difficulty: self.difficulty,
+            gender_ability_override: pack_gender_ability_override(
+                self.gender_override.as_deref(),
+                self.ability_override.as_deref(),
+                resolve_constant,
+            ),
             level: self.level,
             species,
             form: self.form,
             held_item,
             moves,
-            ball_seal: if self.ball_seal > 0 {
-                Some(self.ball_seal)
+            ball_seal: if self.capsule > 0 {
+                Some(self.capsule)
             } else {
                 None
             },
@@ -226,7 +288,7 @@ mod tests {
   "ai_flags": [],
   "double_battle": false,
   "party": [
-    { "species": "SPECIES_CHIMCHAR", "level": 5, "form": 0, "power": 0, "ball_seal": 0 }
+    { "species": "SPECIES_CHIMCHAR", "level": 5, "form": 0, "iv_scale": 0, "ball_seal": 0 }
   ],
   "messages": []
 }"#,
@@ -235,6 +297,85 @@ mod tests {
 
         let loaded = load_all_trainer_data(dir.path()).unwrap();
         assert!(loaded.contains_key("rival"));
+    }
+
+    #[test]
+    fn test_to_trainer_data_supports_platinum_party_shape() {
+        let data: DecompTrainerData = serde_json::from_str(
+            r#"{
+  "name": "Ace Trainer",
+  "class": "TRAINER_CLASS_ACE_TRAINER",
+  "items": [],
+  "ai_flags": [],
+  "double_battle": false,
+  "party": [
+    {
+      "species": "SPECIES_GLALIE",
+      "form": 0,
+      "level": 59,
+      "item": null,
+      "moves": null,
+      "iv_scale": 50,
+      "ball_seal": 7
+    }
+  ],
+  "messages": []
+}"#,
+        )
+        .unwrap();
+
+        let trainer = data.to_trainer_data(|name| match name {
+            "TRAINER_CLASS_ACE_TRAINER" => Some(12),
+            "SPECIES_GLALIE" => Some(362),
+            _ => None,
+        });
+
+        assert_eq!(trainer.party.len(), 1);
+        let mon = &trainer.party[0];
+        assert_eq!(mon.difficulty, 50);
+        assert_eq!(mon.gender_ability_override, 0);
+        assert_eq!(mon.level, 59);
+        assert_eq!(mon.species, 362);
+        assert_eq!(mon.ball_seal, Some(7));
+    }
+
+    #[test]
+    fn test_to_trainer_data_supports_hgss_party_shape() {
+        let data: DecompTrainerData = serde_json::from_str(
+            r#"{
+  "name": "Rival",
+  "class": "TRAINER_CLASS_RIVAL",
+  "items": [],
+  "ai_flags": [],
+  "double_battle": false,
+  "party": [
+    {
+      "difficulty": 30,
+      "genderOverride": "TRPOKE_GENDER_OVERRIDE_MALE",
+      "abilityOverride": "TRPOKE_ABILITY_OVERRIDE_SECOND",
+      "level": 14,
+      "species": "SPECIES_GASTLY",
+      "capsule": 3
+    }
+  ],
+  "messages": []
+}"#,
+        )
+        .unwrap();
+
+        let trainer = data.to_trainer_data(|name| match name {
+            "TRAINER_CLASS_RIVAL" => Some(7),
+            "SPECIES_GASTLY" => Some(92),
+            _ => None,
+        });
+
+        assert_eq!(trainer.party.len(), 1);
+        let mon = &trainer.party[0];
+        assert_eq!(mon.difficulty, 30);
+        assert_eq!(mon.gender_ability_override, 0x21);
+        assert_eq!(mon.level, 14);
+        assert_eq!(mon.species, 92);
+        assert_eq!(mon.ball_seal, Some(3));
     }
 
     #[test]

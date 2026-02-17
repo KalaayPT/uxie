@@ -42,8 +42,9 @@ pub struct TrainerProperties {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PartyPokemon {
-    pub difficulty: u8,
-    pub gender_ability: u8,
+    pub difficulty: u16,
+    #[serde(default)]
+    pub gender_ability_override: u8,
     pub level: u16,
     pub species: u16,
     pub form: u8,
@@ -61,12 +62,12 @@ impl PartyPokemon {
         self.form
     }
 
-    pub fn ability_slot(&self) -> u8 {
-        self.gender_ability & 0x0F
+    pub fn gender_override(&self) -> u8 {
+        self.gender_ability_override & 0x0F
     }
 
-    pub fn gender(&self) -> u8 {
-        (self.gender_ability >> 4) & 0x0F
+    pub fn ability_override(&self) -> u8 {
+        (self.gender_ability_override >> 4) & 0x0F
     }
 }
 
