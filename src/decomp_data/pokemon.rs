@@ -3,7 +3,7 @@
 //! Parses `res/pokemon/{species}/data.json` files and converts to `PersonalData`.
 
 use crate::personal_data::PersonalData;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
@@ -27,7 +27,7 @@ pub struct DecompPokemonData {
     pub safari_flee_rate: u8,
     pub body_color: String,
     pub flip_sprite: bool,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_icon_palette")]
     pub icon_palette: u8,
     #[serde(default)]
     pub learnset: Option<Learnset>,
@@ -72,6 +72,25 @@ pub struct Learnset {
     pub by_tutor: Vec<String>,
     #[serde(default)]
     pub egg_moves: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum IconPaletteField {
+    Value(u8),
+    Variant { base: u8 },
+}
+
+fn deserialize_icon_palette<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<IconPaletteField>::deserialize(deserializer)?;
+    Ok(match value {
+        Some(IconPaletteField::Value(value)) => value,
+        Some(IconPaletteField::Variant { base }) => base,
+        None => 0,
+    })
 }
 
 impl DecompPokemonData {
@@ -256,5 +275,50 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("Failed to parse"));
         assert!(err.to_string().contains("data.json"));
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_load_all_pokemon_data_platinum_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "decomp_data pokemon integration test",
+        ) else {
+            return;
+        };
+
+        let pokemon_dir = root.join("res/pokemon");
+        if !pokemon_dir.exists() {
+            eprintln!(
+                "Skipping decomp_data pokemon integration test: pokemon directory does not exist: {}",
+                pokemon_dir.display()
+            );
+            return;
+        }
+
+        let loaded = load_all_pokemon_data(&pokemon_dir).unwrap();
+        assert!(
+            !loaded.is_empty(),
+            "expected at least one species from {}",
+            pokemon_dir.display()
+        );
+
+        let expected_name = fs::read_dir(&pokemon_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.is_dir() && path.join("data.json").exists())
+            .find_map(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_lowercase)
+            })
+            .expect("expected at least one species directory with data.json");
+
+        assert!(
+            loaded.contains_key(&expected_name),
+            "expected loaded species table to contain '{}'",
+            expected_name
+        );
     }
 }

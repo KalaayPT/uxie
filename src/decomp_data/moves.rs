@@ -183,4 +183,49 @@ mod tests {
         assert!(err.to_string().contains("Failed to parse"));
         assert!(err.to_string().contains("data.json"));
     }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_load_all_move_data_platinum_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "decomp_data moves integration test",
+        ) else {
+            return;
+        };
+
+        let moves_dir = root.join("res/battle/moves");
+        if !moves_dir.exists() {
+            eprintln!(
+                "Skipping decomp_data moves integration test: moves directory does not exist: {}",
+                moves_dir.display()
+            );
+            return;
+        }
+
+        let loaded = load_all_move_data(&moves_dir).unwrap();
+        assert!(
+            !loaded.is_empty(),
+            "expected at least one move from {}",
+            moves_dir.display()
+        );
+
+        let expected_name = fs::read_dir(&moves_dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| path.is_dir() && path.join("data.json").exists())
+            .and_then(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_lowercase)
+            })
+            .expect("expected at least one move directory with data.json");
+
+        assert!(
+            loaded.contains_key(&expected_name),
+            "expected loaded move table to contain '{}'",
+            expected_name
+        );
+    }
 }
