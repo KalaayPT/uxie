@@ -322,6 +322,9 @@ impl Workspace {
                 }
             }
         }
+        for (id, script_name) in scripts.get_all_names().iter().enumerate() {
+            symbols.insert_define(script_name.clone(), id as i64);
+        }
 
         let mut text_banks = TextBankTable::new();
         let text_banks_list = root.join("generated/text_banks.txt");
@@ -379,13 +382,9 @@ impl Workspace {
             symbols.load_headers_from_dir(&include_constants)?;
         }
 
-        // 2. Load generated constants (prefer build/generated/*.py, fallback to generated/*.txt)
-        let build_generated = root.join("build/generated");
+        // 2. Load generated constants from source-generated files.
         let generated = root.join("generated");
-
-        if build_generated.exists() {
-            symbols.load_headers_from_dir(&build_generated)?;
-        } else if generated.exists() {
+        if generated.exists() {
             symbols.load_headers_from_dir(&generated)?;
         }
 
@@ -404,6 +403,25 @@ impl Workspace {
         let build_text_bank = root.join("build/res/text/bank");
         if build_text_bank.exists() {
             symbols.load_headers_from_dir(&build_text_bank)?;
+        }
+
+        // 7. Load script/message index constants needed by global script table parsing.
+        // These files define symbols like `scripts_common`, `NARC_scr_seq_*`, and `NARC_msg_*`.
+        let index_files = [
+            root.join("include/script_manager.h"),
+            root.join("build/res/field/scripts/scr_seq.naix.h"),
+            root.join("build/debug/res/field/scripts/scr_seq.naix.h"),
+            root.join("build/release/res/field/scripts/scr_seq.naix.h"),
+            root.join("res/field/scripts/scr_seq.naix.h"),
+            root.join("files/fielddata/script/scr_seq.naix"),
+            root.join("fielddata/script/scr_seq.naix"),
+            root.join("files/msgdata/msg.naix"),
+            root.join("msgdata/msg.naix"),
+        ];
+        for index_file in index_files {
+            if index_file.exists() {
+                symbols.load_header(index_file)?;
+            }
         }
 
         // NOTE: We intentionally do NOT load build/res/field/events headers here.
