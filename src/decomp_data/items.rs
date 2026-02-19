@@ -91,20 +91,29 @@ impl DecompItemData {
             _ => FieldPocket::Items,
         };
 
-        let mut battle_pocket = BattlePocket::empty();
-        for flag in self.battle_pocket.split('|').map(str::trim) {
-            match flag {
-                "BATTLE_POCKET_MASK_POKE_BALLS" => battle_pocket |= BattlePocket::POKE_BALLS,
-                "BATTLE_POCKET_MASK_BATTLE_ITEMS" => battle_pocket |= BattlePocket::BATTLE_ITEMS,
-                "BATTLE_POCKET_MASK_RECOVER_HP" => battle_pocket |= BattlePocket::HP_RESTORE,
-                "BATTLE_POCKET_MASK_RECOVER_STATUS" => {
-                    battle_pocket |= BattlePocket::STATUS_HEALERS
+        let mut battle_pocket = self
+            .battle_pocket
+            .parse::<u8>()
+            .ok()
+            .map(BattlePocket::from_bits_truncate)
+            .unwrap_or_default();
+        if battle_pocket.is_empty() {
+            for flag in self.battle_pocket.split('|').map(str::trim) {
+                match flag {
+                    "BATTLE_POCKET_MASK_POKE_BALLS" => battle_pocket |= BattlePocket::POKE_BALLS,
+                    "BATTLE_POCKET_MASK_BATTLE_ITEMS" => {
+                        battle_pocket |= BattlePocket::BATTLE_ITEMS
+                    }
+                    "BATTLE_POCKET_MASK_RECOVER_HP" => battle_pocket |= BattlePocket::HP_RESTORE,
+                    "BATTLE_POCKET_MASK_RECOVER_STATUS" => {
+                        battle_pocket |= BattlePocket::STATUS_HEALERS;
+                    }
+                    "BATTLE_POCKET_MASK_RECOVER_PP" => battle_pocket |= BattlePocket::PP_RESTORE,
+                    "BATTLE_POCKET_MASK_RECOVER_HP_STATUS" => {
+                        battle_pocket |= BattlePocket::HP_RESTORE | BattlePocket::STATUS_HEALERS;
+                    }
+                    _ => {}
                 }
-                "BATTLE_POCKET_MASK_RECOVER_PP" => battle_pocket |= BattlePocket::PP_RESTORE,
-                "BATTLE_POCKET_MASK_RECOVER_HP_STATUS" => {
-                    battle_pocket |= BattlePocket::HP_RESTORE | BattlePocket::STATUS_HEALERS
-                }
-                _ => {}
             }
         }
 
@@ -194,73 +203,77 @@ fn parse_csv_row(header: &[&str], values: &[&str]) -> Option<DecompItemData> {
         }
     }
 
-    let get = |key: &str| fields.get(key).copied().unwrap_or("");
-    let get_u8 = |key: &str| get(key).parse::<u8>().unwrap_or(0);
-    let get_i8 = |key: &str| get(key).parse::<i8>().unwrap_or(0);
-    let get_u16 = |key: &str| get(key).parse::<u16>().unwrap_or(0);
-    let get_bool = |key: &str| parse_bool(get(key));
+    let get = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|key| fields.get(key).copied())
+            .unwrap_or("")
+    };
+    let get_u8 = |keys: &[&str]| get(keys).parse::<u8>().unwrap_or(0);
+    let get_i8 = |keys: &[&str]| get(keys).parse::<i8>().unwrap_or(0);
+    let get_u16 = |keys: &[&str]| get(keys).parse::<u16>().unwrap_or(0);
+    let get_bool = |keys: &[&str]| parse_bool(get(keys));
 
     Some(DecompItemData {
-        name: get("item").to_string(),
-        price: get_u16("price"),
-        hold_effect: get("holdEffect").to_string(),
-        hold_effect_param: get_u8("holdEffectParam"),
-        pluck_effect: get_u8("pluckEffect"),
-        fling_effect: get_u8("flingEffect"),
-        fling_power: get_u8("flingPower"),
-        natural_gift_power: get_u8("naturalGiftPower"),
-        natural_gift_type: get_u8("naturalGiftType"),
-        prevent_toss: get_bool("prevent_toss"),
-        selectable: get_bool("selectable"),
-        field_pocket: get("fieldPocket").to_string(),
-        battle_pocket: get("battlePocket").to_string(),
-        field_use_func: get("fieldUseFunc").to_string(),
-        battle_use_func: get_u8("battleUseFunc"),
-        party_use: get_u8("partyUse"),
-        heal_sleep: get_bool("healSleep"),
-        heal_poison: get_bool("healPoison"),
-        heal_burn: get_bool("healBurn"),
-        heal_freeze: get_bool("healFreeze"),
-        heal_paralysis: get_bool("healParalysis"),
-        heal_confusion: get_bool("healConfusion"),
-        heal_attract: get_bool("healAttract"),
-        guard_spec: get_bool("guardSpec"),
-        revive: get_bool("revive"),
-        revive_all: get_bool("reviveAll"),
-        level_up: get_bool("levelUp"),
-        evolve: get_bool("evolve"),
-        atk_stages: get_u8("atkStages"),
-        def_stages: get_u8("defStages"),
-        spatk_stages: get_u8("spatkStages"),
-        spdef_stages: get_u8("spdefStages"),
-        speed_stages: get_u8("speedStages"),
-        acc_stages: get_u8("accStages"),
-        crit_stages: get_u8("critStages"),
-        pp_up: get_bool("ppUp"),
-        pp_max: get_bool("ppMax"),
-        pp_restore: get_bool("ppRestore"),
-        pp_restore_all: get_bool("ppRestoreAll"),
-        hp_restore: get_bool("hpRestore"),
-        give_hp_evs: get_bool("giveHPEVs"),
-        give_atk_evs: get_bool("giveAtkEVs"),
-        give_def_evs: get_bool("giveDefEVs"),
-        give_speed_evs: get_bool("giveSpeedEVs"),
-        give_spatk_evs: get_bool("giveSpAtkEVs"),
-        give_spdef_evs: get_bool("giveSpDefEVs"),
-        give_friendship_low: get_bool("giveFriendshipLow"),
-        give_friendship_med: get_bool("giveFriendshipMed"),
-        give_friendship_high: get_bool("giveFriendshipHigh"),
-        hp_evs: get_i8("hpEVs"),
-        atk_evs: get_i8("atkEVs"),
-        def_evs: get_i8("defEVs"),
-        speed_evs: get_i8("speedEVs"),
-        spatk_evs: get_i8("spatkEVs"),
-        spdef_evs: get_i8("spdefEVs"),
-        hp_restored: get_u8("hpRestored"),
-        pp_restored: get_u8("ppRestored"),
-        friendship_low: get_i8("friendshipLow"),
-        friendship_med: get_i8("friendshipMed"),
-        friendship_high: get_i8("friendshipHigh"),
+        name: get(&["item"]).to_string(),
+        price: get_u16(&["price"]),
+        hold_effect: get(&["holdEffect"]).to_string(),
+        hold_effect_param: get_u8(&["holdEffectParam"]),
+        pluck_effect: get_u8(&["pluckEffect"]),
+        fling_effect: get_u8(&["flingEffect"]),
+        fling_power: get_u8(&["flingPower"]),
+        natural_gift_power: get_u8(&["naturalGiftPower"]),
+        natural_gift_type: get_u8(&["naturalGiftType"]),
+        prevent_toss: get_bool(&["prevent_toss"]),
+        selectable: get_bool(&["selectable"]),
+        field_pocket: get(&["fieldPocket"]).to_string(),
+        battle_pocket: get(&["battlePocket"]).to_string(),
+        field_use_func: get(&["fieldUseFunc"]).to_string(),
+        battle_use_func: get_u8(&["battleUseFunc"]),
+        party_use: get_u8(&["partyUse"]),
+        heal_sleep: get_bool(&["healSleep", "slp_heal"]),
+        heal_poison: get_bool(&["healPoison", "psn_heal"]),
+        heal_burn: get_bool(&["healBurn", "brn_heal"]),
+        heal_freeze: get_bool(&["healFreeze", "frz_heal"]),
+        heal_paralysis: get_bool(&["healParalysis", "prz_heal"]),
+        heal_confusion: get_bool(&["healConfusion", "cfs_heal"]),
+        heal_attract: get_bool(&["healAttract", "inf_heal"]),
+        guard_spec: get_bool(&["guardSpec", "guard_spec"]),
+        revive: get_bool(&["revive"]),
+        revive_all: get_bool(&["reviveAll", "revive_all"]),
+        level_up: get_bool(&["levelUp", "level_up"]),
+        evolve: get_bool(&["evolve"]),
+        atk_stages: get_u8(&["atkStages", "atk_stages"]),
+        def_stages: get_u8(&["defStages", "def_stages"]),
+        spatk_stages: get_u8(&["spatkStages", "spatk_stages"]),
+        spdef_stages: get_u8(&["spdefStages", "spdef_stages"]),
+        speed_stages: get_u8(&["speedStages", "speed_stages"]),
+        acc_stages: get_u8(&["accStages", "accuracy_stages"]),
+        crit_stages: get_u8(&["critStages", "critrate_stages"]),
+        pp_up: get_bool(&["ppUp", "pp_up"]),
+        pp_max: get_bool(&["ppMax", "pp_max"]),
+        pp_restore: get_bool(&["ppRestore", "pp_restore"]),
+        pp_restore_all: get_bool(&["ppRestoreAll", "pp_restore_all"]),
+        hp_restore: get_bool(&["hpRestore", "hp_restore"]),
+        give_hp_evs: get_bool(&["giveHPEVs", "hp_ev_up"]),
+        give_atk_evs: get_bool(&["giveAtkEVs", "atk_ev_up"]),
+        give_def_evs: get_bool(&["giveDefEVs", "def_ev_up"]),
+        give_speed_evs: get_bool(&["giveSpeedEVs", "speed_ev_up"]),
+        give_spatk_evs: get_bool(&["giveSpAtkEVs", "spatk_ev_up"]),
+        give_spdef_evs: get_bool(&["giveSpDefEVs", "spdef_ev_up"]),
+        give_friendship_low: get_bool(&["giveFriendshipLow", "friendship_mod_lo"]),
+        give_friendship_med: get_bool(&["giveFriendshipMed", "friendship_mod_med"]),
+        give_friendship_high: get_bool(&["giveFriendshipHigh", "friendship_mod_hi"]),
+        hp_evs: get_i8(&["hpEVs", "hp_ev_up_param"]),
+        atk_evs: get_i8(&["atkEVs", "atk_ev_up_param"]),
+        def_evs: get_i8(&["defEVs", "def_ev_up_param"]),
+        speed_evs: get_i8(&["speedEVs", "speed_ev_up_param"]),
+        spatk_evs: get_i8(&["spatkEVs", "spatk_ev_up_param"]),
+        spdef_evs: get_i8(&["spdefEVs", "spdef_ev_up_param"]),
+        hp_restored: get_u8(&["hpRestored", "hp_restore_param"]),
+        pp_restored: get_u8(&["ppRestored", "pp_restore_param"]),
+        friendship_low: get_i8(&["friendshipLow", "friendship_mod_lo_param"]),
+        friendship_med: get_i8(&["friendshipMed", "friendship_mod_med_param"]),
+        friendship_high: get_i8(&["friendshipHigh", "friendship_mod_hi_param"]),
     })
 }
 
@@ -330,6 +343,38 @@ mod tests {
     }
 
     #[test]
+    fn test_load_item_data_from_csv_hgss_alias_columns() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("item_data.csv");
+        let csv = "item,price,holdEffect,holdEffectParam,pluckEffect,flingEffect,flingPower,naturalGiftPower,naturalGiftType,prevent_toss,selectable,fieldPocket,battlePocket,fieldUseFunc,battleUseFunc,partyUse,slp_heal,psn_heal,brn_heal,frz_heal,prz_heal,cfs_heal,inf_heal,guard_spec,revive,revive_all,level_up,evolve,atk_stages,def_stages,spatk_stages,spdef_stages,speed_stages,accuracy_stages,critrate_stages,pp_up,pp_max,pp_restore,pp_restore_all,hp_restore,hp_ev_up,atk_ev_up,def_ev_up,speed_ev_up,spatk_ev_up,spdef_ev_up,friendship_mod_lo,friendship_mod_med,friendship_mod_hi,hp_ev_up_param,atk_ev_up_param,def_ev_up_param,speed_ev_up_param,spatk_ev_up_param,spdef_ev_up_param,hp_restore_param,pp_restore_param,friendship_mod_lo_param,friendship_mod_med_param,friendship_mod_hi_param\nITEM_TEST,100,HOLD_EFFECT_NONE,1,2,3,4,5,6,false,true,POCKET_MEDICINE,5,ITEMUSE_NONE,7,8,true,false,true,false,true,false,true,true,true,false,true,false,1,2,3,4,5,6,2,true,false,true,false,true,true,false,true,false,true,false,true,false,true,10,11,12,13,14,15,16,17,18,19,20\n";
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        let item = loaded.get("ITEM_TEST").unwrap();
+
+        assert!(item.heal_sleep);
+        assert!(item.heal_burn);
+        assert!(item.heal_paralysis);
+        assert!(item.heal_attract);
+        assert!(item.guard_spec);
+        assert!(item.revive);
+        assert!(item.level_up);
+        assert_eq!(item.acc_stages, 6);
+        assert_eq!(item.crit_stages, 2);
+        assert!(item.pp_up);
+        assert!(item.pp_restore);
+        assert!(item.hp_restore);
+        assert!(item.give_hp_evs);
+        assert!(item.give_def_evs);
+        assert!(item.give_spatk_evs);
+        assert!(item.give_friendship_low);
+        assert!(item.give_friendship_high);
+        assert_eq!(item.hp_evs, 10);
+        assert_eq!(item.pp_restored, 17);
+        assert_eq!(item.friendship_high, 20);
+    }
+
+    #[test]
     #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_load_item_data_from_csv_platinum_real_fixture() {
         let Some(root) = crate::test_env::existing_path_from_env(
@@ -359,5 +404,37 @@ mod tests {
             "expected at least one ITEM_* constant-style key from {}",
             csv_path.display()
         );
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_load_item_data_from_csv_hgss_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "decomp_data items integration test (hgss)",
+        ) else {
+            return;
+        };
+
+        let csv_path = root.join("files/itemtool/itemdata/item_data.csv");
+        if !csv_path.exists() {
+            eprintln!(
+                "Skipping decomp_data items integration test (hgss): CSV file does not exist: {}",
+                csv_path.display()
+            );
+            return;
+        }
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        assert!(
+            !loaded.is_empty(),
+            "expected at least one item from {}",
+            csv_path.display()
+        );
+
+        let poke_ball = loaded
+            .get("ITEM_POKE_BALL")
+            .expect("expected ITEM_POKE_BALL");
+        assert_eq!(poke_ball.price, 200);
     }
 }
