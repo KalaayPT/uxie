@@ -468,25 +468,63 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires a real DSPRE project with pl_item_data.narc via UXIE_TEST_PLATINUM_DSPRE_PATH"]
-    fn test_real_rom_roundtrip() {
+    #[ignore = "requires a real Platinum DSPRE project via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_platinum() {
         use std::fs::File;
         use std::io::BufReader;
 
-        let Some(dspre_path) = crate::test_env::existing_path_from_env(
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
             "UXIE_TEST_PLATINUM_DSPRE_PATH",
-            "item data real ROM roundtrip test",
+            &[
+                "data/itemtool/itemdata/pl_item_data.narc",
+                "data/itemtool/itemdata/item_data.narc",
+                "data/pbr/item_data.narc",
+            ],
+            "item data real ROM roundtrip test (platinum)",
         ) else {
             return;
         };
-        let narc_path = dspre_path.join("data/itemtool/itemdata/pl_item_data.narc");
-        if !narc_path.exists() {
-            eprintln!(
-                "Skipping: test data not available at {}",
-                narc_path.display()
+
+        let file = File::open(&narc_path).expect("Failed to open NARC");
+        let mut reader = BufReader::new(file);
+        let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load NARC");
+
+        for (i, original_bytes) in narc.members.iter().enumerate().take(100) {
+            if original_bytes.len() != ITEM_DATA_SIZE {
+                continue;
+            }
+
+            let mut cursor = Cursor::new(original_bytes.as_slice());
+            let item =
+                ItemData::from_binary(&mut cursor).expect(&format!("Failed to parse item {}", i));
+
+            let serialized = item.to_bytes();
+            assert_eq!(
+                original_bytes.as_slice(),
+                serialized.as_slice(),
+                "Roundtrip failed for item {}",
+                i
             );
-            return;
         }
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_hgss() {
+        use std::fs::File;
+        use std::io::BufReader;
+
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &[
+                "data/itemtool/itemdata/item_data.narc",
+                "data/itemtool/itemdata/pl_item_data.narc",
+                "data/pbr/item_data.narc",
+            ],
+            "item data real ROM roundtrip test (hgss)",
+        ) else {
+            return;
+        };
 
         let file = File::open(&narc_path).expect("Failed to open NARC");
         let mut reader = BufReader::new(file);
