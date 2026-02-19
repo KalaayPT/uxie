@@ -25,7 +25,10 @@ impl PersonalData {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::io::Cursor;
+    use std::path::Path;
 
     fn create_test_personal_data() -> PersonalData {
         PersonalData {
@@ -223,5 +226,74 @@ mod tests {
             let data = create_test_personal_data();
             prop_assert!(!data.can_learn_tm(tm_index));
         }
+    }
+
+    fn assert_real_personal_narc_roundtrip(narc_path: &Path) {
+        let file = File::open(narc_path).expect("Failed to open personal NARC");
+        let mut reader = BufReader::new(file);
+        let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load personal NARC");
+
+        let mut roundtripped_members = 0usize;
+        for (i, original_bytes) in narc.members.iter().enumerate().take(600) {
+            if original_bytes.len() != PERSONAL_DATA_SIZE {
+                continue;
+            }
+
+            roundtripped_members += 1;
+            let mut cursor = Cursor::new(original_bytes.as_slice());
+            let personal = PersonalData::from_binary(&mut cursor)
+                .unwrap_or_else(|_| panic!("Failed to parse personal member {}", i));
+            let serialized = personal.to_bytes();
+
+            assert_eq!(
+                original_bytes.as_slice(),
+                serialized.as_slice(),
+                "Roundtrip failed for personal member {}",
+                i
+            );
+        }
+
+        assert!(
+            roundtripped_members > 0,
+            "expected at least one personal entry with {} bytes in {}",
+            PERSONAL_DATA_SIZE,
+            narc_path.display()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires a real Platinum DSPRE project via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_platinum() {
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &[
+                "data/poketool/personal/pl_personal.narc",
+                "data/poketool/personal/personal.narc",
+                "data/pbr/personal.narc",
+            ],
+            "personal data real ROM roundtrip test (platinum)",
+        ) else {
+            return;
+        };
+
+        assert_real_personal_narc_roundtrip(&narc_path);
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_hgss() {
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &[
+                "data/poketool/personal/personal.narc",
+                "data/poketool/personal/pl_personal.narc",
+                "data/pbr/personal.narc",
+            ],
+            "personal data real ROM roundtrip test (hgss)",
+        ) else {
+            return;
+        };
+
+        assert_real_personal_narc_roundtrip(&narc_path);
     }
 }
