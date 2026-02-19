@@ -4,8 +4,49 @@ mod encounter_tests {
     use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
     use crate::encounter_file::json::JsonEncounterFile;
     use crate::game::GameFamily;
+    use crate::narc::Narc;
+    use crate::workspace::Workspace;
     use proptest::prelude::*;
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
+    use std::path::Path;
+
+    fn load_encounter_from_project_root(
+        project_root: &Path,
+        family: GameFamily,
+        id: u32,
+    ) -> io::Result<BinaryEncounterFile> {
+        let narc_path = match family {
+            GameFamily::DP => project_root.join("data/fielddata/encountdata/d_enc_data.narc"),
+            GameFamily::Platinum => {
+                project_root.join("data/fielddata/encountdata/pl_enc_data.narc")
+            }
+            GameFamily::HGSS => project_root.join("data/a/0/3/7"),
+        };
+
+        if narc_path.exists() {
+            let mut file = std::fs::File::open(&narc_path)?;
+            let narc = Narc::from_binary(&mut file)?;
+            let data = narc.members.get(id as usize).ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "Encounter ID {} out of range in {}",
+                        id,
+                        narc_path.display()
+                    ),
+                )
+            })?;
+            let mut reader = Cursor::new(data.as_slice());
+            BinaryEncounterFile::from_binary(&mut reader, family)
+        } else {
+            let unpacked_path = project_root
+                .join("unpacked/encounters")
+                .join(format!("{:04}", id));
+            let bin_data = std::fs::read(unpacked_path)?;
+            let mut reader = Cursor::new(bin_data.as_slice());
+            BinaryEncounterFile::from_binary(&mut reader, family)
+        }
+    }
 
     fn build_dppt_fixture() -> BinaryEncounterFile {
         let grass = core::array::from_fn(|i| EncounterEntry {
@@ -178,6 +219,46 @@ mod encounter_tests {
         assert_eq!(bin.grass_encounters[0].species, 1);
         assert_eq!(bin.swarm_encounters[0], 2);
         assert_eq!(bin.swarm_encounters[1], 2);
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum DSPRE fixture via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_load_encounter_platinum_real_fixture() {
+        let Some(project_root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "encounter integration test (platinum)",
+        ) else {
+            return;
+        };
+
+        let ws = Workspace::open(&project_root).unwrap();
+        assert_eq!(ws.family, GameFamily::Platinum);
+
+        let bin = load_encounter_from_project_root(&project_root, GameFamily::Platinum, 0).unwrap();
+        let json = JsonEncounterFile::from_binary(&bin, &ws.symbols, GameFamily::Platinum);
+        let rebuilt = json.to_binary(&ws.symbols, GameFamily::Platinum);
+
+        assert_eq!(bin, rebuilt);
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS DSPRE fixture via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_load_encounter_hgss_real_fixture() {
+        let Some(project_root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            "encounter integration test (hgss)",
+        ) else {
+            return;
+        };
+
+        let ws = Workspace::open(&project_root).unwrap();
+        assert_eq!(ws.family, GameFamily::HGSS);
+
+        let bin = load_encounter_from_project_root(&project_root, GameFamily::HGSS, 0).unwrap();
+        let json = JsonEncounterFile::from_binary(&bin, &ws.symbols, GameFamily::HGSS);
+        let rebuilt = json.to_binary(&ws.symbols, GameFamily::HGSS);
+
+        assert_eq!(bin, rebuilt);
     }
 
     fn encounter_entry_strategy(
