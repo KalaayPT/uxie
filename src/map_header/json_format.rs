@@ -201,4 +201,49 @@ mod tests {
             Some("CAMERA_TYPE_DEFAULT".into())
         );
     }
+
+    #[test]
+    #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_HGSS_DSPRE_PATH and UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_dspre_map_header_hgss_union() {
+        use crate::GameFamily;
+        use crate::provider::{Arm9Provider, DataProvider};
+
+        let Some(arm9_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["arm9.bin", "unpacked/arm9.bin", "arm9/arm9.bin"],
+            "map header HGSS integration test",
+        ) else {
+            return;
+        };
+        let Some(decomp_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "map header HGSS integration test",
+        ) else {
+            return;
+        };
+        let include_path = decomp_path.join("include");
+        if !include_path.exists() {
+            eprintln!(
+                "Skipping map header HGSS integration test: include path not available: {}",
+                include_path.display()
+            );
+            return;
+        }
+
+        let mut symbols = SymbolTable::new();
+        symbols.load_headers_from_dir(&include_path).unwrap();
+
+        let provider = Arm9Provider::new(&arm9_path, 0xF6BE0, 540, GameFamily::HGSS);
+
+        // MAP_UNION in pokeheartgold/src/data/map_headers.h
+        let bin_header = provider.get_map_header(2).unwrap();
+        let json_header = MapHeaderJson::from_binary(&bin_header, &symbols);
+
+        assert_eq!(json_header.music_day_id, Some("SEQ_GS_POKESEN".into()));
+        assert_eq!(json_header.music_night_id, Some("SEQ_GS_POKESEN".into()));
+        assert_eq!(
+            json_header.battle_background,
+            Some("BATTLE_BG_BUILDING_1".into())
+        );
+    }
 }
