@@ -221,6 +221,85 @@ mod event_file_tests {
         }
     }
 
+    #[test]
+    #[ignore = "requires local HGSS DSPRE+decomp fixtures via UXIE_TEST_HGSS_DSPRE_PATH and UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_dspre_event_hgss_zone_event_parity() {
+        let Some(dspre_narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["data/a/0/3/2", "data/fielddata/eventdata/zone_event.narc"],
+            "event HGSS parity integration test",
+        ) else {
+            return;
+        };
+        let Some(decomp_path) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "event HGSS parity integration test",
+        ) else {
+            return;
+        };
+        let decomp_narc_path = decomp_path.join("files/fielddata/eventdata/zone_event.narc");
+        if !decomp_narc_path.exists() {
+            eprintln!(
+                "Skipping event HGSS parity integration test: decomp NARC not found: {}",
+                decomp_narc_path.display()
+            );
+            return;
+        }
+
+        let mut dspre_reader =
+            std::io::BufReader::new(std::fs::File::open(&dspre_narc_path).unwrap());
+        let dspre_narc = crate::Narc::from_binary(&mut dspre_reader).unwrap();
+
+        let mut decomp_reader =
+            std::io::BufReader::new(std::fs::File::open(&decomp_narc_path).unwrap());
+        let decomp_narc = crate::Narc::from_binary(&mut decomp_reader).unwrap();
+
+        assert_eq!(
+            dspre_narc.members.len(),
+            decomp_narc.members.len(),
+            "zone_event member count mismatch between {} and {}",
+            dspre_narc_path.display(),
+            decomp_narc_path.display()
+        );
+        assert!(
+            !dspre_narc.members.is_empty(),
+            "expected non-empty zone_event NARC at {}",
+            dspre_narc_path.display()
+        );
+
+        for event_id in 0..usize::min(20, dspre_narc.members.len()) {
+            let dspre_member = &dspre_narc.members[event_id];
+            let decomp_member = &decomp_narc.members[event_id];
+
+            let mut dspre_cursor = Cursor::new(dspre_member.as_slice());
+            let dspre_event = BinaryEventFile::from_binary(&mut dspre_cursor).unwrap();
+
+            let mut decomp_cursor = Cursor::new(decomp_member.as_slice());
+            let decomp_event = BinaryEventFile::from_binary(&mut decomp_cursor).unwrap();
+
+            assert_eq!(
+                dspre_event.bg_events, decomp_event.bg_events,
+                "event {} bg_events mismatch between DSPRE and decomp zone_event sources",
+                event_id
+            );
+            assert_eq!(
+                dspre_event.object_events, decomp_event.object_events,
+                "event {} object_events mismatch between DSPRE and decomp zone_event sources",
+                event_id
+            );
+            assert_eq!(
+                dspre_event.warp_events, decomp_event.warp_events,
+                "event {} warp_events mismatch between DSPRE and decomp zone_event sources",
+                event_id
+            );
+            assert_eq!(
+                dspre_event.coord_events, decomp_event.coord_events,
+                "event {} coord_events mismatch between DSPRE and decomp zone_event sources",
+                event_id
+            );
+        }
+    }
+
     fn bg_event_strategy() -> impl Strategy<Value = BgEventBinary> {
         (
             any::<u16>(),
