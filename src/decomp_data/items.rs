@@ -292,3 +292,72 @@ pub fn load_item_data_from_csv(
 
     Ok(result)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    const CSV_HEADER: &str = "item,price,holdEffect,holdEffectParam,pluckEffect,flingEffect,flingPower,naturalGiftPower,naturalGiftType,prevent_toss,selectable,fieldPocket,battlePocket,fieldUseFunc,battleUseFunc,partyUse,healSleep,healPoison,healBurn,healFreeze,healParalysis,healConfusion,healAttract,guardSpec,revive,reviveAll,levelUp,evolve,atkStages,defStages,spatkStages,spdefStages,speedStages,accStages,critStages,ppUp,ppMax,ppRestore,ppRestoreAll,hpRestore,giveHPEVs,giveAtkEVs,giveDefEVs,giveSpeedEVs,giveSpAtkEVs,giveSpDefEVs,giveFriendshipLow,giveFriendshipMed,giveFriendshipHigh,hpEVs,atkEVs,defEVs,speedEVs,spatkEVs,spdefEVs,hpRestored,ppRestored,friendshipLow,friendshipMed,friendshipHigh";
+
+    #[test]
+    fn test_load_item_data_from_csv_loads_valid_entries() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        let csv = format!(
+            "{header}\nITEM_POTION,300,HOLD_EFFECT_NONE,0,0,0,0,0,0,false,true,POCKET_MEDICINE,BATTLE_POCKET_MASK_RECOVER_HP,ITEMUSE_NONE,0,0,false,false,false,false,false,false,false,false,false,false,false,false,0,0,0,0,0,0,0,false,false,false,false,true,false,false,false,false,false,false,true,true,true,0,0,0,0,0,0,20,0,3,2,1\n",
+            header = CSV_HEADER
+        );
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        assert!(loaded.contains_key("ITEM_POTION"));
+
+        let item = loaded.get("ITEM_POTION").unwrap();
+        assert_eq!(item.price, 300);
+        assert_eq!(item.field_pocket, "POCKET_MEDICINE");
+    }
+
+    #[test]
+    fn test_load_item_data_from_csv_empty_file_returns_error() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        fs::write(&csv_path, "").unwrap();
+
+        let err = load_item_data_from_csv(&csv_path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Empty CSV file"));
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_load_item_data_from_csv_platinum_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "decomp_data items integration test",
+        ) else {
+            return;
+        };
+
+        let csv_path = root.join("res/items/pl_item_data.csv");
+        if !csv_path.exists() {
+            eprintln!(
+                "Skipping decomp_data items integration test: CSV file does not exist: {}",
+                csv_path.display()
+            );
+            return;
+        }
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        assert!(
+            !loaded.is_empty(),
+            "expected at least one item from {}",
+            csv_path.display()
+        );
+        assert!(
+            loaded.keys().any(|name| name.starts_with("ITEM_")),
+            "expected at least one ITEM_* constant-style key from {}",
+            csv_path.display()
+        );
+    }
+}
