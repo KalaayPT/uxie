@@ -114,7 +114,10 @@ impl Narc {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::io::Cursor;
+    use std::path::Path;
 
     fn create_minimal_narc(file_data: &[&[u8]]) -> Vec<u8> {
         use byteorder::WriteBytesExt;
@@ -285,6 +288,75 @@ mod tests {
 
         assert_eq!(narc.members.len(), 0);
         assert_eq!(narc.members, narc2.members);
+    }
+
+    fn assert_real_narc_parse_roundtrip(narc_path: &Path) {
+        let file = File::open(narc_path).expect("Failed to open real NARC");
+        let mut reader = BufReader::new(file);
+        let narc = Narc::from_binary(&mut reader).expect("Failed to parse real NARC");
+
+        assert!(
+            !narc.members.is_empty(),
+            "expected at least one member in real NARC {}",
+            narc_path.display()
+        );
+
+        let mut serialized = Vec::new();
+        narc.write_to(&mut serialized)
+            .expect("Failed to serialize real NARC");
+        assert!(
+            serialized.starts_with(b"NARC"),
+            "serialized real NARC does not start with NARC magic for {}",
+            narc_path.display()
+        );
+
+        let mut cursor = Cursor::new(serialized);
+        let reparsed =
+            Narc::from_binary(&mut cursor).expect("Failed to parse serialized real NARC bytes");
+        assert_eq!(
+            narc.members,
+            reparsed.members,
+            "member mismatch after real-NARC parse/serialize roundtrip for {}",
+            narc_path.display()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires a real Platinum DSPRE project via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_parse_real_narc_platinum() {
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &[
+                "data/poketool/personal/pl_personal.narc",
+                "data/poketool/personal/personal.narc",
+                "data/itemtool/itemdata/pl_item_data.narc",
+                "data/poketool/waza/pl_waza_tbl.narc",
+            ],
+            "narc real-parse integration test (platinum)",
+        ) else {
+            return;
+        };
+
+        assert_real_narc_parse_roundtrip(&narc_path);
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_parse_real_narc_hgss() {
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &[
+                "data/poketool/personal/pms.narc",
+                "data/data/kowaza.narc",
+                "data/pbr/item_data.narc",
+                "data/a/0/3/7",
+            ],
+            "narc real-parse integration test (hgss)",
+        ) else {
+            return;
+        };
+
+        assert_real_narc_parse_roundtrip(&narc_path);
     }
 
     fn narc_strategy() -> impl Strategy<Value = Narc> {
