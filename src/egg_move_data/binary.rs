@@ -84,7 +84,10 @@ impl EggMoveEntry {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::io::Cursor;
+    use std::path::Path;
 
     #[test]
     fn test_roundtrip_normal_format() {
@@ -294,5 +297,93 @@ mod tests {
             let actual = data.can_learn(species_id, move_id);
             prop_assert_eq!(actual, expected);
         }
+    }
+
+    fn assert_real_hgss_kowaza_roundtrip(narc_path: &Path) {
+        let file = File::open(narc_path).expect("Failed to open HGSS kowaza NARC");
+        let mut reader = BufReader::new(file);
+        let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load HGSS kowaza NARC");
+        let member = narc
+            .members
+            .first()
+            .expect("Expected first member in HGSS kowaza NARC");
+        let mut cursor = Cursor::new(member.as_slice());
+        let data =
+            EggMoveData::from_binary(&mut cursor).expect("Failed to parse HGSS egg move data");
+
+        assert!(
+            !data.entries.is_empty(),
+            "expected at least one HGSS egg move entry in {}",
+            narc_path.display()
+        );
+        let serialized = data.to_bytes();
+        assert!(
+            member.as_slice().starts_with(serialized.as_slice()),
+            "serialized HGSS egg move table is not a prefix of source member in {}",
+            narc_path.display()
+        );
+
+        let reparsed = EggMoveData::from_binary(&mut Cursor::new(serialized.as_slice()))
+            .expect("Failed to reparse serialized HGSS egg move data");
+        assert_eq!(data, reparsed);
+    }
+
+    fn assert_real_platinum_overlay_roundtrip(overlay_path: &Path) {
+        const PLATINUM_EGG_MOVE_OFFSET: usize = 0x29222;
+        let overlay_data =
+            std::fs::read(overlay_path).expect("Failed to read Platinum overlay_0005.bin");
+        assert!(
+            overlay_data.len() > PLATINUM_EGG_MOVE_OFFSET,
+            "overlay too short for Platinum egg move offset: {}",
+            overlay_path.display()
+        );
+
+        let mut cursor = Cursor::new(&overlay_data[PLATINUM_EGG_MOVE_OFFSET..]);
+        let data =
+            EggMoveData::from_binary(&mut cursor).expect("Failed to parse Platinum egg move data");
+
+        assert!(
+            !data.entries.is_empty(),
+            "expected at least one Platinum egg move entry in {}",
+            overlay_path.display()
+        );
+        let serialized = data.to_bytes();
+        assert!(
+            overlay_data[PLATINUM_EGG_MOVE_OFFSET..].starts_with(serialized.as_slice()),
+            "serialized Platinum egg move table is not a prefix of overlay bytes in {}",
+            overlay_path.display()
+        );
+
+        let reparsed = EggMoveData::from_binary(&mut Cursor::new(serialized.as_slice()))
+            .expect("Failed to reparse serialized Platinum egg move data");
+        assert_eq!(data, reparsed);
+    }
+
+    #[test]
+    #[ignore = "requires a real Platinum DSPRE project via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_platinum() {
+        let Some(overlay_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &["overlay/overlay_0005.bin"],
+            "egg move data real ROM roundtrip test (platinum)",
+        ) else {
+            return;
+        };
+
+        assert_real_platinum_overlay_roundtrip(&overlay_path);
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_hgss() {
+        let Some(kowaza_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["data/data/kowaza.narc"],
+            "egg move data real ROM roundtrip test (hgss)",
+        ) else {
+            return;
+        };
+
+        assert_real_hgss_kowaza_roundtrip(&kowaza_path);
     }
 }
