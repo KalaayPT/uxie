@@ -27,7 +27,10 @@ impl MoveData {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::io::Cursor;
+    use std::path::Path;
 
     #[test]
     fn test_roundtrip() {
@@ -158,5 +161,75 @@ mod tests {
             };
             prop_assert_eq!(mapped, expected);
         }
+    }
+
+    fn assert_real_move_narc_roundtrip(narc_path: &Path) {
+        let file = File::open(narc_path).expect("Failed to open move-data NARC");
+        let mut reader = BufReader::new(file);
+        let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load move-data NARC");
+
+        let mut roundtripped_members = 0usize;
+        for (i, original_bytes) in narc.members.iter().enumerate().take(700) {
+            if original_bytes.len() != MOVE_DATA_SIZE {
+                continue;
+            }
+
+            roundtripped_members += 1;
+            let mut cursor = Cursor::new(original_bytes.as_slice());
+            let move_data = MoveData::from_binary(&mut cursor)
+                .unwrap_or_else(|_| panic!("Failed to parse move-data member {}", i));
+            let serialized = move_data.to_bytes();
+
+            assert_eq!(
+                original_bytes.as_slice(),
+                serialized.as_slice(),
+                "Roundtrip failed for move-data member {}",
+                i
+            );
+        }
+
+        assert!(
+            roundtripped_members > 0,
+            "expected at least one move-data entry with {} bytes in {}",
+            MOVE_DATA_SIZE,
+            narc_path.display()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires a real Platinum DSPRE project via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_platinum() {
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &[
+                "data/poketool/waza/pl_waza_tbl.narc",
+                "data/poketool/waza/waza_tbl.narc",
+                "data/pbr/waza_tbl.narc",
+            ],
+            "move data real ROM roundtrip test (platinum)",
+        ) else {
+            return;
+        };
+
+        assert_real_move_narc_roundtrip(&narc_path);
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_hgss() {
+        let Some(narc_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &[
+                "data/data/kowaza.narc",
+                "data/poketool/waza/waza_tbl.narc",
+                "data/poketool/waza/pl_waza_tbl.narc",
+                "data/pbr/waza_tbl.narc",
+            ],
+            "move data real ROM roundtrip test (hgss)",
+        ) else {
+            return;
+        };
+
+        assert_real_move_narc_roundtrip(&narc_path);
     }
 }
