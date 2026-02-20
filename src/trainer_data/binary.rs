@@ -202,7 +202,10 @@ impl TrainerData {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fs::File;
+    use std::io::BufReader;
     use std::io::Cursor;
+    use std::path::Path;
 
     #[test]
     fn test_trainer_properties_roundtrip() {
@@ -575,5 +578,112 @@ mod tests {
 
             prop_assert_eq!(trainer, parsed);
         }
+    }
+
+    fn assert_real_trainer_narcs_roundtrip(
+        trdata_path: &Path,
+        trpoke_path: &Path,
+        family: GameFamily,
+    ) {
+        let trdata_file = File::open(trdata_path).expect("Failed to open trainer properties NARC");
+        let trpoke_file = File::open(trpoke_path).expect("Failed to open trainer party NARC");
+        let mut trdata_reader = BufReader::new(trdata_file);
+        let mut trpoke_reader = BufReader::new(trpoke_file);
+        let trdata_narc =
+            crate::Narc::from_binary(&mut trdata_reader).expect("Failed to load trdata NARC");
+        let trpoke_narc =
+            crate::Narc::from_binary(&mut trpoke_reader).expect("Failed to load trpoke NARC");
+
+        assert_eq!(
+            trdata_narc.members.len(),
+            trpoke_narc.members.len(),
+            "trdata/trpoke member-count mismatch: {} vs {}",
+            trdata_narc.members.len(),
+            trpoke_narc.members.len()
+        );
+        assert!(
+            !trdata_narc.members.is_empty(),
+            "expected non-empty trainer NARCs: {} and {}",
+            trdata_path.display(),
+            trpoke_path.display()
+        );
+
+        for i in 0..trdata_narc.members.len().min(400) {
+            let props_data = trdata_narc
+                .members
+                .get(i)
+                .expect("trdata member index out of range");
+            let party_data = trpoke_narc
+                .members
+                .get(i)
+                .expect("trpoke member index out of range");
+
+            let mut props_cursor = Cursor::new(props_data.as_slice());
+            let mut party_cursor = Cursor::new(party_data.as_slice());
+            let trainer =
+                TrainerData::from_binary_parts(&mut props_cursor, &mut party_cursor, family)
+                    .unwrap_or_else(|_| panic!("Failed to parse trainer member {}", i));
+
+            let mut props_out = Vec::new();
+            let mut party_out = Vec::new();
+            trainer
+                .to_binary_parts(&mut props_out, &mut party_out, family)
+                .unwrap_or_else(|_| panic!("Failed to serialize trainer member {}", i));
+
+            assert_eq!(
+                props_data.as_slice(),
+                props_out.as_slice(),
+                "trdata roundtrip failed for trainer member {}",
+                i
+            );
+            assert_eq!(
+                party_data.as_slice(),
+                party_out.as_slice(),
+                "trpoke roundtrip failed for trainer member {}",
+                i
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a real Platinum DSPRE project via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_platinum() {
+        let Some(trdata_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &["data/poketool/trainer/trdata.narc", "data/a/0/5/5"],
+            "trainer data real ROM roundtrip test (platinum trdata)",
+        ) else {
+            return;
+        };
+        let Some(trpoke_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            &["data/poketool/trainer/trpoke.narc", "data/a/0/5/6"],
+            "trainer data real ROM roundtrip test (platinum trpoke)",
+        ) else {
+            return;
+        };
+
+        assert_real_trainer_narcs_roundtrip(&trdata_path, &trpoke_path, GameFamily::Platinum);
+    }
+
+    #[test]
+    #[ignore = "requires a real HGSS DSPRE project via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_real_rom_roundtrip_hgss() {
+        let Some(trdata_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["data/poketool/trainer/trdata.narc", "data/a/0/5/5"],
+            "trainer data real ROM roundtrip test (hgss trdata)",
+        ) else {
+            return;
+        };
+        let Some(trpoke_path) = crate::test_env::existing_file_under_project_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            &["data/poketool/trainer/trpoke.narc", "data/a/0/5/6"],
+            "trainer data real ROM roundtrip test (hgss trpoke)",
+        ) else {
+            return;
+        };
+
+        assert_real_trainer_narcs_roundtrip(&trdata_path, &trpoke_path, GameFamily::HGSS);
     }
 }
