@@ -15,6 +15,47 @@ mod c_parser_tests {
         path
     }
 
+    fn load_symbol_table_from_real_dirs(
+        root: &Path,
+        dirs: &[&str],
+        context: &str,
+    ) -> Option<SymbolTable> {
+        let mut table = SymbolTable::new();
+        for rel_dir in dirs {
+            let dir = root.join(rel_dir);
+            if !dir.exists() {
+                eprintln!(
+                    "Skipping {}: fixture directory does not exist: {}",
+                    context,
+                    dir.display()
+                );
+                return None;
+            }
+
+            let loaded = table.load_headers_from_dir(&dir).unwrap();
+            assert!(
+                loaded > 0,
+                "{} should contain at least one file",
+                dir.display()
+            );
+        }
+
+        Some(table)
+    }
+
+    fn assert_resolved_constants(table: &SymbolTable, expected: &[(&str, i64)], context: &str) {
+        for &(name, value) in expected {
+            assert_eq!(
+                table.resolve_constant(name),
+                Some(value),
+                "{}: expected {} = {}",
+                context,
+                name,
+                value
+            );
+        }
+    }
+
     #[test]
     fn test_diamond_dependency_caching() {
         let dir = tempdir().unwrap();
@@ -127,5 +168,67 @@ mod c_parser_tests {
         let err = table.load_recursive(&main_path, &[]).unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_load_headers_from_dir_platinum_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "c_parser integration test (Platinum decomp)",
+        ) else {
+            return;
+        };
+
+        // Platinum keeps many symbol lists in generated/*.txt while shared defines
+        // stay under include/constants.
+        let Some(table) = load_symbol_table_from_real_dirs(
+            &root,
+            &["generated", "include/constants"],
+            "c_parser integration test (Platinum decomp)",
+        ) else {
+            return;
+        };
+
+        assert_resolved_constants(
+            &table,
+            &[
+                ("SPECIES_BULBASAUR", 1),
+                ("MOVE_TACKLE", 33),
+                ("ITEM_MASTER_BALL", 1),
+                ("POCKET_BALLS", 2),
+            ],
+            "c_parser integration test (Platinum decomp)",
+        );
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_load_headers_from_dir_hgss_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "c_parser integration test (HGSS decomp)",
+        ) else {
+            return;
+        };
+
+        let Some(table) = load_symbol_table_from_real_dirs(
+            &root,
+            &["include/constants"],
+            "c_parser integration test (HGSS decomp)",
+        ) else {
+            return;
+        };
+
+        assert_resolved_constants(
+            &table,
+            &[
+                ("SPECIES_BULBASAUR", 1),
+                ("MOVE_TACKLE", 33),
+                ("ITEM_MASTER_BALL", 1),
+                ("POCKET_BALLS", 2),
+            ],
+            "c_parser integration test (HGSS decomp)",
+        );
     }
 }
