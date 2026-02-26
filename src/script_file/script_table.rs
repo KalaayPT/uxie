@@ -9,6 +9,7 @@
 //! [`ScriptTable::load_hgss_script_dir`].
 
 use rustc_hash::FxHashMap;
+use std::io;
 use std::path::Path;
 
 /// Mapping between script names and their file IDs.
@@ -74,6 +75,7 @@ impl ScriptTable {
     /// script file ID in decimal. IDs are used directly as table indices.
     pub fn load_hgss_script_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<()> {
         let mut parsed = Vec::new();
+        let dir = dir.as_ref();
 
         for entry in std::fs::read_dir(dir)? {
             let entry = entry?;
@@ -85,7 +87,18 @@ impl ScriptTable {
                 continue;
             };
 
-            if let Some((id, script_name)) = parse_hgss_script_filename(&file_name) {
+            if let Some((id, script_name)) =
+                parse_hgss_script_filename(&file_name).map_err(|e| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "Failed to parse HGSS script filename '{}' in {}: {e}",
+                            file_name,
+                            dir.display()
+                        ),
+                    )
+                })?
+            {
                 parsed.push((id, script_name));
             }
         }
@@ -137,21 +150,44 @@ impl ScriptTable {
     }
 }
 
-fn parse_hgss_script_filename(file_name: &str) -> Option<(usize, String)> {
-    let stem = file_name.strip_suffix(".s")?;
+fn parse_hgss_script_filename(file_name: &str) -> Result<Option<(usize, String)>, String> {
+    if !file_name.ends_with(".s") {
+        return Ok(None);
+    }
+
+    if !file_name.starts_with("scr_seq_") {
+        return Ok(None);
+    }
+
+    let stem = file_name
+        .strip_suffix(".s")
+        .ok_or_else(|| format!("missing '.s' extension in filename '{}'", file_name))?;
     let mut parts = stem.split('_');
 
-    if parts.next()? != "scr" || parts.next()? != "seq" {
-        return None;
+    if parts.next() != Some("scr") || parts.next() != Some("seq") {
+        return Err(format!(
+            "expected prefix format 'scr_seq_XXXX*.s', got '{}'",
+            file_name
+        ));
     }
 
-    let id_part = parts.next()?;
+    let Some(id_part) = parts.next() else {
+        return Err(format!(
+            "missing numeric script id in filename '{}'",
+            file_name
+        ));
+    };
     if id_part.len() != 4 || !id_part.chars().all(|c| c.is_ascii_digit()) {
-        return None;
+        return Err(format!(
+            "invalid script id '{}' in filename '{}'; expected 4 decimal digits",
+            id_part, file_name
+        ));
     }
 
-    let id = id_part.parse::<usize>().ok()?;
-    Some((id, stem.to_string()))
+    let id = id_part
+        .parse::<usize>()
+        .map_err(|e| format!("failed to parse script id '{}': {}", id_part, e))?;
+    Ok(Some((id, stem.to_string())))
 }
 
 #[cfg(test)]
@@ -208,7 +244,6 @@ mod tests {
         fs::write(dir.path().join("scr_seq_0081_D32R0102.s"), "").unwrap();
         fs::write(dir.path().join("scr_seq_0003_D01R0101.s"), "").unwrap();
         fs::write(dir.path().join("readme.txt"), "").unwrap();
-        fs::write(dir.path().join("scr_seq_BAD_D01R0101.s"), "").unwrap();
 
         let mut table = ScriptTable::new();
         table.load_hgss_script_dir(dir.path()).unwrap();
@@ -218,6 +253,17 @@ mod tests {
         assert_eq!(table.get_name(4), None);
         assert_eq!(table.get_id("scr_seq_0003_D01R0101"), Some(3));
         assert_eq!(table.get_id("scr_seq_0004"), None);
+    }
+
+    #[test]
+    fn test_load_hgss_script_dir_invalid_scr_seq_filename_returns_error() {
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("scr_seq_BAD_D01R0101.s"), "").unwrap();
+
+        let mut table = ScriptTable::new();
+        let err = table.load_hgss_script_dir(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("invalid script id"));
     }
 
     fn parse_scripts_order_entries(path: &Path) -> std::io::Result<Vec<String>> {
@@ -251,7 +297,18 @@ mod tests {
                     continue;
                 };
 
-                if let Some((id, script_name)) = parse_hgss_script_filename(&file_name) {
+                if let Some((id, script_name)) =
+                    parse_hgss_script_filename(&file_name).map_err(|e| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Failed to parse HGSS script filename '{}' in {}: {e}",
+                                file_name,
+                                dir.display()
+                            ),
+                        )
+                    })?
+                {
                     parsed.push((id, script_name));
                 }
             }
