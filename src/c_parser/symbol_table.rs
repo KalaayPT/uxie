@@ -822,28 +822,54 @@ impl SymbolTable {
         path: &Path,
         tag: SymbolTag,
     ) -> std::io::Result<()> {
-        for line in content.lines() {
+        for (line_idx, line) in content.lines().enumerate() {
+            let line_number = line_idx + 1;
             if let Some(caps) = RE_PYTHON_ENUM.captures(line.trim()) {
                 let name = caps[1].to_string();
-                let expr = caps[2].trim().to_string();
-                if let Some(val) = crate::c_parser::defines::eval_expr_with_context(
-                    &expr,
+                let expr_raw = caps[2].trim();
+                let expr = expr_raw
+                    .split('#')
+                    .next()
+                    .map(str::trim)
+                    .unwrap_or(expr_raw);
+
+                let is_constant_like = name
+                    .chars()
+                    .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+                if !is_constant_like {
+                    continue;
+                }
+
+                let val = crate::c_parser::defines::eval_expr_with_context(
+                    expr,
                     &self.pending,
                     &self.symbols,
                     &self.eval_cache,
-                ) {
-                    self.symbols.insert(name.clone(), val);
-                    self.value_to_names
-                        .entry(val)
-                        .or_default()
-                        .push(name.clone());
-                    self.pending.insert(name.clone(), val.to_string());
-                    self.symbol_to_file.insert(name.clone(), path.to_path_buf());
-                    self.symbol_to_tags
-                        .entry(name)
-                        .or_default()
-                        .insert(tag.clone());
-                }
+                )
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Failed to evaluate python enum expression '{}' for '{}' at {}:{}",
+                            expr,
+                            name,
+                            path.display(),
+                            line_number
+                        ),
+                    )
+                })?;
+
+                self.symbols.insert(name.clone(), val);
+                self.value_to_names
+                    .entry(val)
+                    .or_default()
+                    .push(name.clone());
+                self.pending.insert(name.clone(), val.to_string());
+                self.symbol_to_file.insert(name.clone(), path.to_path_buf());
+                self.symbol_to_tags
+                    .entry(name)
+                    .or_default()
+                    .insert(tag.clone());
             }
         }
         Ok(())

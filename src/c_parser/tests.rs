@@ -213,6 +213,79 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_load_list_file_str_rejects_unsupported_operator_expression() {
+        let mut table = SymbolTable::new();
+        let err = table.load_list_file_str("CONST_A = 1 < 2\n").unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("CONST_A"));
+        assert!(err.to_string().contains("1 < 2"));
+    }
+
+    #[test]
+    fn test_load_python_enum_str_propagates_assignment_eval_errors() {
+        let mut table = SymbolTable::new();
+        let err = table
+            .load_python_enum_str_with_tag(
+                "SPECIES_OK = 1\nSPECIES_BAD = UNKNOWN_SYMBOL\n",
+                Path::new("inline.py"),
+                crate::c_parser::SymbolTag::Global,
+            )
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("SPECIES_BAD"));
+        assert!(err.to_string().contains("UNKNOWN_SYMBOL"));
+    }
+
+    #[test]
+    fn test_load_python_enum_str_allows_non_constant_assignments() {
+        let mut table = SymbolTable::new();
+        table
+            .load_python_enum_str_with_tag(
+                "__all__ = [\"SPECIES_OK\"]\nhelper = 5\nSPECIES_OK = 1\n",
+                Path::new("inline.py"),
+                crate::c_parser::SymbolTag::Global,
+            )
+            .unwrap();
+
+        assert_eq!(table.resolve_constant("SPECIES_OK"), Some(1));
+        assert_eq!(table.resolve_constant("__all__"), None);
+        assert_eq!(table.resolve_constant("helper"), None);
+    }
+
+    #[test]
+    fn test_load_python_enum_str_assignment_with_inline_comment() {
+        let mut table = SymbolTable::new();
+        table
+            .load_python_enum_str_with_tag(
+                "SPECIES_OK = 1 # comment\nSPECIES_NEXT = SPECIES_OK + 1\n",
+                Path::new("inline.py"),
+                crate::c_parser::SymbolTag::Global,
+            )
+            .unwrap();
+
+        assert_eq!(table.resolve_constant("SPECIES_OK"), Some(1));
+        assert_eq!(table.resolve_constant("SPECIES_NEXT"), Some(2));
+    }
+
+    #[test]
+    fn test_load_python_enum_str_rejects_unsupported_operator_expression() {
+        let mut table = SymbolTable::new();
+        let err = table
+            .load_python_enum_str_with_tag(
+                "SPECIES_BAD = 1 < 2\n",
+                Path::new("inline.py"),
+                crate::c_parser::SymbolTag::Global,
+            )
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("SPECIES_BAD"));
+        assert!(err.to_string().contains("1 < 2"));
+    }
+
+    #[test]
     fn test_load_headers_from_dir_propagates_text_bank_json_schema_errors() {
         let dir = tempdir().unwrap();
         let json_path = dir.path().join("bank.json");

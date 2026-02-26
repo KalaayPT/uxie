@@ -76,6 +76,7 @@ enum Token {
     LParen,
     RParen,
     Comma,
+    Invalid,
     Eof,
 }
 
@@ -148,7 +149,7 @@ impl<'a> Tokenizer<'a> {
                     Token::LShift
                 } else {
                     self.pos += 1;
-                    Token::Eof
+                    Token::Invalid
                 }
             }
             b'>' => {
@@ -157,7 +158,7 @@ impl<'a> Tokenizer<'a> {
                     Token::RShift
                 } else {
                     self.pos += 1;
-                    Token::Eof
+                    Token::Invalid
                 }
             }
             b'(' => {
@@ -174,7 +175,7 @@ impl<'a> Tokenizer<'a> {
             }
             _ => {
                 self.pos += 1;
-                Token::Eof
+                Token::Invalid
             }
         }
     }
@@ -196,15 +197,29 @@ impl<'a> Tokenizer<'a> {
             while self.pos < self.input.len() && self.input[self.pos].is_ascii_hexdigit() {
                 self.pos += 1;
             }
-            let hex_str = std::str::from_utf8(&self.input[hex_start..self.pos]).unwrap_or("0");
-            return Token::Number(i64::from_str_radix(hex_str, 16).unwrap_or(0));
+            if hex_start == self.pos {
+                return Token::Invalid;
+            }
+
+            let Ok(hex_str) = std::str::from_utf8(&self.input[hex_start..self.pos]) else {
+                return Token::Invalid;
+            };
+            let Ok(value) = i64::from_str_radix(hex_str, 16) else {
+                return Token::Invalid;
+            };
+            return Token::Number(value);
         }
 
         while self.pos < self.input.len() && self.input[self.pos].is_ascii_digit() {
             self.pos += 1;
         }
-        let num_str = std::str::from_utf8(&self.input[start..self.pos]).unwrap_or("0");
-        Token::Number(num_str.parse().unwrap_or(0))
+        let Ok(num_str) = std::str::from_utf8(&self.input[start..self.pos]) else {
+            return Token::Invalid;
+        };
+        let Ok(value) = num_str.parse::<i64>() else {
+            return Token::Invalid;
+        };
+        Token::Number(value)
     }
 
     fn read_ident(&mut self) -> Token {
@@ -214,7 +229,9 @@ impl<'a> Tokenizer<'a> {
         {
             self.pos += 1;
         }
-        let ident = std::str::from_utf8(&self.input[start..self.pos]).unwrap_or("");
+        let Ok(ident) = std::str::from_utf8(&self.input[start..self.pos]) else {
+            return Token::Invalid;
+        };
         Token::Ident(ident.to_string())
     }
 }
@@ -294,17 +311,24 @@ fn eval_expr_recursive(
 
     let mut tokenizer = Tokenizer::new(expr);
     let mut tokens = Vec::with_capacity(8);
-    let mut tok = tokenizer.next_token();
-    while tok != Token::Eof {
-        tokens.push(tok);
-        tok = tokenizer.next_token();
+    let mut has_invalid_token = false;
+    loop {
+        let tok = tokenizer.next_token();
+        match tok {
+            Token::Eof => break,
+            Token::Invalid => {
+                has_invalid_token = true;
+                break;
+            }
+            _ => tokens.push(tok),
+        }
     }
 
-    let result = if tokens.is_empty() {
+    let result = if has_invalid_token || tokens.is_empty() {
         None
     } else {
         let mut pos = 0;
-        parse_expr(
+        let val = parse_expr(
             &tokens,
             &mut pos,
             0,
@@ -314,7 +338,8 @@ fn eval_expr_recursive(
             visiting,
             depth,
             parent_resolver,
-        )
+        );
+        if pos == tokens.len() { val } else { None }
     };
 
     visiting.remove(expr);
@@ -450,9 +475,10 @@ fn parse_primary(
                     depth,
                     parent_resolver,
                 )?;
-                if *pos < tokens.len() && tokens[*pos] == Token::Comma {
-                    *pos += 1;
+                if *pos >= tokens.len() || tokens[*pos] != Token::Comma {
+                    return None;
                 }
+                *pos += 1;
                 let g = parse_expr(
                     tokens,
                     pos,
@@ -464,9 +490,10 @@ fn parse_primary(
                     depth,
                     parent_resolver,
                 )?;
-                if *pos < tokens.len() && tokens[*pos] == Token::Comma {
-                    *pos += 1;
+                if *pos >= tokens.len() || tokens[*pos] != Token::Comma {
+                    return None;
                 }
+                *pos += 1;
                 let b = parse_expr(
                     tokens,
                     pos,
@@ -478,9 +505,10 @@ fn parse_primary(
                     depth,
                     parent_resolver,
                 )?;
-                if *pos < tokens.len() && tokens[*pos] == Token::RParen {
-                    *pos += 1;
+                if *pos >= tokens.len() || tokens[*pos] != Token::RParen {
+                    return None;
                 }
+                *pos += 1;
                 return Some((b << 10) | (g << 5) | r);
             }
 
@@ -521,9 +549,10 @@ fn parse_primary(
                 depth,
                 parent_resolver,
             )?;
-            if *pos < tokens.len() && tokens[*pos] == Token::RParen {
-                *pos += 1;
+            if *pos >= tokens.len() || tokens[*pos] != Token::RParen {
+                return None;
             }
+            *pos += 1;
             Some(val)
         }
         Token::Plus => {
@@ -728,5 +757,34 @@ mod tests {
             eval_expr_with_context("1 << 2 + 3", &exprs, &res, &cache),
             Some(32)
         );
+    }
+
+    #[test]
+    fn test_unsupported_comparison_operators_return_none() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+
+        assert_eq!(eval_expr_with_context("1 < 2", &exprs, &res, &cache), None);
+        assert_eq!(eval_expr_with_context("1 > 2", &exprs, &res, &cache), None);
+    }
+
+    #[test]
+    fn test_malformed_numeric_literals_return_none() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+
+        assert_eq!(eval_expr_with_context("0x", &exprs, &res, &cache), None);
+        assert_eq!(eval_expr_with_context("0xZZ", &exprs, &res, &cache), None);
+    }
+
+    #[test]
+    fn test_unbalanced_parentheses_return_none() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+
+        assert_eq!(eval_expr_with_context("(1 + 2", &exprs, &res, &cache), None);
     }
 }
