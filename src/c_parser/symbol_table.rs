@@ -615,18 +615,40 @@ impl SymbolTable {
                     ),
                 )
             })?;
+            let expects_message_ids = messages.iter().any(|msg| msg.get("id").is_some());
             for (index, msg) in messages.iter().enumerate() {
-                if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
-                    let val = index as i64;
-                    self.symbols.insert(id.to_string(), val);
-                    self.value_to_names
-                        .entry(val)
-                        .or_default()
-                        .push(id.to_string());
-                    self.symbol_to_file
-                        .insert(id.to_string(), path.to_path_buf());
-                    count += 1;
-                }
+                let Some(id) = msg.get("id") else {
+                    if expects_message_ids {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Text bank JSON {} has non-string or missing 'messages[{}].id'",
+                                path.display(),
+                                index
+                            ),
+                        ));
+                    }
+                    continue;
+                };
+                let id = id.as_str().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Text bank JSON {} has non-string or missing 'messages[{}].id'",
+                            path.display(),
+                            index
+                        ),
+                    )
+                })?;
+                let val = index as i64;
+                self.symbols.insert(id.to_string(), val);
+                self.value_to_names
+                    .entry(val)
+                    .or_default()
+                    .push(id.to_string());
+                self.symbol_to_file
+                    .insert(id.to_string(), path.to_path_buf());
+                count += 1;
             }
         }
 
@@ -641,17 +663,25 @@ impl SymbolTable {
                 )
             })?;
             for (index, event) in events.iter().enumerate() {
-                if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
-                    let val = index as i64;
-                    self.symbols.insert(id.to_string(), val);
-                    self.value_to_names
-                        .entry(val)
-                        .or_default()
-                        .push(id.to_string());
-                    self.symbol_to_file
-                        .insert(id.to_string(), path.to_path_buf());
-                    count += 1;
-                }
+                let id = event.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Text bank JSON {} has non-string or missing 'object_events[{}].id'",
+                            path.display(),
+                            index
+                        ),
+                    )
+                })?;
+                let val = index as i64;
+                self.symbols.insert(id.to_string(), val);
+                self.value_to_names
+                    .entry(val)
+                    .or_default()
+                    .push(id.to_string());
+                self.symbol_to_file
+                    .insert(id.to_string(), path.to_path_buf());
+                count += 1;
             }
         }
 
@@ -679,17 +709,25 @@ impl SymbolTable {
             })?;
 
         for (index, event) in events.iter().enumerate() {
-            if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
-                let val = index as i64;
-                self.symbols.insert(id.to_string(), val);
-                self.value_to_names
-                    .entry(val)
-                    .or_default()
-                    .push(id.to_string());
-                self.symbol_to_file
-                    .insert(id.to_string(), path.to_path_buf());
-                count += 1;
-            }
+            let id = event.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Events JSON {} has non-string or missing 'object_events[{}].id'",
+                        path.display(),
+                        index
+                    ),
+                )
+            })?;
+            let val = index as i64;
+            self.symbols.insert(id.to_string(), val);
+            self.value_to_names
+                .entry(val)
+                .or_default()
+                .push(id.to_string());
+            self.symbol_to_file
+                .insert(id.to_string(), path.to_path_buf());
+            count += 1;
         }
 
         Ok(count)

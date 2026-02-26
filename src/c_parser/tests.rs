@@ -204,6 +204,36 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_load_headers_from_dir_propagates_text_bank_json_entry_id_errors() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("bank.json");
+        std::fs::write(
+            &json_path,
+            r#"{ "messages": [ { "id": "MSG_HELLO" }, {} ] }"#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let err = table.load_headers_from_dir(dir.path()).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("messages[1].id"));
+    }
+
+    #[test]
+    fn test_load_headers_from_dir_allows_non_symbol_message_arrays() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("location_names.json");
+        std::fs::write(&json_path, r#"{ "messages": [ { "en_US": "Test" } ] }"#).unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table.load_headers_from_dir(dir.path()).unwrap();
+
+        assert_eq!(loaded, 1);
+        assert_eq!(table.resolve_constant("en_US"), None);
+    }
+
+    #[test]
     fn test_load_recursive_propagates_events_json_parse_errors() {
         let dir = tempdir().unwrap();
         let sm = SourceManager::new();
@@ -234,6 +264,23 @@ mod c_parser_tests {
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("object_events"));
+    }
+
+    #[test]
+    fn test_load_recursive_propagates_events_json_entry_id_errors() {
+        let dir = tempdir().unwrap();
+        let sm = SourceManager::new();
+
+        let main_path = create_file(dir.path(), "main.h", "#include \"res/field/events/test.h\"");
+        let events_json_path = dir.path().join("res/field/events/test.json");
+        std::fs::create_dir_all(events_json_path.parent().unwrap()).unwrap();
+        std::fs::write(&events_json_path, r#"{ "object_events": [ {} ] }"#).unwrap();
+
+        let mut table = SymbolTable::with_source_manager(sm);
+        let err = table.load_recursive(&main_path, &[]).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("object_events[0].id"));
     }
 
     #[test]
