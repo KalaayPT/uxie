@@ -190,6 +190,29 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_load_list_file_str_propagates_assignment_eval_errors() {
+        let mut table = SymbolTable::new();
+        let err = table
+            .load_list_file_str("CONST_A = 1\nCONST_B = UNKNOWN_SYMBOL\n")
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("CONST_B"));
+        assert!(err.to_string().contains("UNKNOWN_SYMBOL"));
+    }
+
+    #[test]
+    fn test_load_list_file_str_assignment_with_inline_comment() {
+        let mut table = SymbolTable::new();
+        table
+            .load_list_file_str("CONST_A = 1 # comment\nCONST_B\n")
+            .unwrap();
+
+        assert_eq!(table.resolve_constant("CONST_A"), Some(1));
+        assert_eq!(table.resolve_constant("CONST_B"), Some(2));
+    }
+
+    #[test]
     fn test_load_headers_from_dir_propagates_text_bank_json_schema_errors() {
         let dir = tempdir().unwrap();
         let json_path = dir.path().join("bank.json");

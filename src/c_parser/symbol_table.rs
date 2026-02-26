@@ -531,22 +531,39 @@ impl SymbolTable {
         tag: SymbolTag,
     ) -> std::io::Result<()> {
         let mut current_index = 0i64;
-        for line in content.lines() {
+        for (line_idx, line) in content.lines().enumerate() {
+            let line_number = line_idx + 1;
             let line = line.trim();
             if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
                 continue;
             }
             if let Some(pos) = line.find('=') {
                 let name = line[..pos].trim().to_string();
-                let expr = line[pos + 1..].trim().to_string();
-                if let Some(val) = crate::c_parser::defines::eval_expr_with_context(
-                    &expr,
+                let expr_raw = line[pos + 1..].trim();
+                let expr = expr_raw
+                    .split('#')
+                    .next()
+                    .map(str::trim)
+                    .unwrap_or(expr_raw);
+                let val = crate::c_parser::defines::eval_expr_with_context(
+                    expr,
                     &self.pending,
                     &self.symbols,
                     &self.eval_cache,
-                ) {
-                    current_index = val;
-                }
+                )
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Failed to evaluate assignment expression '{}' for '{}' at {}:{}",
+                            expr,
+                            name,
+                            path.display(),
+                            line_number
+                        ),
+                    )
+                })?;
+                current_index = val;
                 self.symbols.insert(name.clone(), current_index);
                 self.value_to_names
                     .entry(current_index)
