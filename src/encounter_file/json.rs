@@ -2,6 +2,7 @@ use crate::c_parser::SymbolTable;
 use crate::encounter_file::binary::{BinaryEncounterFile, EncounterEntry, WaterEncounterEntry};
 use crate::game::GameFamily;
 use serde::{Deserialize, Serialize};
+use std::io;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EncounterEntryJson {
@@ -57,42 +58,42 @@ pub struct JsonEncounterFile {
 
 fn collect_encounter_array<const N: usize>(
     entries: &[EncounterEntryJson],
-    resolve: &dyn Fn(&str) -> u32,
-) -> [EncounterEntry; N] {
+    resolve: &dyn Fn(&str) -> io::Result<u32>,
+) -> io::Result<[EncounterEntry; N]> {
     let mut result = [EncounterEntry::default(); N];
     for (slot, entry) in result.iter_mut().zip(entries.iter()) {
         *slot = EncounterEntry {
             level: entry.level,
-            species: resolve(&entry.species),
+            species: resolve(&entry.species)?,
         };
     }
-    result
+    Ok(result)
 }
 
 fn collect_species_array<const N: usize>(
     names: &[String],
-    resolve: &dyn Fn(&str) -> u32,
-) -> [u32; N] {
+    resolve: &dyn Fn(&str) -> io::Result<u32>,
+) -> io::Result<[u32; N]> {
     let mut result = [0u32; N];
     for (slot, name) in result.iter_mut().zip(names.iter()) {
-        *slot = resolve(name);
+        *slot = resolve(name)?;
     }
-    result
+    Ok(result)
 }
 
 fn collect_water_array<const N: usize>(
     entries: &[WaterEncounterEntryJson],
-    resolve: &dyn Fn(&str) -> u32,
-) -> [WaterEncounterEntry; N] {
+    resolve: &dyn Fn(&str) -> io::Result<u32>,
+) -> io::Result<[WaterEncounterEntry; N]> {
     let mut result = [WaterEncounterEntry::default(); N];
     for (slot, entry) in result.iter_mut().zip(entries.iter()) {
         *slot = WaterEncounterEntry {
             min_level: entry.level_min,
             max_level: entry.level_max,
-            species: resolve(&entry.species),
+            species: resolve(&entry.species)?,
         };
     }
-    result
+    Ok(result)
 }
 
 fn encounter_entries_to_json(
@@ -127,44 +128,45 @@ fn water_entries_to_json(
 }
 
 impl JsonEncounterFile {
-    pub fn to_binary(&self, symbols: &SymbolTable, family: GameFamily) -> BinaryEncounterFile {
-        let resolve = |name: &str| {
-            symbols
-                .resolve_constant(name)
-                .map(|v| v as u32)
-                .unwrap_or_else(|| name.parse().unwrap_or(0))
-        };
+    pub fn to_binary(
+        &self,
+        symbols: &SymbolTable,
+        family: GameFamily,
+    ) -> io::Result<BinaryEncounterFile> {
+        let resolve = |name: &str| resolve_species_id(name, symbols);
 
         let morning_encounters = self
             .morning
             .as_ref()
             .map(|m| collect_encounter_array(m, &resolve))
+            .transpose()?
             .unwrap_or_default();
 
         let rock_smash_encounters = self
             .rock_smash_encounters
             .as_ref()
             .map(|r| collect_water_array(r, &resolve))
+            .transpose()?
             .unwrap_or_default();
 
         let music_encounters = match family {
             GameFamily::HGSS => {
                 if let Some(music) = self.music.as_ref() {
-                    collect_species_array(music, &resolve)
+                    collect_species_array(music, &resolve)?
                 } else {
-                    collect_species_array(&self.radar, &resolve)
+                    collect_species_array(&self.radar, &resolve)?
                 }
             }
             _ => Default::default(),
         };
 
-        BinaryEncounterFile {
+        Ok(BinaryEncounterFile {
             walking_rate: self.land_rate,
-            grass_encounters: collect_encounter_array(&self.land_encounters, &resolve),
-            swarm_encounters: collect_species_array(&self.swarms, &resolve),
-            day_encounters: collect_species_array(&self.day, &resolve),
-            night_encounters: collect_species_array(&self.night, &resolve),
-            radar_encounters: collect_species_array(&self.radar, &resolve),
+            grass_encounters: collect_encounter_array(&self.land_encounters, &resolve)?,
+            swarm_encounters: collect_species_array(&self.swarms, &resolve)?,
+            day_encounters: collect_species_array(&self.day, &resolve)?,
+            night_encounters: collect_species_array(&self.night, &resolve)?,
+            radar_encounters: collect_species_array(&self.radar, &resolve)?,
             music_encounters,
             form_encounter_rates: [
                 self.rate_form0,
@@ -174,23 +176,23 @@ impl JsonEncounterFile {
                 self.rate_form4,
             ],
             unown_table_id: self.unown_table,
-            dual_slot_ruby: collect_species_array(&self.ruby, &resolve),
-            dual_slot_sapphire: collect_species_array(&self.sapphire, &resolve),
-            dual_slot_emerald: collect_species_array(&self.emerald, &resolve),
-            dual_slot_firered: collect_species_array(&self.firered, &resolve),
-            dual_slot_leafgreen: collect_species_array(&self.leafgreen, &resolve),
+            dual_slot_ruby: collect_species_array(&self.ruby, &resolve)?,
+            dual_slot_sapphire: collect_species_array(&self.sapphire, &resolve)?,
+            dual_slot_emerald: collect_species_array(&self.emerald, &resolve)?,
+            dual_slot_firered: collect_species_array(&self.firered, &resolve)?,
+            dual_slot_leafgreen: collect_species_array(&self.leafgreen, &resolve)?,
             surf_rate: self.surf_rate,
-            surf_encounters: collect_water_array(&self.surf_encounters, &resolve),
+            surf_encounters: collect_water_array(&self.surf_encounters, &resolve)?,
             old_rod_rate: self.old_rod_rate,
-            old_rod_encounters: collect_water_array(&self.old_rod_encounters, &resolve),
+            old_rod_encounters: collect_water_array(&self.old_rod_encounters, &resolve)?,
             good_rod_rate: self.good_rod_rate,
-            good_rod_encounters: collect_water_array(&self.good_rod_encounters, &resolve),
+            good_rod_encounters: collect_water_array(&self.good_rod_encounters, &resolve)?,
             super_rod_rate: self.super_rod_rate,
-            super_rod_encounters: collect_water_array(&self.super_rod_encounters, &resolve),
+            super_rod_encounters: collect_water_array(&self.super_rod_encounters, &resolve)?,
             rock_smash_rate: self.rock_smash_rate.unwrap_or(0),
             rock_smash_encounters,
             morning_encounters,
-        }
+        })
     }
 
     pub fn from_binary(
@@ -246,4 +248,17 @@ impl JsonEncounterFile {
 
         res
     }
+}
+
+fn resolve_species_id(name: &str, symbols: &SymbolTable) -> io::Result<u32> {
+    if let Some(value) = symbols.resolve_constant(name) {
+        return Ok(value as u32);
+    }
+
+    name.parse::<u32>().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to resolve encounter species '{}': {}", name, e),
+        )
+    })
 }

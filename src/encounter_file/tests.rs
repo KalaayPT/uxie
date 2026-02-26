@@ -214,11 +214,63 @@ mod encounter_tests {
         }"#;
 
         let encounter: JsonEncounterFile = serde_json::from_str(json).unwrap();
-        let bin = encounter.to_binary(&symbols, GameFamily::Platinum);
+        let bin = encounter.to_binary(&symbols, GameFamily::Platinum).unwrap();
 
         assert_eq!(bin.grass_encounters[0].species, 1);
         assert_eq!(bin.swarm_encounters[0], 2);
         assert_eq!(bin.swarm_encounters[1], 2);
+    }
+
+    #[test]
+    fn test_encounter_json_unresolved_species_returns_error_platinum() {
+        let symbols = SymbolTable::new();
+        let json = r#"{
+            "land_rate": 30,
+            "land_encounters": [{"level": 5, "species": "SPECIES_DOES_NOT_EXIST"}],
+            "swarms": [],
+            "day": [], "night": [], "radar": [],
+            "rate_form0": 0, "rate_form1": 0, "rate_form2": 0, "rate_form3": 0, "rate_form4": 0,
+            "unown_table": 0,
+            "ruby": [], "sapphire": [], "emerald": [], "firered": [], "leafgreen": [],
+            "surf_rate": 0, "surf_encounters": [],
+            "old_rod_rate": 0, "old_rod_encounters": [],
+            "good_rod_rate": 0, "good_rod_encounters": [],
+            "super_rod_rate": 0, "super_rod_encounters": []
+        }"#;
+        let encounter: JsonEncounterFile = serde_json::from_str(json).unwrap();
+
+        let err = encounter
+            .to_binary(&symbols, GameFamily::Platinum)
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("SPECIES_DOES_NOT_EXIST"));
+    }
+
+    #[test]
+    fn test_encounter_json_unresolved_species_returns_error_hgss_music() {
+        let symbols = SymbolTable::new();
+        let json = r#"{
+            "land_rate": 30,
+            "land_encounters": [],
+            "swarms": [],
+            "day": [], "night": [], "radar": [],
+            "rate_form0": 0, "rate_form1": 0, "rate_form2": 0, "rate_form3": 0, "rate_form4": 0,
+            "unown_table": 0,
+            "ruby": [], "sapphire": [], "emerald": [], "firered": [], "leafgreen": [],
+            "surf_rate": 0, "surf_encounters": [],
+            "old_rod_rate": 0, "old_rod_encounters": [],
+            "good_rod_rate": 0, "good_rod_encounters": [],
+            "super_rod_rate": 0, "super_rod_encounters": [],
+            "music": ["SPECIES_DOES_NOT_EXIST"],
+            "rock_smash_rate": 0,
+            "rock_smash_encounters": [],
+            "morning": []
+        }"#;
+        let encounter: JsonEncounterFile = serde_json::from_str(json).unwrap();
+
+        let err = encounter.to_binary(&symbols, GameFamily::HGSS).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("SPECIES_DOES_NOT_EXIST"));
     }
 
     #[test]
@@ -236,7 +288,7 @@ mod encounter_tests {
 
         let bin = load_encounter_from_project_root(&project_root, GameFamily::Platinum, 0).unwrap();
         let json = JsonEncounterFile::from_binary(&bin, &ws.symbols, GameFamily::Platinum);
-        let rebuilt = json.to_binary(&ws.symbols, GameFamily::Platinum);
+        let rebuilt = json.to_binary(&ws.symbols, GameFamily::Platinum).unwrap();
 
         assert_eq!(bin, rebuilt);
     }
@@ -256,7 +308,7 @@ mod encounter_tests {
 
         let bin = load_encounter_from_project_root(&project_root, GameFamily::HGSS, 0).unwrap();
         let json = JsonEncounterFile::from_binary(&bin, &ws.symbols, GameFamily::HGSS);
-        let rebuilt = json.to_binary(&ws.symbols, GameFamily::HGSS);
+        let rebuilt = json.to_binary(&ws.symbols, GameFamily::HGSS).unwrap();
 
         assert_eq!(bin, rebuilt);
     }
