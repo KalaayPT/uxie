@@ -321,4 +321,32 @@ mod tests {
             expected_name
         );
     }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_load_all_pokemon_data_hgss_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "decomp_data pokemon integration test (hgss)",
+        ) else {
+            return;
+        };
+
+        let pokemon_dir = root.join("res/pokemon");
+        let loaded = load_all_pokemon_data(&pokemon_dir).unwrap();
+
+        if pokemon_dir.exists() {
+            assert!(
+                !loaded.is_empty(),
+                "expected at least one species from {}",
+                pokemon_dir.display()
+            );
+        } else {
+            assert!(
+                loaded.is_empty(),
+                "expected empty species table when HGSS pokemon directory is missing: {}",
+                pokemon_dir.display()
+            );
+        }
+    }
 }

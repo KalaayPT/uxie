@@ -228,4 +228,32 @@ mod tests {
             expected_name
         );
     }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_load_all_move_data_hgss_real_fixture() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "decomp_data moves integration test (hgss)",
+        ) else {
+            return;
+        };
+
+        let moves_dir = root.join("res/battle/moves");
+        let loaded = load_all_move_data(&moves_dir).unwrap();
+
+        if moves_dir.exists() {
+            assert!(
+                !loaded.is_empty(),
+                "expected at least one move from {}",
+                moves_dir.display()
+            );
+        } else {
+            assert!(
+                loaded.is_empty(),
+                "expected empty move table when HGSS moves directory is missing: {}",
+                moves_dir.display()
+            );
+        }
+    }
 }
