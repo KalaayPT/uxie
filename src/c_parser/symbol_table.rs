@@ -796,14 +796,18 @@ impl SymbolTable {
 
     pub fn load_from_url(&mut self, url: &str) -> std::io::Result<()> {
         let output = std::process::Command::new("curl")
+            .arg("-f")
             .arg("-L")
-            .arg("-s")
+            .arg("-sS")
             .arg(url)
             .output()?;
         if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(std::io::Error::other(format!(
-                "Failed to fetch URL: {}",
-                url
+                "Failed to fetch URL {} (status: {}): {}",
+                url,
+                output.status,
+                stderr.trim()
             )));
         }
         let content = String::from_utf8_lossy(&output.stdout);

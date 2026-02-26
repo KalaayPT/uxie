@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod c_parser_tests {
     use crate::c_parser::{SourceManager, SymbolTable};
-    use std::io::Write;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::path::{Path, PathBuf};
+    use std::thread;
     use tempfile::tempdir;
 
     fn create_file(dir: &Path, name: &str, content: &str) -> PathBuf {
@@ -54,6 +56,39 @@ mod c_parser_tests {
                 value
             );
         }
+    }
+
+    fn curl_available() -> bool {
+        std::process::Command::new("curl")
+            .arg("--version")
+            .output()
+            .is_ok()
+    }
+
+    fn spawn_single_response_server(
+        status_line: &str,
+        body: &str,
+    ) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let status_line = status_line.to_string();
+        let body = body.to_string();
+
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request_buf = [0u8; 1024];
+            let _ = stream.read(&mut request_buf);
+
+            let response = format!(
+                "{status_line}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            stream.flush().unwrap();
+        });
+
+        (format!("http://{}/symbols.h", addr), handle)
     }
 
     #[test]
@@ -199,6 +234,41 @@ mod c_parser_tests {
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("object_events"));
+    }
+
+    #[test]
+    fn test_load_from_url_http_404_returns_error() {
+        if !curl_available() {
+            eprintln!("Skipping: curl is not available");
+            return;
+        }
+
+        let (url, handle) = spawn_single_response_server("HTTP/1.1 404 Not Found", "missing");
+        let mut table = SymbolTable::new();
+
+        let err = table.load_from_url(&url).unwrap_err();
+        handle.join().unwrap();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::Other);
+        assert!(err.to_string().contains("Failed to fetch URL"));
+        assert!(err.to_string().contains("404"));
+    }
+
+    #[test]
+    fn test_load_from_url_http_200_loads_symbols() {
+        if !curl_available() {
+            eprintln!("Skipping: curl is not available");
+            return;
+        }
+
+        let (url, handle) =
+            spawn_single_response_server("HTTP/1.1 200 OK", "#define TEST_REMOTE_CONST 123");
+        let mut table = SymbolTable::new();
+
+        table.load_from_url(&url).unwrap();
+        handle.join().unwrap();
+
+        assert_eq!(table.resolve_constant("TEST_REMOTE_CONST"), Some(123));
     }
 
     #[test]
