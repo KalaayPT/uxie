@@ -74,6 +74,15 @@ pub struct DecompItemData {
 }
 
 impl DecompItemData {
+    /// Convert decomp item data into binary [`ItemData`].
+    ///
+    /// The `resolve_constant` callback supplies numeric values for symbolic
+    /// names used by decomp CSV fields.
+    ///
+    /// Typical usage is passing through workspace symbol resolution:
+    /// `to_item_data(|name| workspace.resolve_constant(name))`.
+    ///
+    /// Returns `InvalidData` when any required constant cannot be resolved.
     pub fn to_item_data<F>(&self, resolve_constant: F) -> io::Result<ItemData>
     where
         F: Fn(&str) -> Option<i64>,

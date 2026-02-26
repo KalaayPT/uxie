@@ -473,6 +473,10 @@ impl Workspace {
         Ok(table)
     }
 
+    /// Resolve a symbolic constant from the workspace symbol table.
+    ///
+    /// This is commonly passed as a callback into decomp conversion helpers,
+    /// for example: `to_move_data(|name| workspace.resolve_constant(name))`.
     pub fn resolve_constant(&self, name: &str) -> Option<i64> {
         self.symbols.resolve_constant(name)
     }

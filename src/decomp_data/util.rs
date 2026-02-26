@@ -3,6 +3,11 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+/// Resolve a required symbolic constant using a caller-provided resolver.
+///
+/// This keeps decomp conversion code decoupled from any specific symbol source
+/// (for example `Workspace::resolve_constant`) while still failing fast when a
+/// required constant is missing.
 pub(crate) fn resolve_required_constant<F>(
     resolver: &F,
     constant: &str,
@@ -23,6 +28,8 @@ where
     })
 }
 
+/// Read and deserialize a JSON file into `T`, mapping serde failures to
+/// `InvalidData`.
 pub(crate) fn load_json_file<T>(path: impl AsRef<Path>) -> io::Result<T>
 where
     T: DeserializeOwned,

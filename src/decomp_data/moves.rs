@@ -45,6 +45,15 @@ pub struct ContestData {
 }
 
 impl DecompMoveData {
+    /// Convert decomp move data into binary [`MoveData`].
+    ///
+    /// The `resolve_constant` callback supplies numeric values for symbolic
+    /// names used by decomp JSON (for example `TYPE_NORMAL`).
+    ///
+    /// Typical usage is passing through workspace symbol resolution:
+    /// `to_move_data(|name| workspace.resolve_constant(name))`.
+    ///
+    /// Returns `InvalidData` when any required constant cannot be resolved.
     pub fn to_move_data<F>(&self, resolve_constant: F) -> io::Result<MoveData>
     where
         F: Fn(&str) -> Option<i64>,

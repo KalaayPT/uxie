@@ -95,6 +95,15 @@ where
 }
 
 impl DecompPokemonData {
+    /// Convert decomp pokemon data into binary [`PersonalData`].
+    ///
+    /// The `resolve_constant` callback supplies numeric values for symbolic
+    /// names used by decomp JSON fields.
+    ///
+    /// Typical usage is passing through workspace symbol resolution:
+    /// `to_personal_data(|name| workspace.resolve_constant(name))`.
+    ///
+    /// Returns `InvalidData` when any required constant cannot be resolved.
     pub fn to_personal_data<F>(&self, resolve_constant: F) -> io::Result<PersonalData>
     where
         F: Fn(&str) -> Option<i64>,

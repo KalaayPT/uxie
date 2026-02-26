@@ -146,6 +146,15 @@ where
 }
 
 impl DecompTrainerData {
+    /// Convert decomp trainer data into binary [`TrainerData`].
+    ///
+    /// The `resolve_constant` callback supplies numeric values for symbolic
+    /// names used by decomp JSON fields.
+    ///
+    /// Typical usage is passing through workspace symbol resolution:
+    /// `to_trainer_data(|name| workspace.resolve_constant(name))`.
+    ///
+    /// Returns `InvalidData` when any required constant cannot be resolved.
     pub fn to_trainer_data<F>(&self, resolve_constant: F) -> io::Result<TrainerData>
     where
         F: Fn(&str) -> Option<i64>,
