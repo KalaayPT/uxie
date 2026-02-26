@@ -227,10 +227,10 @@ impl DecompProvider {
         for p in parsed {
             let header = match self.family {
                 GameFamily::HGSS => {
-                    MapHeader::HGSS(crate::map_header::parsed_to_hgss_header(&p, &self.symbols))
+                    MapHeader::HGSS(crate::map_header::parsed_to_hgss_header(&p, &self.symbols)?)
                 }
                 GameFamily::DP | GameFamily::Platinum => {
-                    MapHeader::Pt(crate::map_header::parsed_to_pt_header(&p, &self.symbols))
+                    MapHeader::Pt(crate::map_header::parsed_to_pt_header(&p, &self.symbols)?)
                 }
             };
             headers.push(header);
@@ -712,6 +712,48 @@ mod tests {
             }
             _ => panic!("expected HGSS map header variant"),
         }
+    }
+
+    #[test]
+    fn test_decomp_provider_invalid_platinum_header_value_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_BAD] = {
+            .scriptsArchiveID = not-a-valid-literal,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+        let err = provider.get_map_header(0).unwrap_err();
+        assert!(err.to_string().contains("MAP_HEADER_BAD"));
+        assert!(err.to_string().contains("scriptsArchiveID"));
+    }
+
+    #[test]
+    fn test_decomp_provider_invalid_hgss_header_value_returns_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("src/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_BAD_HG] = {
+            .bikeAllowed = MAYBE_ENABLED,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::HGSS);
+        let err = provider.get_map_header(0).unwrap_err();
+        assert!(err.to_string().contains("MAP_HEADER_BAD_HG"));
+        assert!(err.to_string().contains("bikeAllowed"));
     }
 
     #[test]

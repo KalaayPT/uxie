@@ -2,6 +2,7 @@ use super::types::*;
 use crate::c_parser::SymbolTable;
 use regex::Regex;
 use std::collections::HashMap;
+use std::io;
 use std::sync::LazyLock;
 
 static HEADER_PATTERN: LazyLock<Regex> =
@@ -41,221 +42,251 @@ pub fn parse_map_headers_from_c(source: &str) -> Vec<ParsedMapHeader> {
     headers
 }
 
-pub fn parsed_to_pt_header(parsed: &ParsedMapHeader, symbols: &SymbolTable) -> MapHeaderPt {
+pub fn parsed_to_pt_header(
+    parsed: &ParsedMapHeader,
+    symbols: &SymbolTable,
+) -> io::Result<MapHeaderPt> {
     let mut h = MapHeaderPt::default();
 
-    let resolve = |v: &str| -> i64 { resolve_value(v, symbols) };
-
-    if let Some(v) = parsed.fields.get("areaDataArchiveID") {
-        h.area_data_id = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "areaDataArchiveID", symbols)? {
+        h.area_data_id = v as u8;
     }
-    if let Some(v) = parsed.fields.get("unk_01") {
-        h.unknown1 = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "unk_01", symbols)? {
+        h.unknown1 = v as u8;
     }
-    if let Some(v) = parsed.fields.get("mapMatrixID") {
-        h.matrix_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "mapMatrixID", symbols)? {
+        h.matrix_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("scriptsArchiveID") {
-        h.script_file_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "scriptsArchiveID", symbols)? {
+        h.script_file_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("initScriptsArchiveID") {
-        h.level_script_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "initScriptsArchiveID", symbols)? {
+        h.level_script_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("msgArchiveID") {
-        h.text_archive_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "msgArchiveID", symbols)? {
+        h.text_archive_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("dayMusicID") {
-        h.music_day_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "dayMusicID", symbols)? {
+        h.music_day_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("nightMusicID") {
-        h.music_night_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "nightMusicID", symbols)? {
+        h.music_night_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("wildEncountersArchiveID") {
-        h.wild_pokemon = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "wildEncountersArchiveID", symbols)? {
+        h.wild_pokemon = v as u16;
     }
-    if let Some(v) = parsed.fields.get("eventsArchiveID") {
-        h.event_file_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "eventsArchiveID", symbols)? {
+        h.event_file_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("mapLabelTextID") {
-        h.location_name = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "mapLabelTextID", symbols)? {
+        h.location_name = v as u8;
     }
-    if let Some(v) = parsed.fields.get("mapLabelWindowID") {
-        h.area_icon = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "mapLabelWindowID", symbols)? {
+        h.area_icon = v as u8;
     }
-    if let Some(v) = parsed.fields.get("weather") {
-        h.weather_id = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "weather", symbols)? {
+        h.weather_id = v as u8;
     }
-    if let Some(v) = parsed.fields.get("cameraType") {
-        h.camera_angle_id = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "cameraType", symbols)? {
+        h.camera_angle_id = v as u8;
     }
-    if let Some(v) = parsed.fields.get("mapType") {
-        h.location_specifier = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "mapType", symbols)? {
+        h.location_specifier = v as u8;
     }
-    if let Some(v) = parsed.fields.get("battleBG") {
-        h.battle_background = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "battleBG", symbols)? {
+        h.battle_background = v as u8;
     }
 
     let mut flags: u8 = 0;
-    if parsed
-        .fields
-        .get("isBikeAllowed")
-        .map(|v| v == "TRUE")
-        .unwrap_or(false)
-    {
+    if resolve_field_bool(parsed, "isBikeAllowed", symbols)?.unwrap_or(false) {
         flags |= 0b0001;
     }
-    if parsed
-        .fields
-        .get("isRunningAllowed")
-        .map(|v| v == "TRUE")
-        .unwrap_or(false)
-    {
+    if resolve_field_bool(parsed, "isRunningAllowed", symbols)?.unwrap_or(false) {
         flags |= 0b0010;
     }
-    if parsed
-        .fields
-        .get("isEscapeRopeAllowed")
-        .map(|v| v == "TRUE")
-        .unwrap_or(false)
-    {
+    if resolve_field_bool(parsed, "isEscapeRopeAllowed", symbols)?.unwrap_or(false) {
         flags |= 0b0100;
     }
-    if parsed
-        .fields
-        .get("isFlyAllowed")
-        .map(|v| v == "TRUE")
-        .unwrap_or(false)
-    {
+    if resolve_field_bool(parsed, "isFlyAllowed", symbols)?.unwrap_or(false) {
         flags |= 0b1000;
     }
     h.flags = flags;
 
-    h
+    Ok(h)
 }
 
-pub fn parsed_to_hgss_header(parsed: &ParsedMapHeader, symbols: &SymbolTable) -> MapHeaderHGSS {
+pub fn parsed_to_hgss_header(
+    parsed: &ParsedMapHeader,
+    symbols: &SymbolTable,
+) -> io::Result<MapHeaderHGSS> {
     let mut h = MapHeaderHGSS::default();
 
-    let resolve = |v: &str| -> i64 { resolve_value(v, symbols) };
-    let field_bool = |name: &str| -> bool {
-        parsed
-            .fields
-            .get(name)
-            .map(|v| parse_bool_with_symbols(v, symbols))
-            .unwrap_or(false)
-    };
-
-    if let Some(v) = parsed.fields.get("wildEncounterBank") {
-        h.wild_pokemon = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "wildEncounterBank", symbols)? {
+        h.wild_pokemon = v as u8;
     }
-    if let Some(v) = parsed.fields.get("areaDataBank") {
-        h.area_data_id = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "areaDataBank", symbols)? {
+        h.area_data_id = v as u8;
     }
-    if let Some(v) = parsed.fields.get("moveModelBank") {
-        h.unknown0 = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "moveModelBank", symbols)? {
+        h.unknown0 = v as u8;
     }
-    if let Some(v) = parsed.fields.get("worldMapX") {
-        h.worldmap_x = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "worldMapX", symbols)? {
+        h.worldmap_x = v as u8;
     }
-    if let Some(v) = parsed.fields.get("worldMapY") {
-        h.worldmap_y = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "worldMapY", symbols)? {
+        h.worldmap_y = v as u8;
     }
-    if let Some(v) = parsed.fields.get("matrixId") {
-        h.matrix_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "matrixId", symbols)? {
+        h.matrix_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("scriptsBank") {
-        h.script_file_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "scriptsBank", symbols)? {
+        h.script_file_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("scriptHeaderBank") {
-        h.level_script_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "scriptHeaderBank", symbols)? {
+        h.level_script_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("msgBank") {
-        h.text_archive_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "msgBank", symbols)? {
+        h.text_archive_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("dayMusicId") {
-        h.music_day_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "dayMusicId", symbols)? {
+        h.music_day_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("nightMusicId") {
-        h.music_night_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "nightMusicId", symbols)? {
+        h.music_night_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("eventsBank") {
-        h.event_file_id = resolve(v) as u16;
+    if let Some(v) = resolve_field_value(parsed, "eventsBank", symbols)? {
+        h.event_file_id = v as u16;
     }
-    if let Some(v) = parsed.fields.get("mapsec") {
-        h.location_name = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "mapsec", symbols)? {
+        h.location_name = v as u8;
     }
-    if let Some(v) = parsed.fields.get("areaIcon") {
-        h.area_icon = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "areaIcon", symbols)? {
+        h.area_icon = v as u8;
     }
-    if let Some(v) = parsed.fields.get("momCallIntroParam") {
-        h.unknown1 = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "momCallIntroParam", symbols)? {
+        h.unknown1 = v as u8;
     }
-    if let Some(v) = parsed.fields.get("isKanto") {
-        h.kanto_flag = parse_bool_with_symbols(v, symbols);
+    if let Some(v) = resolve_field_bool(parsed, "isKanto", symbols)? {
+        h.kanto_flag = v;
     }
-    if let Some(v) = parsed.fields.get("weather") {
-        h.weather_id = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "weather", symbols)? {
+        h.weather_id = v as u8;
     }
-    if let Some(v) = parsed.fields.get("mapType") {
-        h.location_type = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "mapType", symbols)? {
+        h.location_type = v as u8;
     }
-    if let Some(v) = parsed.fields.get("cameraType") {
-        h.camera_angle_id = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "cameraType", symbols)? {
+        h.camera_angle_id = v as u8;
     }
-    if let Some(v) = parsed.fields.get("followMode") {
-        h.follow_mode = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "followMode", symbols)? {
+        h.follow_mode = v as u8;
     }
-    if let Some(v) = parsed.fields.get("battleBg") {
-        h.battle_background = resolve(v) as u8;
+    if let Some(v) = resolve_field_value(parsed, "battleBg", symbols)? {
+        h.battle_background = v as u8;
     }
 
     let mut flags: u8 = 0;
-    if field_bool("bikeAllowed") {
+    if resolve_field_bool(parsed, "bikeAllowed", symbols)?.unwrap_or(false) {
         flags |= 1 << 0;
     }
-    if field_bool("runningAllowed_Unused") {
+    if resolve_field_bool(parsed, "runningAllowed_Unused", symbols)?.unwrap_or(false) {
         flags |= 1 << 1;
     }
-    if field_bool("escapeRopeAllowed") {
+    if resolve_field_bool(parsed, "escapeRopeAllowed", symbols)?.unwrap_or(false) {
         flags |= 1 << 2;
     }
-    if field_bool("flyAllowed") {
+    if resolve_field_bool(parsed, "flyAllowed", symbols)?.unwrap_or(false) {
         flags |= 1 << 3;
     }
-    if field_bool("outgoingCalls") {
+    if resolve_field_bool(parsed, "outgoingCalls", symbols)?.unwrap_or(false) {
         flags |= 1 << 4;
     }
-    if field_bool("incomingCalls") {
+    if resolve_field_bool(parsed, "incomingCalls", symbols)?.unwrap_or(false) {
         flags |= 1 << 5;
     }
-    if field_bool("radioSignal") {
+    if resolve_field_bool(parsed, "radioSignal", symbols)?.unwrap_or(false) {
         flags |= 1 << 6;
     }
     h.flags = flags;
 
-    h
+    Ok(h)
 }
 
-fn resolve_value(v: &str, symbols: &SymbolTable) -> i64 {
-    symbols
-        .resolve_constant(v)
-        .unwrap_or_else(|| parse_int_or_hex(v))
+fn resolve_field_value(
+    parsed: &ParsedMapHeader,
+    field_name: &str,
+    symbols: &SymbolTable,
+) -> io::Result<Option<i64>> {
+    parsed
+        .fields
+        .get(field_name)
+        .map(|value| {
+            resolve_value(value, symbols).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Failed to resolve map header '{}' field '{}' value '{}': {}",
+                        parsed.name, field_name, value, e
+                    ),
+                )
+            })
+        })
+        .transpose()
 }
 
-fn parse_bool_with_symbols(value: &str, symbols: &SymbolTable) -> bool {
+fn resolve_field_bool(
+    parsed: &ParsedMapHeader,
+    field_name: &str,
+    symbols: &SymbolTable,
+) -> io::Result<Option<bool>> {
+    parsed
+        .fields
+        .get(field_name)
+        .map(|value| {
+            parse_bool_with_symbols(value, symbols).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Failed to resolve map header '{}' field '{}' value '{}': {}",
+                        parsed.name, field_name, value, e
+                    ),
+                )
+            })
+        })
+        .transpose()
+}
+
+fn resolve_value(v: &str, symbols: &SymbolTable) -> io::Result<i64> {
+    if let Some(value) = symbols.resolve_constant(v) {
+        return Ok(value);
+    }
+    parse_int_or_hex(v)
+}
+
+fn parse_bool_with_symbols(value: &str, symbols: &SymbolTable) -> io::Result<bool> {
     match value.trim() {
-        "TRUE" | "true" | "1" => true,
-        "FALSE" | "false" | "0" => false,
-        other => resolve_value(other, symbols) != 0,
+        "TRUE" | "true" | "1" => Ok(true),
+        "FALSE" | "false" | "0" => Ok(false),
+        other => Ok(resolve_value(other, symbols)? != 0),
     }
 }
 
-fn parse_int_or_hex(s: &str) -> i64 {
+fn parse_int_or_hex(s: &str) -> io::Result<i64> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
-        i64::from_str_radix(&s[2..], 16).unwrap_or(0)
+        i64::from_str_radix(&s[2..], 16).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid hexadecimal literal '{}': {}", s, e),
+            )
+        })
     } else {
-        s.parse().unwrap_or(0)
+        s.parse().map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("invalid integer literal '{}': {}", s, e),
+            )
+        })
     }
 }
 
@@ -326,7 +357,7 @@ mod tests {
         assert_eq!(headers.len(), 1);
 
         let symbols = SymbolTable::new();
-        let h = parsed_to_hgss_header(&headers[0], &symbols);
+        let h = parsed_to_hgss_header(&headers[0], &symbols).unwrap();
 
         assert_eq!(h.wild_pokemon, 1);
         assert_eq!(h.area_data_id, 2);
@@ -348,5 +379,37 @@ mod tests {
         assert_eq!(h.follow_mode, 2);
         assert_eq!(h.battle_background, 19);
         assert_eq!(h.flags, 0x55);
+    }
+
+    #[test]
+    fn test_parsed_to_pt_header_invalid_literal_returns_error() {
+        let source = r"
+    [MAP_HEADER_BAD] = {
+        .scriptsArchiveID = not-a-valid-literal,
+    },
+        ";
+        let headers = parse_map_headers_from_c(source);
+        let symbols = SymbolTable::new();
+
+        let err = parsed_to_pt_header(&headers[0], &symbols).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("MAP_HEADER_BAD"));
+        assert!(err.to_string().contains("scriptsArchiveID"));
+    }
+
+    #[test]
+    fn test_parsed_to_hgss_header_invalid_boolean_symbol_returns_error() {
+        let source = r"
+    [MAP_HEADER_BAD_HG] = {
+        .bikeAllowed = MAYBE_ENABLED,
+    },
+        ";
+        let headers = parse_map_headers_from_c(source);
+        let symbols = SymbolTable::new();
+
+        let err = parsed_to_hgss_header(&headers[0], &symbols).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("MAP_HEADER_BAD_HG"));
+        assert!(err.to_string().contains("bikeAllowed"));
     }
 }
