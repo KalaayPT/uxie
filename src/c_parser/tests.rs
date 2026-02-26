@@ -155,6 +155,20 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_load_headers_from_dir_propagates_text_bank_json_schema_errors() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("bank.json");
+        std::fs::write(&json_path, "{}").unwrap();
+
+        let mut table = SymbolTable::new();
+        let err = table.load_headers_from_dir(dir.path()).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("messages"));
+        assert!(err.to_string().contains("object_events"));
+    }
+
+    #[test]
     fn test_load_recursive_propagates_events_json_parse_errors() {
         let dir = tempdir().unwrap();
         let sm = SourceManager::new();

@@ -593,7 +593,28 @@ impl SymbolTable {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut count = 0;
 
-        if let Some(messages) = json.get("messages").and_then(|v| v.as_array()) {
+        let messages_field = json.get("messages");
+        let events_field = json.get("object_events");
+        if messages_field.is_none() && events_field.is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Text bank JSON {} is missing both 'messages' and 'object_events' arrays",
+                    path.display()
+                ),
+            ));
+        }
+
+        if let Some(messages_value) = messages_field {
+            let messages = messages_value.as_array().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} has non-array 'messages' field",
+                        path.display()
+                    ),
+                )
+            })?;
             for (index, msg) in messages.iter().enumerate() {
                 if let Some(id) = msg.get("id").and_then(|v| v.as_str()) {
                     let val = index as i64;
@@ -609,7 +630,16 @@ impl SymbolTable {
             }
         }
 
-        if let Some(events) = json.get("object_events").and_then(|v| v.as_array()) {
+        if let Some(events_value) = events_field {
+            let events = events_value.as_array().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} has non-array 'object_events' field",
+                        path.display()
+                    ),
+                )
+            })?;
             for (index, event) in events.iter().enumerate() {
                 if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
                     let val = index as i64;
