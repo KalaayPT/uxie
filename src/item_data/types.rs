@@ -2,6 +2,7 @@ use binrw::{BinRead, BinWrite};
 use bitflags::bitflags;
 use modular_bitfield::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::io;
 
 bitflags! {
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -29,17 +30,17 @@ pub enum FieldPocket {
 }
 
 impl FieldPocket {
-    pub fn from_u8(value: u8) -> Self {
+    pub fn try_from_u8(value: u8) -> Option<Self> {
         match value {
-            0 => FieldPocket::Items,
-            1 => FieldPocket::Medicine,
-            2 => FieldPocket::Balls,
-            3 => FieldPocket::TmHms,
-            4 => FieldPocket::Berries,
-            5 => FieldPocket::Mail,
-            6 => FieldPocket::BattleItems,
-            7 => FieldPocket::KeyItems,
-            _ => FieldPocket::Items,
+            0 => Some(FieldPocket::Items),
+            1 => Some(FieldPocket::Medicine),
+            2 => Some(FieldPocket::Balls),
+            3 => Some(FieldPocket::TmHms),
+            4 => Some(FieldPocket::Berries),
+            5 => Some(FieldPocket::Mail),
+            6 => Some(FieldPocket::BattleItems),
+            7 => Some(FieldPocket::KeyItems),
+            _ => None,
         }
     }
 }
@@ -341,8 +342,29 @@ impl ItemData {
         battle_use_func: u8,
         party_use: u8,
         party_use_param: ItemPartyUseParam,
-    ) -> Self {
-        Self {
+    ) -> io::Result<Self> {
+        let field_pocket_bits = bitfield.field_pocket();
+        let field_pocket = FieldPocket::try_from_u8(field_pocket_bits).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid field pocket bits '{}' in item bitfield (expected 0..=7)",
+                    field_pocket_bits
+                ),
+            )
+        })?;
+        let battle_pocket_bits = bitfield.battle_pocket();
+        let battle_pocket = BattlePocket::from_bits(battle_pocket_bits).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid battle pocket bits '{}' in item bitfield",
+                    battle_pocket_bits
+                ),
+            )
+        })?;
+
+        Ok(Self {
             price,
             hold_effect,
             hold_effect_param,
@@ -353,13 +375,13 @@ impl ItemData {
             natural_gift_type: bitfield.natural_gift_type(),
             prevent_toss: bitfield.prevent_toss(),
             is_selectable: bitfield.is_selectable(),
-            field_pocket: FieldPocket::from_u8(bitfield.field_pocket()),
-            battle_pocket: BattlePocket::from_bits_truncate(bitfield.battle_pocket()),
+            field_pocket,
+            battle_pocket,
             field_use_func,
             battle_use_func,
             party_use,
             party_use_param,
-        }
+        })
     }
 
     /// Convert to binary bitfield

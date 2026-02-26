@@ -56,7 +56,7 @@ impl ItemData {
         let party_use_param =
             ItemPartyUseParam::from_parts(bin.party_use_flags, bin.party_use_values);
 
-        Ok(Self::from_parts(
+        Self::from_parts(
             bin.price,
             bin.hold_effect,
             bin.hold_effect_param,
@@ -69,7 +69,7 @@ impl ItemData {
             bin.battle_use_func,
             bin.party_use,
             party_use_param,
-        ))
+        )
     }
 
     pub fn to_binary<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
@@ -107,7 +107,7 @@ mod tests {
     use super::*;
     use crate::item_data::types::{BattlePocket, FieldPocket};
     use proptest::prelude::*;
-    use std::io::Cursor;
+    use std::io::{self, Cursor};
 
     #[test]
     fn test_roundtrip() {
@@ -208,6 +208,38 @@ mod tests {
         assert_eq!(parsed.field_pocket, FieldPocket::KeyItems);
         assert!(parsed.battle_pocket.contains(BattlePocket::POKE_BALLS));
         assert!(parsed.battle_pocket.contains(BattlePocket::HP_RESTORE));
+    }
+
+    #[test]
+    fn test_from_binary_invalid_field_pocket_bits_returns_error() {
+        let bin = ItemDataBinary {
+            price: 0,
+            hold_effect: 0,
+            hold_effect_param: 0,
+            pluck_effect: 0,
+            fling_effect: 0,
+            fling_power: 0,
+            natural_gift_power: 0,
+            bitfield: ItemBitfield::new()
+                .with_natural_gift_type(0)
+                .with_prevent_toss(false)
+                .with_is_selectable(false)
+                .with_field_pocket(15)
+                .with_battle_pocket(0),
+            field_use_func: 0,
+            battle_use_func: 0,
+            party_use: 0,
+            party_use_flags: ItemPartyUseFlagsBits::new(),
+            party_use_values: ItemPartyUseValues::default(),
+        };
+
+        let mut buf = Cursor::new(Vec::new());
+        bin.write_le(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = ItemData::from_binary(&mut buf).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid field pocket bits"));
     }
 
     fn field_pocket_strategy() -> impl Strategy<Value = FieldPocket> {
