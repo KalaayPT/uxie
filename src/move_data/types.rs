@@ -1,6 +1,7 @@
 use binrw::{BinRead, BinWrite};
 use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
+use std::io;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, BinRead, BinWrite)]
 #[brw(repr = u8)]
@@ -32,6 +33,17 @@ bitflags! {
     }
 }
 
+impl MoveFlags {
+    pub fn from_bits_strict(bits: u8) -> io::Result<Self> {
+        Self::from_bits(bits).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid move flags bits '{}'", bits),
+            )
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, BinRead, BinWrite)]
 #[brw(little)]
 pub struct MoveData {
@@ -44,7 +56,7 @@ pub struct MoveData {
     pub side_effect_chance: u8,
     pub target: u16,
     pub priority: i8,
-    #[br(map = |b: u8| MoveFlags::from_bits_truncate(b))]
+    #[br(try_map = MoveFlags::from_bits_strict)]
     #[bw(map = |f: &MoveFlags| f.bits())]
     pub flags: MoveFlags,
     pub contest_appeal: u8,

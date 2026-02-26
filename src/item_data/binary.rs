@@ -464,7 +464,8 @@ mod tests {
                 prevent_toss,
                 is_selectable,
                 field_pocket,
-                battle_pocket: BattlePocket::from_bits_truncate(battle_pocket_bits),
+                battle_pocket: BattlePocket::from_bits(battle_pocket_bits)
+                    .expect("0..31 should always be valid battle-pocket bits"),
                 field_use_func,
                 battle_use_func,
                 party_use,

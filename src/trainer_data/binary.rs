@@ -8,7 +8,12 @@ pub const TRAINER_PROPERTIES_SIZE: usize = 20;
 impl TrainerProperties {
     pub fn from_binary<R: Read>(reader: &mut R) -> io::Result<Self> {
         let flags_byte = reader.read_u8()?;
-        let flags = TrainerFlags::from_bits_truncate(flags_byte);
+        let flags = TrainerFlags::from_bits(flags_byte).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid trainer flags bits '{}'", flags_byte),
+            )
+        })?;
         let trainer_class = reader.read_u8()?;
         let unknown = reader.read_u8()?;
         let party_count = reader.read_u8()?;
@@ -18,7 +23,13 @@ impl TrainerProperties {
             *item = reader.read_u16::<LittleEndian>()?;
         }
 
-        let ai_flags = AiFlags::from_bits_truncate(reader.read_u32::<LittleEndian>()?);
+        let ai_flags_bits = reader.read_u32::<LittleEndian>()?;
+        let ai_flags = AiFlags::from_bits(ai_flags_bits).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid trainer AI flags bits '{:#010X}'", ai_flags_bits),
+            )
+        })?;
         let double_battle = reader.read_u32::<LittleEndian>()?;
 
         Ok(Self {
@@ -228,6 +239,47 @@ mod tests {
     }
 
     #[test]
+    fn test_trainer_properties_invalid_flags_bits_returns_error() {
+        let props = TrainerProperties {
+            flags: TrainerFlags::HAS_MOVES,
+            trainer_class: 0,
+            unknown: 0,
+            party_count: 0,
+            items: [0; 4],
+            ai_flags: AiFlags::BASIC,
+            double_battle: 0,
+        };
+        let mut bytes = props.to_bytes();
+        bytes[0] = 0b100;
+
+        let mut cursor = Cursor::new(bytes);
+        let err = TrainerProperties::from_binary(&mut cursor).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid trainer flags bits"));
+    }
+
+    #[test]
+    fn test_trainer_properties_invalid_ai_flags_bits_returns_error() {
+        let props = TrainerProperties {
+            flags: TrainerFlags::HAS_MOVES,
+            trainer_class: 0,
+            unknown: 0,
+            party_count: 0,
+            items: [0; 4],
+            ai_flags: AiFlags::BASIC,
+            double_battle: 0,
+        };
+        let mut bytes = props.to_bytes();
+        let invalid_ai_bits = 1u32 << 11;
+        bytes[12..16].copy_from_slice(&invalid_ai_bits.to_le_bytes());
+
+        let mut cursor = Cursor::new(bytes);
+        let err = TrainerProperties::from_binary(&mut cursor).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid trainer AI flags bits"));
+    }
+
+    #[test]
     fn test_party_pokemon_base() {
         let flags = TrainerFlags::empty();
         let family = GameFamily::DP;
@@ -381,7 +433,40 @@ mod tests {
     }
 
     fn trainer_flags_strategy() -> impl Strategy<Value = TrainerFlags> {
-        (0u8..4).prop_map(TrainerFlags::from_bits_truncate)
+        prop_oneof![
+            Just(TrainerFlags::empty()),
+            Just(TrainerFlags::HAS_MOVES),
+            Just(TrainerFlags::HAS_ITEMS),
+            Just(TrainerFlags::HAS_MOVES | TrainerFlags::HAS_ITEMS),
+        ]
+    }
+
+    fn ai_flags_strategy() -> impl Strategy<Value = AiFlags> {
+        any::<u16>().prop_map(|mask| {
+            let mut flags = AiFlags::empty();
+            let all = [
+                AiFlags::BASIC,
+                AiFlags::EVAL_ATTACK,
+                AiFlags::EXPERT,
+                AiFlags::SETUP_FIRST_TURN,
+                AiFlags::RISKY,
+                AiFlags::DAMAGE_PRIORITY,
+                AiFlags::BATON_PASS,
+                AiFlags::TAG_STRATEGY,
+                AiFlags::CHECK_HP,
+                AiFlags::WEATHER,
+                AiFlags::HARRASSMENT,
+                AiFlags::ROAMING_POKEMON,
+                AiFlags::SAFARI,
+                AiFlags::CATCH_TUTORIAL,
+            ];
+            for (idx, flag) in all.iter().enumerate() {
+                if (mask & (1 << idx)) != 0 {
+                    flags |= *flag;
+                }
+            }
+            flags
+        })
     }
 
     fn trainer_properties_strategy() -> impl Strategy<Value = TrainerProperties> {
@@ -391,26 +476,20 @@ mod tests {
             any::<u8>(),
             0u8..16,
             any::<[u16; 4]>(),
-            any::<u32>(),
+            ai_flags_strategy(),
             any::<u32>(),
         )
             .prop_map(
-                |(
-                    flags,
-                    trainer_class,
-                    unknown,
-                    party_count,
-                    items,
-                    ai_flags_bits,
-                    double_battle,
-                )| TrainerProperties {
-                    flags,
-                    trainer_class,
-                    unknown,
-                    party_count,
-                    items,
-                    ai_flags: AiFlags::from_bits_truncate(ai_flags_bits),
-                    double_battle,
+                |(flags, trainer_class, unknown, party_count, items, ai_flags, double_battle)| {
+                    TrainerProperties {
+                        flags,
+                        trainer_class,
+                        unknown,
+                        party_count,
+                        items,
+                        ai_flags,
+                        double_battle,
+                    }
                 },
             )
     }
@@ -497,7 +576,7 @@ mod tests {
             any::<u8>(),
             0u8..12,
             any::<[u16; 4]>(),
-            any::<u32>(),
+            ai_flags_strategy(),
             any::<u32>(),
         )
             .prop_flat_map(
@@ -508,7 +587,7 @@ mod tests {
                     unknown,
                     party_count,
                     items,
-                    ai_flags_bits,
+                    ai_flags,
                     double_battle,
                 )| {
                     let properties = TrainerProperties {
@@ -517,7 +596,7 @@ mod tests {
                         unknown,
                         party_count,
                         items,
-                        ai_flags: AiFlags::from_bits_truncate(ai_flags_bits),
+                        ai_flags,
                         double_battle,
                     };
                     let party_len = usize::from(party_count);

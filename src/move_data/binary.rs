@@ -82,12 +82,43 @@ mod tests {
         assert_eq!(parsed.priority, -6);
     }
 
+    #[test]
+    fn test_from_binary_invalid_move_flags_returns_error() {
+        let mut bytes = MoveData {
+            battle_effect: 0,
+            split: MoveSplit::Physical,
+            power: 0,
+            move_type: 0,
+            accuracy: 0,
+            pp: 0,
+            side_effect_chance: 0,
+            target: 0,
+            priority: 0,
+            flags: MoveFlags::empty(),
+            contest_appeal: 0,
+            contest_condition: 0,
+        }
+        .to_bytes();
+        bytes[11] = 0b1000_0000;
+        let mut cursor = Cursor::new(bytes);
+
+        let err = MoveData::from_binary(&mut cursor).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid move flags bits"));
+    }
+
     fn move_split_strategy() -> impl Strategy<Value = MoveSplit> {
         prop_oneof![
             Just(MoveSplit::Physical),
             Just(MoveSplit::Special),
             Just(MoveSplit::Status),
         ]
+    }
+
+    fn move_flags_strategy() -> impl Strategy<Value = MoveFlags> {
+        (0u8..=0x3F).prop_map(|bits| {
+            MoveFlags::from_bits(bits).expect("0..=0x3F should always be valid move-flag bits")
+        })
     }
 
     fn move_data_strategy() -> impl Strategy<Value = MoveData> {
@@ -101,7 +132,7 @@ mod tests {
             any::<u8>(),
             any::<u16>(),
             any::<i8>(),
-            any::<u8>(),
+            move_flags_strategy(),
             any::<u8>(),
             any::<u8>(),
         )
@@ -116,7 +147,7 @@ mod tests {
                     side_effect_chance,
                     target,
                     priority,
-                    flags_bits,
+                    flags,
                     contest_appeal,
                     contest_condition,
                 )| MoveData {
@@ -129,7 +160,7 @@ mod tests {
                     side_effect_chance,
                     target,
                     priority,
-                    flags: MoveFlags::from_bits_truncate(flags_bits),
+                    flags,
                     contest_appeal,
                     contest_condition,
                 },
