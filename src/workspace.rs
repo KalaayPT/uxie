@@ -155,18 +155,26 @@ impl Workspace {
                                 )
                             })?;
 
-                    Some(
-                        messages
-                            .iter()
-                            .map(|m| {
-                                m.get("en_US")
-                                    .or_else(|| m.get("ja_JP"))
-                                    .and_then(|v| v.as_str())
-                                    .unwrap_or("Unknown")
-                                    .to_string()
-                            })
-                            .collect(),
-                    )
+                    let mut names = Vec::with_capacity(messages.len());
+                    for (idx, message) in messages.iter().enumerate() {
+                        let value = message
+                            .get("en_US")
+                            .or_else(|| message.get("ja_JP"))
+                            .and_then(|v| v.as_str())
+                            .ok_or_else(|| {
+                                std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    format!(
+                                        "Location names JSON {} has message[{}] missing string 'en_US'/'ja_JP'",
+                                        location_json.display(),
+                                        idx
+                                    ),
+                                )
+                            })?;
+                        names.push(value.to_string());
+                    }
+
+                    Some(names)
                 } else {
                     None
                 }
@@ -818,6 +826,50 @@ mod tests {
 
         assert_eq!(ws.scripts.get_name(0), Some("script_main"));
         assert_eq!(ws.scripts.get_name(1), Some("script_event"));
+    }
+
+    #[test]
+    fn test_open_decomp_location_names_uses_ja_jp_when_en_us_missing() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("res/text")).unwrap();
+        fs::write(
+            root.join("res/text/location_names.json"),
+            r#"{"messages":[{"ja_JP":"jp_only_location"}]}"#,
+        )
+        .unwrap();
+
+        let ws = Workspace::open(root).unwrap();
+        assert_eq!(
+            ws.get_map_location_name(0),
+            Some("jp_only_location".to_string())
+        );
+    }
+
+    #[test]
+    fn test_open_decomp_invalid_location_names_entry_returns_invalid_data() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("res/text")).unwrap();
+        fs::write(
+            root.join("res/text/location_names.json"),
+            r#"{"messages":[{"id":"LOCATION_ONLY_ID"}]}"#,
+        )
+        .unwrap();
+
+        match Workspace::open(root) {
+            Ok(_) => panic!("Expected open to fail for invalid location_names.json entry"),
+            Err(err) => {
+                assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+                assert!(err.to_string().contains("message[0]"));
+                assert!(err.to_string().contains("en_US"));
+                assert!(err.to_string().contains("ja_JP"));
+            }
+        }
     }
 
     #[test]
