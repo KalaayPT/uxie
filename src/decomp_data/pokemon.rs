@@ -2,6 +2,7 @@
 //!
 //! Parses `res/pokemon/{species}/data.json` files and converts to `PersonalData`.
 
+use super::util::{load_json_file, resolve_required_constant};
 use crate::personal_data::PersonalData;
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
@@ -94,7 +95,7 @@ where
 }
 
 impl DecompPokemonData {
-    pub fn to_personal_data<F>(&self, resolve_constant: F) -> PersonalData
+    pub fn to_personal_data<F>(&self, resolve_constant: F) -> io::Result<PersonalData>
     where
         F: Fn(&str) -> Option<i64>,
     {
@@ -107,19 +108,65 @@ impl DecompPokemonData {
             | ((self.ev_yields.special_defense as u16 & 0b11) << 10);
 
         // color_flip: lower 7 bits = color, bit 7 = flip
-        let color = resolve_constant(&self.body_color).unwrap_or(0) as u8;
+        let color = resolve_required_constant(
+            &resolve_constant,
+            &self.body_color,
+            "body_color",
+            "pokemon",
+        )? as u8;
         let color_flip = (color & 0x7F) | if self.flip_sprite { 0x80 } else { 0 };
 
-        let type1 = resolve_constant(&self.types[0]).unwrap_or(0) as u8;
-        let type2 = resolve_constant(&self.types[1]).unwrap_or(0) as u8;
-        let item1 = resolve_constant(&self.held_items.common).unwrap_or(0) as u16;
-        let item2 = resolve_constant(&self.held_items.rare).unwrap_or(0) as u16;
-        let ability1 = resolve_constant(&self.abilities[0]).unwrap_or(0) as u8;
-        let ability2 = resolve_constant(&self.abilities[1]).unwrap_or(0) as u8;
-        let egg_group1 = resolve_constant(&self.egg_groups[0]).unwrap_or(0) as u8;
-        let egg_group2 = resolve_constant(&self.egg_groups[1]).unwrap_or(0) as u8;
-        let gender_ratio = resolve_constant(&self.gender_ratio).unwrap_or(0) as u8;
-        let growth_rate = resolve_constant(&self.exp_rate).unwrap_or(0) as u8;
+        let type1 =
+            resolve_required_constant(&resolve_constant, &self.types[0], "types[0]", "pokemon")?
+                as u8;
+        let type2 =
+            resolve_required_constant(&resolve_constant, &self.types[1], "types[1]", "pokemon")?
+                as u8;
+        let item1 = resolve_required_constant(
+            &resolve_constant,
+            &self.held_items.common,
+            "held_items.common",
+            "pokemon",
+        )? as u16;
+        let item2 = resolve_required_constant(
+            &resolve_constant,
+            &self.held_items.rare,
+            "held_items.rare",
+            "pokemon",
+        )? as u16;
+        let ability1 = resolve_required_constant(
+            &resolve_constant,
+            &self.abilities[0],
+            "abilities[0]",
+            "pokemon",
+        )? as u8;
+        let ability2 = resolve_required_constant(
+            &resolve_constant,
+            &self.abilities[1],
+            "abilities[1]",
+            "pokemon",
+        )? as u8;
+        let egg_group1 = resolve_required_constant(
+            &resolve_constant,
+            &self.egg_groups[0],
+            "egg_groups[0]",
+            "pokemon",
+        )? as u8;
+        let egg_group2 = resolve_required_constant(
+            &resolve_constant,
+            &self.egg_groups[1],
+            "egg_groups[1]",
+            "pokemon",
+        )? as u8;
+        let gender_ratio = resolve_required_constant(
+            &resolve_constant,
+            &self.gender_ratio,
+            "gender_ratio",
+            "pokemon",
+        )? as u8;
+        let growth_rate =
+            resolve_required_constant(&resolve_constant, &self.exp_rate, "exp_rate", "pokemon")?
+                as u8;
         let mut tm_compatibility = [0u8; 16];
         if let Some(ref learnset) = self.learnset {
             for tm in &learnset.by_tm {
@@ -133,7 +180,7 @@ impl DecompPokemonData {
             }
         }
 
-        PersonalData {
+        Ok(PersonalData {
             hp: self.base_stats.hp,
             attack: self.base_stats.attack,
             defense: self.base_stats.defense,
@@ -158,7 +205,7 @@ impl DecompPokemonData {
             safari_flee_rate: self.safari_flee_rate,
             color_flip,
             tm_compatibility,
-        }
+        })
     }
 }
 
@@ -177,8 +224,7 @@ fn parse_tm_index(tm: &str) -> Option<u8> {
 
 /// Load Pokemon data from a decomp JSON file
 pub fn load_pokemon_data_from_json(path: impl AsRef<Path>) -> io::Result<DecompPokemonData> {
-    let content = fs::read_to_string(path)?;
-    serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    load_json_file(path)
 }
 
 /// Load all Pokemon data from a decomp source directory
@@ -275,6 +321,97 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("Failed to parse"));
         assert!(err.to_string().contains("data.json"));
+    }
+
+    #[test]
+    fn test_to_personal_data_resolves_required_constants() {
+        let data: DecompPokemonData = serde_json::from_str(
+            r#"{
+  "base_stats": {
+    "hp": 44, "attack": 58, "defense": 44, "speed": 61, "special_attack": 58, "special_defense": 44
+  },
+  "types": ["TYPE_FIRE", "TYPE_FIRE"],
+  "catch_rate": 45,
+  "base_exp_reward": 62,
+  "ev_yields": { "hp": 0, "attack": 0, "defense": 0, "speed": 1, "special_attack": 0, "special_defense": 0 },
+  "held_items": { "common": "ITEM_NONE", "rare": "ITEM_NONE" },
+  "gender_ratio": "MON_RATIO_MALE_87_5",
+  "hatch_cycles": 20,
+  "base_friendship": 70,
+  "exp_rate": "GROWTH_MEDIUM_SLOW",
+  "egg_groups": ["EGG_GROUP_FIELD", "EGG_GROUP_HUMAN_LIKE"],
+  "abilities": ["ABILITY_BLAZE", "ABILITY_NONE"],
+  "safari_flee_rate": 0,
+  "body_color": "BODY_COLOR_BROWN",
+  "flip_sprite": false
+}"#,
+        )
+        .unwrap();
+
+        let personal = data
+            .to_personal_data(|name| match name {
+                "TYPE_FIRE" => Some(10),
+                "ITEM_NONE" => Some(0),
+                "MON_RATIO_MALE_87_5" => Some(31),
+                "GROWTH_MEDIUM_SLOW" => Some(3),
+                "EGG_GROUP_FIELD" => Some(5),
+                "EGG_GROUP_HUMAN_LIKE" => Some(8),
+                "ABILITY_BLAZE" => Some(66),
+                "ABILITY_NONE" => Some(0),
+                "BODY_COLOR_BROWN" => Some(4),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(personal.type1, 10);
+        assert_eq!(personal.type2, 10);
+        assert_eq!(personal.gender_ratio, 31);
+        assert_eq!(personal.ability1, 66);
+        assert_eq!(personal.color_flip & 0x7F, 4);
+    }
+
+    #[test]
+    fn test_to_personal_data_unresolved_required_constant_returns_error() {
+        let data: DecompPokemonData = serde_json::from_str(
+            r#"{
+  "base_stats": {
+    "hp": 44, "attack": 58, "defense": 44, "speed": 61, "special_attack": 58, "special_defense": 44
+  },
+  "types": ["TYPE_FIRE", "TYPE_FIRE"],
+  "catch_rate": 45,
+  "base_exp_reward": 62,
+  "ev_yields": { "hp": 0, "attack": 0, "defense": 0, "speed": 1, "special_attack": 0, "special_defense": 0 },
+  "held_items": { "common": "ITEM_NONE", "rare": "ITEM_NONE" },
+  "gender_ratio": "MON_RATIO_MALE_87_5",
+  "hatch_cycles": 20,
+  "base_friendship": 70,
+  "exp_rate": "GROWTH_MEDIUM_SLOW",
+  "egg_groups": ["EGG_GROUP_FIELD", "EGG_GROUP_HUMAN_LIKE"],
+  "abilities": ["ABILITY_BLAZE", "ABILITY_NONE"],
+  "safari_flee_rate": 0,
+  "body_color": "BODY_COLOR_BROWN",
+  "flip_sprite": false
+}"#,
+        )
+        .unwrap();
+
+        let err = data
+            .to_personal_data(|name| match name {
+                "TYPE_FIRE" => Some(10),
+                "ITEM_NONE" => Some(0),
+                "MON_RATIO_MALE_87_5" => Some(31),
+                "GROWTH_MEDIUM_SLOW" => Some(3),
+                "EGG_GROUP_FIELD" => Some(5),
+                "ABILITY_BLAZE" => Some(66),
+                "ABILITY_NONE" => Some(0),
+                "BODY_COLOR_BROWN" => Some(4),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("EGG_GROUP_HUMAN_LIKE"));
+        assert!(err.to_string().contains("egg_groups[1]"));
     }
 
     #[test]

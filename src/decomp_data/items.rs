@@ -2,6 +2,7 @@
 //!
 //! Parses `res/items/pl_item_data.csv` and converts to `ItemData`.
 
+use super::util::resolve_required_constant;
 use crate::item_data::{BattlePocket, FieldPocket, ItemData, ItemPartyUseParam};
 use std::collections::HashMap;
 use std::fs;
@@ -73,11 +74,13 @@ pub struct DecompItemData {
 }
 
 impl DecompItemData {
-    pub fn to_item_data<F>(&self, resolve_constant: F) -> ItemData
+    pub fn to_item_data<F>(&self, resolve_constant: F) -> io::Result<ItemData>
     where
         F: Fn(&str) -> Option<i64>,
     {
-        let hold_effect = resolve_constant(&self.hold_effect).unwrap_or(0) as u8;
+        let hold_effect =
+            resolve_required_constant(&resolve_constant, &self.hold_effect, "holdEffect", "item")?
+                as u8;
 
         let field_pocket = match self.field_pocket.as_str() {
             "POCKET_ITEMS" => FieldPocket::Items,
@@ -117,7 +120,12 @@ impl DecompItemData {
             }
         }
 
-        let field_use_func = resolve_constant(&self.field_use_func).unwrap_or(0) as u8;
+        let field_use_func = resolve_required_constant(
+            &resolve_constant,
+            &self.field_use_func,
+            "fieldUseFunc",
+            "item",
+        )? as u8;
 
         let party_use_param = ItemPartyUseParam {
             heal_sleep: self.heal_sleep,
@@ -166,7 +174,7 @@ impl DecompItemData {
             friendship_high: self.friendship_high,
         };
 
-        ItemData {
+        Ok(ItemData {
             price: self.price,
             hold_effect,
             hold_effect_param: self.hold_effect_param,
@@ -183,7 +191,7 @@ impl DecompItemData {
             battle_use_func: self.battle_use_func,
             party_use: self.party_use,
             party_use_param,
-        }
+        })
     }
 }
 
@@ -418,6 +426,57 @@ mod tests {
         let err = load_item_data_from_csv(&csv_path).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("Empty CSV file"));
+    }
+
+    #[test]
+    fn test_to_item_data_resolves_required_constants() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        let csv = format!(
+            "{header}\n{row}\n",
+            header = CSV_HEADER,
+            row = CSV_VALID_ROW
+        );
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        let item = loaded.get("ITEM_POTION").unwrap();
+        let data = item
+            .to_item_data(|name| match name {
+                "HOLD_EFFECT_NONE" => Some(0),
+                "ITEMUSE_NONE" => Some(0),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(data.price, 300);
+        assert_eq!(data.hold_effect, 0);
+        assert_eq!(data.field_use_func, 0);
+    }
+
+    #[test]
+    fn test_to_item_data_unresolved_required_constant_returns_error() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        let csv = format!(
+            "{header}\n{row}\n",
+            header = CSV_HEADER,
+            row = CSV_VALID_ROW
+        );
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        let item = loaded.get("ITEM_POTION").unwrap();
+        let err = item
+            .to_item_data(|name| match name {
+                "ITEMUSE_NONE" => Some(0),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("HOLD_EFFECT_NONE"));
+        assert!(err.to_string().contains("holdEffect"));
     }
 
     #[test]

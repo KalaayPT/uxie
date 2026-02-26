@@ -2,6 +2,7 @@
 //!
 //! Parses `res/battle/moves/{move}/data.json` files and converts to `MoveData`.
 
+use super::util::{load_json_file, resolve_required_constant};
 use crate::move_data::{MoveData, MoveFlags, MoveSplit};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -44,11 +45,16 @@ pub struct ContestData {
 }
 
 impl DecompMoveData {
-    pub fn to_move_data<F>(&self, resolve_constant: F) -> MoveData
+    pub fn to_move_data<F>(&self, resolve_constant: F) -> io::Result<MoveData>
     where
         F: Fn(&str) -> Option<i64>,
     {
-        let battle_effect = resolve_constant(&self.effect.effect_type).unwrap_or(0) as u16;
+        let battle_effect = resolve_required_constant(
+            &resolve_constant,
+            &self.effect.effect_type,
+            "effect.type",
+            "move",
+        )? as u16;
 
         let split = match self.move_class.as_str() {
             "CLASS_PHYSICAL" => MoveSplit::Physical,
@@ -57,8 +63,10 @@ impl DecompMoveData {
             _ => MoveSplit::Status,
         };
 
-        let move_type = resolve_constant(&self.move_type).unwrap_or(0) as u8;
-        let target = resolve_constant(&self.range).unwrap_or(0) as u16;
+        let move_type =
+            resolve_required_constant(&resolve_constant, &self.move_type, "type", "move")? as u8;
+        let target =
+            resolve_required_constant(&resolve_constant, &self.range, "range", "move")? as u16;
 
         let mut flags = MoveFlags::empty();
         for flag in &self.flags {
@@ -74,14 +82,24 @@ impl DecompMoveData {
         }
 
         let (contest_appeal, contest_condition) = if let Some(ref contest) = self.contest {
-            let appeal = resolve_constant(&contest.effect).unwrap_or(0) as u8;
-            let condition = resolve_constant(&contest.contest_type).unwrap_or(0) as u8;
+            let appeal = resolve_required_constant(
+                &resolve_constant,
+                &contest.effect,
+                "contest.effect",
+                "move",
+            )? as u8;
+            let condition = resolve_required_constant(
+                &resolve_constant,
+                &contest.contest_type,
+                "contest.type",
+                "move",
+            )? as u8;
             (appeal, condition)
         } else {
             (0, 0)
         };
 
-        MoveData {
+        Ok(MoveData {
             battle_effect,
             split,
             power: self.power,
@@ -94,14 +112,13 @@ impl DecompMoveData {
             flags,
             contest_appeal,
             contest_condition,
-        }
+        })
     }
 }
 
 /// Load move data from a decomp JSON file
 pub fn load_move_data_from_json(path: impl AsRef<Path>) -> io::Result<DecompMoveData> {
-    let content = fs::read_to_string(path)?;
-    serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    load_json_file(path)
 }
 
 /// Load all move data from a decomp source directory
@@ -182,6 +199,78 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("Failed to parse"));
         assert!(err.to_string().contains("data.json"));
+    }
+
+    #[test]
+    fn test_to_move_data_resolves_required_constants() {
+        let data = DecompMoveData {
+            name: "Tackle".to_string(),
+            move_class: "CLASS_PHYSICAL".to_string(),
+            move_type: "TYPE_NORMAL".to_string(),
+            power: 40,
+            accuracy: 100,
+            pp: 35,
+            effect: MoveEffect {
+                effect_type: "MOVE_EFFECT_HIT".to_string(),
+                chance: 0,
+            },
+            range: "RANGE_ADJACENT_OPPONENTS".to_string(),
+            priority: 0,
+            flags: vec!["MOVE_FLAG_MAKES_CONTACT".to_string()],
+            contest: Some(ContestData {
+                effect: "CONTEST_EFFECT_NONE".to_string(),
+                contest_type: "CONTEST_TYPE_COOL".to_string(),
+            }),
+        };
+
+        let move_data = data
+            .to_move_data(|name| match name {
+                "MOVE_EFFECT_HIT" => Some(1),
+                "TYPE_NORMAL" => Some(2),
+                "RANGE_ADJACENT_OPPONENTS" => Some(3),
+                "CONTEST_EFFECT_NONE" => Some(4),
+                "CONTEST_TYPE_COOL" => Some(5),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(move_data.battle_effect, 1);
+        assert_eq!(move_data.move_type, 2);
+        assert_eq!(move_data.target, 3);
+        assert_eq!(move_data.contest_appeal, 4);
+        assert_eq!(move_data.contest_condition, 5);
+    }
+
+    #[test]
+    fn test_to_move_data_unresolved_required_constant_returns_error() {
+        let data = DecompMoveData {
+            name: "Tackle".to_string(),
+            move_class: "CLASS_PHYSICAL".to_string(),
+            move_type: "TYPE_NORMAL".to_string(),
+            power: 40,
+            accuracy: 100,
+            pp: 35,
+            effect: MoveEffect {
+                effect_type: "MOVE_EFFECT_HIT".to_string(),
+                chance: 0,
+            },
+            range: "RANGE_ADJACENT_OPPONENTS".to_string(),
+            priority: 0,
+            flags: vec![],
+            contest: None,
+        };
+
+        let err = data
+            .to_move_data(|name| match name {
+                "MOVE_EFFECT_HIT" => Some(1),
+                "RANGE_ADJACENT_OPPONENTS" => Some(3),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("TYPE_NORMAL"));
+        assert!(err.to_string().contains("type"));
     }
 
     #[test]

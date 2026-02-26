@@ -2,6 +2,7 @@
 //!
 //! Parses `res/trainers/data/{trainer}.json` files and converts to `TrainerData`.
 
+use super::util::{load_json_file, resolve_required_constant};
 use crate::trainer_data::{AiFlags, PartyPokemon, TrainerData, TrainerFlags, TrainerProperties};
 use serde::{Deserialize, Deserializer};
 use std::collections::HashMap;
@@ -77,62 +78,75 @@ where
     }))
 }
 
-fn resolve_override_symbol<F>(value: &str, resolve_constant: &F, known: &[(&str, u8)]) -> u8
+fn resolve_override_symbol<F>(
+    value: &str,
+    resolve_constant: &F,
+    known: &[(&str, u8)],
+    field: &str,
+) -> io::Result<u8>
 where
     F: Fn(&str) -> Option<i64>,
 {
     if let Some(resolved) = resolve_constant(value) {
-        return resolved as u8;
+        return Ok(resolved as u8);
     }
-    known
+    if let Some(value_id) = known
         .iter()
         .find_map(|(name, value_id)| (*name == value).then_some(*value_id))
-        .unwrap_or(0)
+    {
+        return Ok(value_id);
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!(
+            "Failed to resolve override constant '{}' for trainer field '{}'",
+            value, field
+        ),
+    ))
 }
 
 fn pack_gender_ability_override<F>(
     gender_override: Option<&str>,
     ability_override: Option<&str>,
     resolve_constant: &F,
-) -> u8
+) -> io::Result<u8>
 where
     F: Fn(&str) -> Option<i64>,
 {
-    let gender = gender_override
-        .map(|value| {
-            resolve_override_symbol(
-                value,
-                resolve_constant,
-                &[
-                    ("TRPOKE_GENDER_OVERRIDE_OFF", 0),
-                    ("TRPOKE_GENDER_OVERRIDE_MALE", 1),
-                    ("TRPOKE_GENDER_OVERRIDE_FEMALE", 2),
-                ],
-            )
-        })
-        .unwrap_or(0)
-        & 0x0F;
+    let gender = match gender_override {
+        Some(value) => resolve_override_symbol(
+            value,
+            resolve_constant,
+            &[
+                ("TRPOKE_GENDER_OVERRIDE_OFF", 0),
+                ("TRPOKE_GENDER_OVERRIDE_MALE", 1),
+                ("TRPOKE_GENDER_OVERRIDE_FEMALE", 2),
+            ],
+            "genderOverride",
+        )?,
+        None => 0,
+    } & 0x0F;
 
-    let ability = ability_override
-        .map(|value| {
-            resolve_override_symbol(
-                value,
-                resolve_constant,
-                &[
-                    ("TRPOKE_ABILITY_OVERRIDE_OFF", 0),
-                    ("TRPOKE_ABILITY_OVERRIDE_FIRST", 1),
-                    ("TRPOKE_ABILITY_OVERRIDE_SECOND", 2),
-                ],
-            )
-        })
-        .unwrap_or(0)
-        & 0x0F;
+    let ability = match ability_override {
+        Some(value) => resolve_override_symbol(
+            value,
+            resolve_constant,
+            &[
+                ("TRPOKE_ABILITY_OVERRIDE_OFF", 0),
+                ("TRPOKE_ABILITY_OVERRIDE_FIRST", 1),
+                ("TRPOKE_ABILITY_OVERRIDE_SECOND", 2),
+            ],
+            "abilityOverride",
+        )?,
+        None => 0,
+    } & 0x0F;
 
-    gender | (ability << 4)
+    Ok(gender | (ability << 4))
 }
 
 impl DecompTrainerData {
-    pub fn to_trainer_data<F>(&self, resolve_constant: F) -> TrainerData
+    pub fn to_trainer_data<F>(&self, resolve_constant: F) -> io::Result<TrainerData>
     where
         F: Fn(&str) -> Option<i64>,
     {
@@ -147,11 +161,18 @@ impl DecompTrainerData {
             flags |= TrainerFlags::HAS_ITEMS;
         }
 
-        let trainer_class = resolve_constant(&self.trainer_class).unwrap_or(0) as u8;
+        let trainer_class = resolve_required_constant(
+            &resolve_constant,
+            &self.trainer_class,
+            "trainer_class",
+            "trainer",
+        )? as u8;
 
         let mut items = [0u16; 4];
         for (i, item_name) in self.items.iter().take(4).enumerate() {
-            items[i] = resolve_constant(item_name).unwrap_or(0) as u16;
+            let field = format!("items[{i}]");
+            items[i] =
+                resolve_required_constant(&resolve_constant, item_name, &field, "trainer")? as u16;
         }
 
         let mut ai_flags = AiFlags::empty();
@@ -189,39 +210,46 @@ impl DecompTrainerData {
             .party
             .iter()
             .map(|p| p.to_party_pokemon(&resolve_constant))
-            .collect();
+            .collect::<io::Result<Vec<_>>>()?;
 
-        TrainerData { properties, party }
+        Ok(TrainerData { properties, party })
     }
 }
 
 impl DecompPartyMember {
-    fn to_party_pokemon<F>(&self, resolve_constant: &F) -> PartyPokemon
+    fn to_party_pokemon<F>(&self, resolve_constant: &F) -> io::Result<PartyPokemon>
     where
         F: Fn(&str) -> Option<i64>,
     {
-        let species = resolve_constant(&self.species).unwrap_or(0) as u16;
+        let species =
+            resolve_required_constant(resolve_constant, &self.species, "party.species", "trainer")?
+                as u16;
 
-        let held_item = self
-            .item
-            .as_ref()
-            .map(|name| resolve_constant(name).unwrap_or(0) as u16);
+        let held_item = if let Some(name) = self.item.as_ref() {
+            Some(resolve_required_constant(resolve_constant, name, "party.item", "trainer")? as u16)
+        } else {
+            None
+        };
 
-        let moves = self.moves.as_ref().map(|move_list| {
+        let moves = if let Some(move_list) = self.moves.as_ref() {
             let mut arr = [0u16; 4];
             for (i, move_name) in move_list.iter().take(4).enumerate() {
-                arr[i] = resolve_constant(move_name).unwrap_or(0) as u16;
+                let field = format!("party.moves[{i}]");
+                arr[i] = resolve_required_constant(resolve_constant, move_name, &field, "trainer")?
+                    as u16;
             }
-            arr
-        });
+            Some(arr)
+        } else {
+            None
+        };
 
-        PartyPokemon {
+        Ok(PartyPokemon {
             difficulty: self.difficulty,
             gender_ability_override: pack_gender_ability_override(
                 self.gender_override.as_deref(),
                 self.ability_override.as_deref(),
                 resolve_constant,
-            ),
+            )?,
             level: self.level,
             species,
             form: self.form,
@@ -232,13 +260,12 @@ impl DecompPartyMember {
             } else {
                 None
             },
-        }
+        })
     }
 }
 
 pub fn load_trainer_data_from_json(path: impl AsRef<Path>) -> io::Result<DecompTrainerData> {
-    let content = fs::read_to_string(path)?;
-    serde_json::from_str(&content).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    load_json_file(path)
 }
 
 pub fn load_all_trainer_data(
@@ -324,11 +351,13 @@ mod tests {
         )
         .unwrap();
 
-        let trainer = data.to_trainer_data(|name| match name {
-            "TRAINER_CLASS_ACE_TRAINER" => Some(12),
-            "SPECIES_GLALIE" => Some(362),
-            _ => None,
-        });
+        let trainer = data
+            .to_trainer_data(|name| match name {
+                "TRAINER_CLASS_ACE_TRAINER" => Some(12),
+                "SPECIES_GLALIE" => Some(362),
+                _ => None,
+            })
+            .unwrap();
 
         assert_eq!(trainer.party.len(), 1);
         let mon = &trainer.party[0];
@@ -363,11 +392,13 @@ mod tests {
         )
         .unwrap();
 
-        let trainer = data.to_trainer_data(|name| match name {
-            "TRAINER_CLASS_RIVAL" => Some(7),
-            "SPECIES_GASTLY" => Some(92),
-            _ => None,
-        });
+        let trainer = data
+            .to_trainer_data(|name| match name {
+                "TRAINER_CLASS_RIVAL" => Some(7),
+                "SPECIES_GASTLY" => Some(92),
+                _ => None,
+            })
+            .unwrap();
 
         assert_eq!(trainer.party.len(), 1);
         let mon = &trainer.party[0];
@@ -376,6 +407,70 @@ mod tests {
         assert_eq!(mon.level, 14);
         assert_eq!(mon.species, 92);
         assert_eq!(mon.ball_seal, Some(3));
+    }
+
+    #[test]
+    fn test_to_trainer_data_unresolved_required_constant_returns_error() {
+        let data: DecompTrainerData = serde_json::from_str(
+            r#"{
+  "name": "Rival",
+  "class": "TRAINER_CLASS_RIVAL",
+  "items": [],
+  "ai_flags": [],
+  "double_battle": false,
+  "party": [
+    { "species": "SPECIES_GASTLY", "level": 14, "difficulty": 30 }
+  ],
+  "messages": []
+}"#,
+        )
+        .unwrap();
+
+        let err = data
+            .to_trainer_data(|name| match name {
+                "TRAINER_CLASS_RIVAL" => Some(7),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("SPECIES_GASTLY"));
+        assert!(err.to_string().contains("party.species"));
+    }
+
+    #[test]
+    fn test_to_trainer_data_unresolved_override_constant_returns_error() {
+        let data: DecompTrainerData = serde_json::from_str(
+            r#"{
+  "name": "Rival",
+  "class": "TRAINER_CLASS_RIVAL",
+  "items": [],
+  "ai_flags": [],
+  "double_battle": false,
+  "party": [
+    {
+      "difficulty": 30,
+      "genderOverride": "TRPOKE_GENDER_OVERRIDE_UNKNOWN",
+      "level": 14,
+      "species": "SPECIES_GASTLY"
+    }
+  ],
+  "messages": []
+}"#,
+        )
+        .unwrap();
+
+        let err = data
+            .to_trainer_data(|name| match name {
+                "TRAINER_CLASS_RIVAL" => Some(7),
+                "SPECIES_GASTLY" => Some(92),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("TRPOKE_GENDER_OVERRIDE_UNKNOWN"));
+        assert!(err.to_string().contains("genderOverride"));
     }
 
     #[test]

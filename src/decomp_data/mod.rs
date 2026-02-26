@@ -9,6 +9,7 @@ pub mod moves;
 pub mod paths;
 pub mod pokemon;
 pub mod trainers;
+pub(crate) mod util;
 
 pub use items::{DecompItemData, load_item_data_from_csv};
 pub use moves::{DecompMoveData, load_move_data_from_json};
