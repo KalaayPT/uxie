@@ -187,119 +187,195 @@ impl DecompItemData {
     }
 }
 
-fn parse_bool(s: &str) -> bool {
-    matches!(s.to_lowercase().as_str(), "true" | "1" | "yes")
+fn parse_bool(s: &str, row_number: usize, column: &str) -> io::Result<bool> {
+    let normalized = s.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "" | "false" | "0" | "no" => Ok(false),
+        "true" | "1" | "yes" => Ok(true),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Invalid boolean value '{}' for column '{}' at row {}",
+                s, column, row_number
+            ),
+        )),
+    }
 }
 
-fn parse_csv_row(header: &[&str], values: &[&str]) -> Option<DecompItemData> {
+fn parse_optional_number<T>(s: &str, row_number: usize, column: &str) -> io::Result<T>
+where
+    T: std::str::FromStr + Default,
+    T::Err: std::fmt::Display,
+{
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Ok(T::default());
+    }
+
+    trimmed.parse::<T>().map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Invalid value '{}' for column '{}' at row {}: {}",
+                trimmed, column, row_number, e
+            ),
+        )
+    })
+}
+
+fn parse_csv_row(
+    header: &[&str],
+    values: &[&str],
+    row_number: usize,
+) -> io::Result<Option<DecompItemData>> {
     if values.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     let mut fields: HashMap<&str, &str> = HashMap::new();
     for (i, &h) in header.iter().enumerate() {
         if let Some(&v) = values.get(i) {
-            fields.insert(h, v);
+            fields.insert(h.trim(), v.trim());
         }
     }
 
-    let get = |keys: &[&str]| {
+    let get_string = |keys: &[&str]| {
         keys.iter()
-            .find_map(|key| fields.get(key).copied())
+            .find_map(|&key| fields.get(key).copied())
             .unwrap_or("")
+            .to_string()
     };
-    let get_u8 = |keys: &[&str]| get(keys).parse::<u8>().unwrap_or(0);
-    let get_i8 = |keys: &[&str]| get(keys).parse::<i8>().unwrap_or(0);
-    let get_u16 = |keys: &[&str]| get(keys).parse::<u16>().unwrap_or(0);
-    let get_bool = |keys: &[&str]| parse_bool(get(keys));
+    let get_u8 = |keys: &[&str]| {
+        for key in keys {
+            if let Some(&value) = fields.get(key) {
+                return parse_optional_number::<u8>(value, row_number, key);
+            }
+        }
+        parse_optional_number::<u8>("", row_number, keys[0])
+    };
+    let get_i8 = |keys: &[&str]| {
+        for key in keys {
+            if let Some(&value) = fields.get(key) {
+                return parse_optional_number::<i8>(value, row_number, key);
+            }
+        }
+        parse_optional_number::<i8>("", row_number, keys[0])
+    };
+    let get_u16 = |keys: &[&str]| {
+        for key in keys {
+            if let Some(&value) = fields.get(key) {
+                return parse_optional_number::<u16>(value, row_number, key);
+            }
+        }
+        parse_optional_number::<u16>("", row_number, keys[0])
+    };
+    let get_bool = |keys: &[&str]| {
+        for key in keys {
+            if let Some(&value) = fields.get(key) {
+                return parse_bool(value, row_number, key);
+            }
+        }
+        parse_bool("", row_number, keys[0])
+    };
 
-    Some(DecompItemData {
-        name: get(&["item"]).to_string(),
-        price: get_u16(&["price"]),
-        hold_effect: get(&["holdEffect"]).to_string(),
-        hold_effect_param: get_u8(&["holdEffectParam"]),
-        pluck_effect: get_u8(&["pluckEffect"]),
-        fling_effect: get_u8(&["flingEffect"]),
-        fling_power: get_u8(&["flingPower"]),
-        natural_gift_power: get_u8(&["naturalGiftPower"]),
-        natural_gift_type: get_u8(&["naturalGiftType"]),
-        prevent_toss: get_bool(&["prevent_toss"]),
-        selectable: get_bool(&["selectable"]),
-        field_pocket: get(&["fieldPocket"]).to_string(),
-        battle_pocket: get(&["battlePocket"]).to_string(),
-        field_use_func: get(&["fieldUseFunc"]).to_string(),
-        battle_use_func: get_u8(&["battleUseFunc"]),
-        party_use: get_u8(&["partyUse"]),
-        heal_sleep: get_bool(&["healSleep", "slp_heal"]),
-        heal_poison: get_bool(&["healPoison", "psn_heal"]),
-        heal_burn: get_bool(&["healBurn", "brn_heal"]),
-        heal_freeze: get_bool(&["healFreeze", "frz_heal"]),
-        heal_paralysis: get_bool(&["healParalysis", "prz_heal"]),
-        heal_confusion: get_bool(&["healConfusion", "cfs_heal"]),
-        heal_attract: get_bool(&["healAttract", "inf_heal"]),
-        guard_spec: get_bool(&["guardSpec", "guard_spec"]),
-        revive: get_bool(&["revive"]),
-        revive_all: get_bool(&["reviveAll", "revive_all"]),
-        level_up: get_bool(&["levelUp", "level_up"]),
-        evolve: get_bool(&["evolve"]),
-        atk_stages: get_u8(&["atkStages", "atk_stages"]),
-        def_stages: get_u8(&["defStages", "def_stages"]),
-        spatk_stages: get_u8(&["spatkStages", "spatk_stages"]),
-        spdef_stages: get_u8(&["spdefStages", "spdef_stages"]),
-        speed_stages: get_u8(&["speedStages", "speed_stages"]),
-        acc_stages: get_u8(&["accStages", "accuracy_stages"]),
-        crit_stages: get_u8(&["critStages", "critrate_stages"]),
-        pp_up: get_bool(&["ppUp", "pp_up"]),
-        pp_max: get_bool(&["ppMax", "pp_max"]),
-        pp_restore: get_bool(&["ppRestore", "pp_restore"]),
-        pp_restore_all: get_bool(&["ppRestoreAll", "pp_restore_all"]),
-        hp_restore: get_bool(&["hpRestore", "hp_restore"]),
-        give_hp_evs: get_bool(&["giveHPEVs", "hp_ev_up"]),
-        give_atk_evs: get_bool(&["giveAtkEVs", "atk_ev_up"]),
-        give_def_evs: get_bool(&["giveDefEVs", "def_ev_up"]),
-        give_speed_evs: get_bool(&["giveSpeedEVs", "speed_ev_up"]),
-        give_spatk_evs: get_bool(&["giveSpAtkEVs", "spatk_ev_up"]),
-        give_spdef_evs: get_bool(&["giveSpDefEVs", "spdef_ev_up"]),
-        give_friendship_low: get_bool(&["giveFriendshipLow", "friendship_mod_lo"]),
-        give_friendship_med: get_bool(&["giveFriendshipMed", "friendship_mod_med"]),
-        give_friendship_high: get_bool(&["giveFriendshipHigh", "friendship_mod_hi"]),
-        hp_evs: get_i8(&["hpEVs", "hp_ev_up_param"]),
-        atk_evs: get_i8(&["atkEVs", "atk_ev_up_param"]),
-        def_evs: get_i8(&["defEVs", "def_ev_up_param"]),
-        speed_evs: get_i8(&["speedEVs", "speed_ev_up_param"]),
-        spatk_evs: get_i8(&["spatkEVs", "spatk_ev_up_param"]),
-        spdef_evs: get_i8(&["spdefEVs", "spdef_ev_up_param"]),
-        hp_restored: get_u8(&["hpRestored", "hp_restore_param"]),
-        pp_restored: get_u8(&["ppRestored", "pp_restore_param"]),
-        friendship_low: get_i8(&["friendshipLow", "friendship_mod_lo_param"]),
-        friendship_med: get_i8(&["friendshipMed", "friendship_mod_med_param"]),
-        friendship_high: get_i8(&["friendshipHigh", "friendship_mod_hi_param"]),
-    })
+    let name = get_string(&["item"]);
+    if name.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(DecompItemData {
+        name,
+        price: get_u16(&["price"])?,
+        hold_effect: get_string(&["holdEffect"]),
+        hold_effect_param: get_u8(&["holdEffectParam"])?,
+        pluck_effect: get_u8(&["pluckEffect"])?,
+        fling_effect: get_u8(&["flingEffect"])?,
+        fling_power: get_u8(&["flingPower"])?,
+        natural_gift_power: get_u8(&["naturalGiftPower"])?,
+        natural_gift_type: get_u8(&["naturalGiftType"])?,
+        prevent_toss: get_bool(&["prevent_toss"])?,
+        selectable: get_bool(&["selectable"])?,
+        field_pocket: get_string(&["fieldPocket"]),
+        battle_pocket: get_string(&["battlePocket"]),
+        field_use_func: get_string(&["fieldUseFunc"]),
+        battle_use_func: get_u8(&["battleUseFunc"])?,
+        party_use: get_u8(&["partyUse"])?,
+        heal_sleep: get_bool(&["healSleep", "slp_heal"])?,
+        heal_poison: get_bool(&["healPoison", "psn_heal"])?,
+        heal_burn: get_bool(&["healBurn", "brn_heal"])?,
+        heal_freeze: get_bool(&["healFreeze", "frz_heal"])?,
+        heal_paralysis: get_bool(&["healParalysis", "prz_heal"])?,
+        heal_confusion: get_bool(&["healConfusion", "cfs_heal"])?,
+        heal_attract: get_bool(&["healAttract", "inf_heal"])?,
+        guard_spec: get_bool(&["guardSpec", "guard_spec"])?,
+        revive: get_bool(&["revive"])?,
+        revive_all: get_bool(&["reviveAll", "revive_all"])?,
+        level_up: get_bool(&["levelUp", "level_up"])?,
+        evolve: get_bool(&["evolve"])?,
+        atk_stages: get_u8(&["atkStages", "atk_stages"])?,
+        def_stages: get_u8(&["defStages", "def_stages"])?,
+        spatk_stages: get_u8(&["spatkStages", "spatk_stages"])?,
+        spdef_stages: get_u8(&["spdefStages", "spdef_stages"])?,
+        speed_stages: get_u8(&["speedStages", "speed_stages"])?,
+        acc_stages: get_u8(&["accStages", "accuracy_stages"])?,
+        crit_stages: get_u8(&["critStages", "critrate_stages"])?,
+        pp_up: get_bool(&["ppUp", "pp_up"])?,
+        pp_max: get_bool(&["ppMax", "pp_max"])?,
+        pp_restore: get_bool(&["ppRestore", "pp_restore"])?,
+        pp_restore_all: get_bool(&["ppRestoreAll", "pp_restore_all"])?,
+        hp_restore: get_bool(&["hpRestore", "hp_restore"])?,
+        give_hp_evs: get_bool(&["giveHPEVs", "hp_ev_up"])?,
+        give_atk_evs: get_bool(&["giveAtkEVs", "atk_ev_up"])?,
+        give_def_evs: get_bool(&["giveDefEVs", "def_ev_up"])?,
+        give_speed_evs: get_bool(&["giveSpeedEVs", "speed_ev_up"])?,
+        give_spatk_evs: get_bool(&["giveSpAtkEVs", "spatk_ev_up"])?,
+        give_spdef_evs: get_bool(&["giveSpDefEVs", "spdef_ev_up"])?,
+        give_friendship_low: get_bool(&["giveFriendshipLow", "friendship_mod_lo"])?,
+        give_friendship_med: get_bool(&["giveFriendshipMed", "friendship_mod_med"])?,
+        give_friendship_high: get_bool(&["giveFriendshipHigh", "friendship_mod_hi"])?,
+        hp_evs: get_i8(&["hpEVs", "hp_ev_up_param"])?,
+        atk_evs: get_i8(&["atkEVs", "atk_ev_up_param"])?,
+        def_evs: get_i8(&["defEVs", "def_ev_up_param"])?,
+        speed_evs: get_i8(&["speedEVs", "speed_ev_up_param"])?,
+        spatk_evs: get_i8(&["spatkEVs", "spatk_ev_up_param"])?,
+        spdef_evs: get_i8(&["spdefEVs", "spdef_ev_up_param"])?,
+        hp_restored: get_u8(&["hpRestored", "hp_restore_param"])?,
+        pp_restored: get_u8(&["ppRestored", "pp_restore_param"])?,
+        friendship_low: get_i8(&["friendshipLow", "friendship_mod_lo_param"])?,
+        friendship_med: get_i8(&["friendshipMed", "friendship_mod_med_param"])?,
+        friendship_high: get_i8(&["friendshipHigh", "friendship_mod_hi_param"])?,
+    }))
 }
 
 pub fn load_item_data_from_csv(
     path: impl AsRef<Path>,
 ) -> io::Result<HashMap<String, DecompItemData>> {
+    let path = path.as_ref();
     let content = fs::read_to_string(path)?;
     let mut lines = content.lines();
 
     let header_line = lines
         .next()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "Empty CSV file"))?;
-    let header: Vec<&str> = header_line.split(',').collect();
+    let header: Vec<&str> = header_line.split(',').map(str::trim).collect();
 
     let mut result = HashMap::new();
 
-    for line in lines {
+    for (row_index, line) in lines.enumerate() {
         if line.trim().is_empty() {
             continue;
         }
 
-        let values: Vec<&str> = line.split(',').collect();
-        if let Some(item) = parse_csv_row(&header, &values) {
-            if !item.name.is_empty() {
-                result.insert(item.name.clone(), item);
-            }
+        let row_number = row_index + 2;
+        let values: Vec<&str> = line.split(',').map(str::trim).collect();
+        let item = parse_csv_row(&header, &values, row_number).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Failed to parse {}: {}", path.display(), e),
+            )
+        })?;
+        if let Some(item) = item {
+            result.insert(item.name.clone(), item);
         }
     }
 
@@ -312,14 +388,16 @@ mod tests {
     use tempfile::tempdir;
 
     const CSV_HEADER: &str = "item,price,holdEffect,holdEffectParam,pluckEffect,flingEffect,flingPower,naturalGiftPower,naturalGiftType,prevent_toss,selectable,fieldPocket,battlePocket,fieldUseFunc,battleUseFunc,partyUse,healSleep,healPoison,healBurn,healFreeze,healParalysis,healConfusion,healAttract,guardSpec,revive,reviveAll,levelUp,evolve,atkStages,defStages,spatkStages,spdefStages,speedStages,accStages,critStages,ppUp,ppMax,ppRestore,ppRestoreAll,hpRestore,giveHPEVs,giveAtkEVs,giveDefEVs,giveSpeedEVs,giveSpAtkEVs,giveSpDefEVs,giveFriendshipLow,giveFriendshipMed,giveFriendshipHigh,hpEVs,atkEVs,defEVs,speedEVs,spatkEVs,spdefEVs,hpRestored,ppRestored,friendshipLow,friendshipMed,friendshipHigh";
+    const CSV_VALID_ROW: &str = "ITEM_POTION,300,HOLD_EFFECT_NONE,0,0,0,0,0,0,false,true,POCKET_MEDICINE,BATTLE_POCKET_MASK_RECOVER_HP,ITEMUSE_NONE,0,0,false,false,false,false,false,false,false,false,false,false,false,false,0,0,0,0,0,0,0,false,false,false,false,true,false,false,false,false,false,false,true,true,true,0,0,0,0,0,0,20,0,3,2,1";
 
     #[test]
     fn test_load_item_data_from_csv_loads_valid_entries() {
         let dir = tempdir().unwrap();
         let csv_path = dir.path().join("pl_item_data.csv");
         let csv = format!(
-            "{header}\nITEM_POTION,300,HOLD_EFFECT_NONE,0,0,0,0,0,0,false,true,POCKET_MEDICINE,BATTLE_POCKET_MASK_RECOVER_HP,ITEMUSE_NONE,0,0,false,false,false,false,false,false,false,false,false,false,false,false,0,0,0,0,0,0,0,false,false,false,false,true,false,false,false,false,false,false,true,true,true,0,0,0,0,0,0,20,0,3,2,1\n",
-            header = CSV_HEADER
+            "{header}\n{row}\n",
+            header = CSV_HEADER,
+            row = CSV_VALID_ROW
         );
         fs::write(&csv_path, csv).unwrap();
 
@@ -340,6 +418,40 @@ mod tests {
         let err = load_item_data_from_csv(&csv_path).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("Empty CSV file"));
+    }
+
+    #[test]
+    fn test_load_item_data_from_csv_invalid_numeric_returns_error() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+
+        let mut cols: Vec<&str> = CSV_VALID_ROW.split(',').collect();
+        cols[1] = "not_a_number";
+        let csv = format!("{header}\n{}\n", cols.join(","), header = CSV_HEADER);
+        fs::write(&csv_path, csv).unwrap();
+
+        let err = load_item_data_from_csv(&csv_path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Failed to parse"));
+        assert!(err.to_string().contains("price"));
+        assert!(err.to_string().contains("row 2"));
+    }
+
+    #[test]
+    fn test_load_item_data_from_csv_invalid_boolean_returns_error() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+
+        let mut cols: Vec<&str> = CSV_VALID_ROW.split(',').collect();
+        cols[16] = "maybe";
+        let csv = format!("{header}\n{}\n", cols.join(","), header = CSV_HEADER);
+        fs::write(&csv_path, csv).unwrap();
+
+        let err = load_item_data_from_csv(&csv_path).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Failed to parse"));
+        assert!(err.to_string().contains("healSleep"));
+        assert!(err.to_string().contains("row 2"));
     }
 
     #[test]
