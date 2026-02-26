@@ -91,43 +91,8 @@ impl DecompItemData {
             resolve_required_constant(&resolve_constant, &self.hold_effect, "holdEffect", "item")?
                 as u8;
 
-        let field_pocket = match self.field_pocket.as_str() {
-            "POCKET_ITEMS" => FieldPocket::Items,
-            "POCKET_MEDICINE" => FieldPocket::Medicine,
-            "POCKET_BALLS" => FieldPocket::Balls,
-            "POCKET_TM_HMS" => FieldPocket::TmHms,
-            "POCKET_BERRIES" => FieldPocket::Berries,
-            "POCKET_MAIL" => FieldPocket::Mail,
-            "POCKET_BATTLE_ITEMS" => FieldPocket::BattleItems,
-            "POCKET_KEY_ITEMS" => FieldPocket::KeyItems,
-            _ => FieldPocket::Items,
-        };
-
-        let mut battle_pocket = self
-            .battle_pocket
-            .parse::<u8>()
-            .ok()
-            .map(BattlePocket::from_bits_truncate)
-            .unwrap_or_default();
-        if battle_pocket.is_empty() {
-            for flag in self.battle_pocket.split('|').map(str::trim) {
-                match flag {
-                    "BATTLE_POCKET_MASK_POKE_BALLS" => battle_pocket |= BattlePocket::POKE_BALLS,
-                    "BATTLE_POCKET_MASK_BATTLE_ITEMS" => {
-                        battle_pocket |= BattlePocket::BATTLE_ITEMS
-                    }
-                    "BATTLE_POCKET_MASK_RECOVER_HP" => battle_pocket |= BattlePocket::HP_RESTORE,
-                    "BATTLE_POCKET_MASK_RECOVER_STATUS" => {
-                        battle_pocket |= BattlePocket::STATUS_HEALERS;
-                    }
-                    "BATTLE_POCKET_MASK_RECOVER_PP" => battle_pocket |= BattlePocket::PP_RESTORE,
-                    "BATTLE_POCKET_MASK_RECOVER_HP_STATUS" => {
-                        battle_pocket |= BattlePocket::HP_RESTORE | BattlePocket::STATUS_HEALERS;
-                    }
-                    _ => {}
-                }
-            }
-        }
+        let field_pocket = parse_field_pocket(&self.field_pocket)?;
+        let battle_pocket = parse_battle_pocket(&self.battle_pocket)?;
 
         let field_use_func = resolve_required_constant(
             &resolve_constant,
@@ -202,6 +167,81 @@ impl DecompItemData {
             party_use_param,
         })
     }
+}
+
+fn parse_field_pocket(value: &str) -> io::Result<FieldPocket> {
+    match value {
+        "POCKET_ITEMS" => Ok(FieldPocket::Items),
+        "POCKET_MEDICINE" => Ok(FieldPocket::Medicine),
+        "POCKET_BALLS" => Ok(FieldPocket::Balls),
+        "POCKET_TM_HMS" => Ok(FieldPocket::TmHms),
+        "POCKET_BERRIES" => Ok(FieldPocket::Berries),
+        "POCKET_MAIL" => Ok(FieldPocket::Mail),
+        "POCKET_BATTLE_ITEMS" => Ok(FieldPocket::BattleItems),
+        "POCKET_KEY_ITEMS" => Ok(FieldPocket::KeyItems),
+        _ => match value.parse::<u8>() {
+            Ok(0) => Ok(FieldPocket::Items),
+            Ok(1) => Ok(FieldPocket::Medicine),
+            Ok(2) => Ok(FieldPocket::Balls),
+            Ok(3) => Ok(FieldPocket::TmHms),
+            Ok(4) => Ok(FieldPocket::Berries),
+            Ok(5) => Ok(FieldPocket::Mail),
+            Ok(6) => Ok(FieldPocket::BattleItems),
+            Ok(7) => Ok(FieldPocket::KeyItems),
+            Ok(other) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid numeric field pocket '{}' (expected 0..=7)", other),
+            )),
+            Err(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid field pocket '{}'", value),
+            )),
+        },
+    }
+}
+
+fn parse_battle_pocket(value: &str) -> io::Result<BattlePocket> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(BattlePocket::empty());
+    }
+
+    if let Ok(bits) = trimmed.parse::<u8>() {
+        return BattlePocket::from_bits(bits).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Invalid numeric battle pocket '{}' (contains unsupported flag bits)",
+                    bits
+                ),
+            )
+        });
+    }
+
+    let mut battle_pocket = BattlePocket::empty();
+    for flag in trimmed.split('|').map(str::trim) {
+        match flag {
+            "BATTLE_POCKET_MASK_NONE" => {}
+            "BATTLE_POCKET_MASK_POKE_BALLS" => battle_pocket |= BattlePocket::POKE_BALLS,
+            "BATTLE_POCKET_MASK_BATTLE_ITEMS" => battle_pocket |= BattlePocket::BATTLE_ITEMS,
+            "BATTLE_POCKET_MASK_RECOVER_HP" => battle_pocket |= BattlePocket::HP_RESTORE,
+            "BATTLE_POCKET_MASK_RECOVER_STATUS" => {
+                battle_pocket |= BattlePocket::STATUS_HEALERS;
+            }
+            "BATTLE_POCKET_MASK_RECOVER_PP" => battle_pocket |= BattlePocket::PP_RESTORE,
+            "BATTLE_POCKET_MASK_RECOVER_HP_STATUS" => {
+                battle_pocket |= BattlePocket::HP_RESTORE | BattlePocket::STATUS_HEALERS;
+            }
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid battle pocket flag '{}'", flag),
+                ));
+            }
+        }
+    }
+
+    Ok(battle_pocket)
 }
 
 fn parse_bool(s: &str, row_number: usize, column: &str) -> io::Result<bool> {
@@ -486,6 +526,77 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("HOLD_EFFECT_NONE"));
         assert!(err.to_string().contains("holdEffect"));
+    }
+
+    #[test]
+    fn test_to_item_data_invalid_field_pocket_returns_error() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        let mut cols: Vec<&str> = CSV_VALID_ROW.split(',').collect();
+        cols[11] = "POCKET_UNKNOWN";
+        let csv = format!("{header}\n{}\n", cols.join(","), header = CSV_HEADER);
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        let item = loaded.get("ITEM_POTION").unwrap();
+        let err = item
+            .to_item_data(|name| match name {
+                "HOLD_EFFECT_NONE" => Some(0),
+                "ITEMUSE_NONE" => Some(0),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid field pocket"));
+    }
+
+    #[test]
+    fn test_to_item_data_invalid_battle_pocket_flag_returns_error() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        let mut cols: Vec<&str> = CSV_VALID_ROW.split(',').collect();
+        cols[12] = "BATTLE_POCKET_MASK_UNKNOWN";
+        let csv = format!("{header}\n{}\n", cols.join(","), header = CSV_HEADER);
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        let item = loaded.get("ITEM_POTION").unwrap();
+        let err = item
+            .to_item_data(|name| match name {
+                "HOLD_EFFECT_NONE" => Some(0),
+                "ITEMUSE_NONE" => Some(0),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid battle pocket flag"));
+    }
+
+    #[test]
+    fn test_to_item_data_numeric_field_and_battle_pocket_are_supported() {
+        let dir = tempdir().unwrap();
+        let csv_path = dir.path().join("pl_item_data.csv");
+        let mut cols: Vec<&str> = CSV_VALID_ROW.split(',').collect();
+        cols[11] = "2";
+        cols[12] = "5";
+        let csv = format!("{header}\n{}\n", cols.join(","), header = CSV_HEADER);
+        fs::write(&csv_path, csv).unwrap();
+
+        let loaded = load_item_data_from_csv(&csv_path).unwrap();
+        let item = loaded.get("ITEM_POTION").unwrap();
+        let data = item
+            .to_item_data(|name| match name {
+                "HOLD_EFFECT_NONE" => Some(0),
+                "ITEMUSE_NONE" => Some(0),
+                _ => None,
+            })
+            .unwrap();
+
+        assert_eq!(data.field_pocket, FieldPocket::Balls);
+        assert!(data.battle_pocket.contains(BattlePocket::POKE_BALLS));
+        assert!(data.battle_pocket.contains(BattlePocket::HP_RESTORE));
     }
 
     #[test]

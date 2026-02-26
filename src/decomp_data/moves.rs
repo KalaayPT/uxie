@@ -66,11 +66,14 @@ impl DecompMoveData {
         )? as u16;
 
         let split = match self.move_class.as_str() {
-            "CLASS_PHYSICAL" => MoveSplit::Physical,
-            "CLASS_SPECIAL" => MoveSplit::Special,
-            "CLASS_STATUS" => MoveSplit::Status,
-            _ => MoveSplit::Status,
-        };
+            "CLASS_PHYSICAL" => Ok(MoveSplit::Physical),
+            "CLASS_SPECIAL" => Ok(MoveSplit::Special),
+            "CLASS_STATUS" => Ok(MoveSplit::Status),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid move class '{}'", self.move_class.as_str()),
+            )),
+        }?;
 
         let move_type =
             resolve_required_constant(&resolve_constant, &self.move_type, "type", "move")? as u8;
@@ -280,6 +283,39 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("TYPE_NORMAL"));
         assert!(err.to_string().contains("type"));
+    }
+
+    #[test]
+    fn test_to_move_data_invalid_move_class_returns_error() {
+        let data = DecompMoveData {
+            name: "Tackle".to_string(),
+            move_class: "CLASS_NOT_REAL".to_string(),
+            move_type: "TYPE_NORMAL".to_string(),
+            power: 40,
+            accuracy: 100,
+            pp: 35,
+            effect: MoveEffect {
+                effect_type: "MOVE_EFFECT_HIT".to_string(),
+                chance: 0,
+            },
+            range: "RANGE_ADJACENT_OPPONENTS".to_string(),
+            priority: 0,
+            flags: vec![],
+            contest: None,
+        };
+
+        let err = data
+            .to_move_data(|name| match name {
+                "MOVE_EFFECT_HIT" => Some(1),
+                "TYPE_NORMAL" => Some(2),
+                "RANGE_ADJACENT_OPPONENTS" => Some(3),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("Invalid move class"));
+        assert!(err.to_string().contains("CLASS_NOT_REAL"));
     }
 
     #[test]

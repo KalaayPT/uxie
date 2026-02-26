@@ -179,13 +179,10 @@ impl DecompPokemonData {
         let mut tm_compatibility = [0u8; 16];
         if let Some(ref learnset) = self.learnset {
             for tm in &learnset.by_tm {
-                if let Some(idx) = parse_tm_index(tm) {
-                    if idx < 128 {
-                        let byte_idx = (idx / 8) as usize;
-                        let bit_idx = idx % 8;
-                        tm_compatibility[byte_idx] |= 1 << bit_idx;
-                    }
-                }
+                let idx = parse_tm_index(tm)?;
+                let byte_idx = (idx / 8) as usize;
+                let bit_idx = idx % 8;
+                tm_compatibility[byte_idx] |= 1 << bit_idx;
             }
         }
 
@@ -219,16 +216,45 @@ impl DecompPokemonData {
 }
 
 /// Parse TM/HM index from string like "TM01", "TM92", "HM01"
-fn parse_tm_index(tm: &str) -> Option<u8> {
-    if tm.starts_with("TM") {
-        // TM01-TM92 -> indices 0-91
-        tm[2..].parse::<u8>().ok().map(|n| n.saturating_sub(1))
-    } else if tm.starts_with("HM") {
-        // HM01-HM08 -> indices 92-99
-        tm[2..].parse::<u8>().ok().map(|n| 91 + n)
-    } else {
-        None
+fn parse_tm_index(tm: &str) -> io::Result<u8> {
+    let token = tm.trim();
+
+    if let Some(number) = token.strip_prefix("TM") {
+        let number = number.parse::<u8>().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid TM token '{}' (expected TM01..TM92)", token),
+            )
+        })?;
+        return match number {
+            1..=92 => Ok(number - 1),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid TM token '{}' (expected TM01..TM92)", token),
+            )),
+        };
     }
+
+    if let Some(number) = token.strip_prefix("HM") {
+        let number = number.parse::<u8>().map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid HM token '{}' (expected HM01..HM08)", token),
+            )
+        })?;
+        return match number {
+            1..=8 => Ok(91 + number),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Invalid HM token '{}' (expected HM01..HM08)", token),
+            )),
+        };
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("Invalid TM/HM token '{}' (expected TMxx or HMxx)", token),
+    ))
 }
 
 /// Load Pokemon data from a decomp JSON file
@@ -279,11 +305,20 @@ mod tests {
 
     #[test]
     fn test_parse_tm_index() {
-        assert_eq!(parse_tm_index("TM01"), Some(0));
-        assert_eq!(parse_tm_index("TM25"), Some(24));
-        assert_eq!(parse_tm_index("TM92"), Some(91));
-        assert_eq!(parse_tm_index("HM01"), Some(92));
-        assert_eq!(parse_tm_index("HM08"), Some(99));
+        assert_eq!(parse_tm_index("TM01").unwrap(), 0);
+        assert_eq!(parse_tm_index("TM25").unwrap(), 24);
+        assert_eq!(parse_tm_index("TM92").unwrap(), 91);
+        assert_eq!(parse_tm_index("HM01").unwrap(), 92);
+        assert_eq!(parse_tm_index("HM08").unwrap(), 99);
+    }
+
+    #[test]
+    fn test_parse_tm_index_invalid_tokens_return_error() {
+        for token in ["TM00", "TM93", "HM00", "HM09", "TMX1", "MOVE_TACKLE"] {
+            let err = parse_tm_index(token).unwrap_err();
+            assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+            assert!(err.to_string().contains(token));
+        }
     }
 
     #[test]
@@ -421,6 +456,55 @@ mod tests {
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("EGG_GROUP_HUMAN_LIKE"));
         assert!(err.to_string().contains("egg_groups[1]"));
+    }
+
+    #[test]
+    fn test_to_personal_data_invalid_tm_token_returns_error() {
+        let data: DecompPokemonData = serde_json::from_str(
+            r#"{
+  "base_stats": {
+    "hp": 44, "attack": 58, "defense": 44, "speed": 61, "special_attack": 58, "special_defense": 44
+  },
+  "types": ["TYPE_FIRE", "TYPE_FIRE"],
+  "catch_rate": 45,
+  "base_exp_reward": 62,
+  "ev_yields": { "hp": 0, "attack": 0, "defense": 0, "speed": 1, "special_attack": 0, "special_defense": 0 },
+  "held_items": { "common": "ITEM_NONE", "rare": "ITEM_NONE" },
+  "gender_ratio": "MON_RATIO_MALE_87_5",
+  "hatch_cycles": 20,
+  "base_friendship": 70,
+  "exp_rate": "GROWTH_MEDIUM_SLOW",
+  "egg_groups": ["EGG_GROUP_FIELD", "EGG_GROUP_HUMAN_LIKE"],
+  "abilities": ["ABILITY_BLAZE", "ABILITY_NONE"],
+  "safari_flee_rate": 0,
+  "body_color": "BODY_COLOR_BROWN",
+  "flip_sprite": false,
+  "learnset": {
+    "by_level": [],
+    "by_tm": ["TM01", "TM00"]
+  }
+}"#,
+        )
+        .unwrap();
+
+        let err = data
+            .to_personal_data(|name| match name {
+                "TYPE_FIRE" => Some(10),
+                "ITEM_NONE" => Some(0),
+                "MON_RATIO_MALE_87_5" => Some(31),
+                "GROWTH_MEDIUM_SLOW" => Some(3),
+                "EGG_GROUP_FIELD" => Some(5),
+                "EGG_GROUP_HUMAN_LIKE" => Some(8),
+                "ABILITY_BLAZE" => Some(66),
+                "ABILITY_NONE" => Some(0),
+                "BODY_COLOR_BROWN" => Some(4),
+                _ => None,
+            })
+            .unwrap_err();
+
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("TM00"));
+        assert!(err.to_string().contains("TM01..TM92"));
     }
 
     #[test]
