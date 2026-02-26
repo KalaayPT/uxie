@@ -171,6 +171,23 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_load_recursive_propagates_events_json_schema_errors() {
+        let dir = tempdir().unwrap();
+        let sm = SourceManager::new();
+
+        let main_path = create_file(dir.path(), "main.h", "#include \"res/field/events/test.h\"");
+        let events_json_path = dir.path().join("res/field/events/test.json");
+        std::fs::create_dir_all(events_json_path.parent().unwrap()).unwrap();
+        std::fs::write(&events_json_path, "{}").unwrap();
+
+        let mut table = SymbolTable::with_source_manager(sm);
+        let err = table.load_recursive(&main_path, &[]).unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("object_events"));
+    }
+
+    #[test]
     #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_load_headers_from_dir_platinum_real_fixture() {
         let Some(root) = crate::test_env::existing_path_from_env(

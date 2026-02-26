@@ -635,19 +635,30 @@ impl SymbolTable {
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let mut count = 0;
 
-        if let Some(events) = json.get("object_events").and_then(|v| v.as_array()) {
-            for (index, event) in events.iter().enumerate() {
-                if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
-                    let val = index as i64;
-                    self.symbols.insert(id.to_string(), val);
-                    self.value_to_names
-                        .entry(val)
-                        .or_default()
-                        .push(id.to_string());
-                    self.symbol_to_file
-                        .insert(id.to_string(), path.to_path_buf());
-                    count += 1;
-                }
+        let events = json
+            .get("object_events")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Events JSON {} is missing an 'object_events' array",
+                        path.display()
+                    ),
+                )
+            })?;
+
+        for (index, event) in events.iter().enumerate() {
+            if let Some(id) = event.get("id").and_then(|v| v.as_str()) {
+                let val = index as i64;
+                self.symbols.insert(id.to_string(), val);
+                self.value_to_names
+                    .entry(val)
+                    .or_default()
+                    .push(id.to_string());
+                self.symbol_to_file
+                    .insert(id.to_string(), path.to_path_buf());
+                count += 1;
             }
         }
 
