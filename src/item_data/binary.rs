@@ -111,6 +111,11 @@ mod tests {
 
     #[test]
     fn test_roundtrip() {
+        let party_use_flags = ItemPartyUseFlagsBits::new().with_hp_restore(true);
+        let party_use_values = ItemPartyUseValues {
+            hp_restored: 20,
+            ..Default::default()
+        };
         let item = ItemData {
             price: 200,
             hold_effect: 0,
@@ -127,11 +132,7 @@ mod tests {
             field_use_func: 2,
             battle_use_func: 0,
             party_use: 1,
-            party_use_param: ItemPartyUseParam {
-                hp_restore: true,
-                hp_restored: 20,
-                ..Default::default()
-            },
+            party_use_param: ItemPartyUseParam::from_parts(party_use_flags, party_use_values),
         };
 
         let bytes = item.to_bytes();
@@ -143,29 +144,30 @@ mod tests {
         assert_eq!(item.price, parsed.price);
         assert_eq!(item.field_pocket, parsed.field_pocket);
         assert_eq!(item.is_selectable, parsed.is_selectable);
-        assert_eq!(
-            item.party_use_param.hp_restored,
-            parsed.party_use_param.hp_restored
-        );
+        let (_, item_values) = item.party_use_param.to_parts();
+        let (_, parsed_values) = parsed.party_use_param.to_parts();
+        assert_eq!(item_values.hp_restored, parsed_values.hp_restored);
     }
 
     #[test]
     fn test_party_use_param_roundtrip() {
-        let param = ItemPartyUseParam {
-            heal_sleep: true,
-            heal_poison: true,
-            hp_restore: true,
+        let flags = ItemPartyUseFlagsBits::new()
+            .with_heal_sleep(true)
+            .with_heal_poison(true)
+            .with_hp_restore(true)
+            .with_give_hp_evs(true)
+            .with_give_friendship_low(true)
+            .with_give_friendship_med(true)
+            .with_give_friendship_high(true);
+        let values = ItemPartyUseValues {
             hp_restored: 50,
-            give_hp_evs: true,
             hp_evs: 10,
             friendship_low: 5,
             friendship_med: 3,
             friendship_high: 1,
-            give_friendship_low: true,
-            give_friendship_med: true,
-            give_friendship_high: true,
             ..Default::default()
         };
+        let param = ItemPartyUseParam::from_parts(flags, values);
 
         let mut buf = Cursor::new(Vec::new());
         param.to_binary(&mut buf).unwrap();
@@ -256,46 +258,8 @@ mod tests {
     }
 
     fn party_use_param_strategy() -> impl Strategy<Value = ItemPartyUseParam> {
-        let status = (
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-        );
-        let stages = (
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            0u8..16,
-            0u8..16,
-            0u8..16,
-            0u8..16,
-            0u8..16,
-            0u8..16,
-            0u8..4,
-        );
-        let flags = (
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-            any::<bool>(),
-        );
-        let values_a = (
-            any::<bool>(),
-            any::<bool>(),
+        let flags = any::<[u8; 7]>();
+        let values = (
             any::<i8>(),
             any::<i8>(),
             any::<i8>(),
@@ -304,51 +268,15 @@ mod tests {
             any::<i8>(),
             any::<u8>(),
             any::<u8>(),
+            any::<i8>(),
+            any::<i8>(),
+            any::<i8>(),
         );
-        let values_b = (any::<i8>(), any::<i8>(), any::<i8>());
 
-        (status, stages, flags, values_a, values_b).prop_map(
+        (flags, values).prop_map(
             |(
+                flags_bytes,
                 (
-                    heal_sleep,
-                    heal_poison,
-                    heal_burn,
-                    heal_freeze,
-                    heal_paralysis,
-                    heal_confusion,
-                    heal_attract,
-                    guard_spec,
-                ),
-                (
-                    revive,
-                    revive_all,
-                    level_up,
-                    evolve,
-                    atk_stages,
-                    def_stages,
-                    spatk_stages,
-                    spdef_stages,
-                    speed_stages,
-                    acc_stages,
-                    crit_stages,
-                ),
-                (
-                    pp_up,
-                    pp_max,
-                    pp_restore,
-                    pp_restore_all,
-                    hp_restore,
-                    give_hp_evs,
-                    give_atk_evs,
-                    give_def_evs,
-                    give_speed_evs,
-                    give_spatk_evs,
-                    give_spdef_evs,
-                    give_friendship_low,
-                ),
-                (
-                    give_friendship_med,
-                    give_friendship_high,
                     hp_evs,
                     atk_evs,
                     def_evs,
@@ -357,53 +285,27 @@ mod tests {
                     spdef_evs,
                     hp_restored,
                     pp_restored,
+                    friendship_low,
+                    friendship_med,
+                    friendship_high,
                 ),
-                (friendship_low, friendship_med, friendship_high),
-            )| ItemPartyUseParam {
-                heal_sleep,
-                heal_poison,
-                heal_burn,
-                heal_freeze,
-                heal_paralysis,
-                heal_confusion,
-                heal_attract,
-                guard_spec,
-                revive,
-                revive_all,
-                level_up,
-                evolve,
-                atk_stages,
-                def_stages,
-                spatk_stages,
-                spdef_stages,
-                speed_stages,
-                acc_stages,
-                crit_stages,
-                pp_up,
-                pp_max,
-                pp_restore,
-                pp_restore_all,
-                hp_restore,
-                give_hp_evs,
-                give_atk_evs,
-                give_def_evs,
-                give_speed_evs,
-                give_spatk_evs,
-                give_spdef_evs,
-                give_friendship_low,
-                give_friendship_med,
-                give_friendship_high,
-                hp_evs,
-                atk_evs,
-                def_evs,
-                speed_evs,
-                spatk_evs,
-                spdef_evs,
-                hp_restored,
-                pp_restored,
-                friendship_low,
-                friendship_med,
-                friendship_high,
+            )| {
+                let flags = ItemPartyUseFlagsBits::from_bytes(flags_bytes);
+                let values = ItemPartyUseValues {
+                    hp_evs,
+                    atk_evs,
+                    def_evs,
+                    speed_evs,
+                    spatk_evs,
+                    spdef_evs,
+                    hp_restored,
+                    pp_restored,
+                    friendship_low,
+                    friendship_med,
+                    friendship_high,
+                };
+
+                ItemPartyUseParam::from_parts(flags, values)
             },
         )
     }

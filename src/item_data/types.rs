@@ -62,7 +62,7 @@ pub struct ItemBitfield {
 
 /// Packed bitfield for party use flags (7 bytes / 56 bits)
 #[bitfield(bits = 56)]
-#[derive(Debug, Clone, Copy, Default, BinRead, BinWrite)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, BinRead, BinWrite)]
 #[br(map = Self::from_bytes)]
 #[bw(map = |s: &Self| s.into_bytes())]
 #[allow(unused_parens)]
@@ -118,7 +118,7 @@ pub struct ItemPartyUseFlagsBits {
 }
 
 /// Scalar values following the party use flags (11 bytes)
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, BinRead, BinWrite)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, BinRead, BinWrite)]
 #[brw(little)]
 pub struct ItemPartyUseValues {
     pub hp_evs: i8,
@@ -135,172 +135,45 @@ pub struct ItemPartyUseValues {
 }
 
 /// Party use parameters (18 bytes: 7 bytes flags + 11 bytes values)
+///
+/// This keeps the binary shape as the canonical model to avoid duplicating
+/// each flag/value in a second flattened struct representation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ItemPartyUseParam {
-    // Byte 0: Status healing flags
-    pub heal_sleep: bool,
-    pub heal_poison: bool,
-    pub heal_burn: bool,
-    pub heal_freeze: bool,
-    pub heal_paralysis: bool,
-    pub heal_confusion: bool,
-    pub heal_attract: bool,
-    pub guard_spec: bool,
-
-    // Byte 1: Revival/level flags + attack stages
-    pub revive: bool,
-    pub revive_all: bool,
-    pub level_up: bool,
-    pub evolve: bool,
-    pub atk_stages: u8,
-
-    // Byte 2: Defense and SpAtk stages
-    pub def_stages: u8,
-    pub spatk_stages: u8,
-
-    // Byte 3: SpDef and Speed stages
-    pub spdef_stages: u8,
-    pub speed_stages: u8,
-
-    // Byte 4: Accuracy, Crit stages, PP flags
-    pub acc_stages: u8,
-    pub crit_stages: u8,
-    pub pp_up: bool,
-    pub pp_max: bool,
-
-    // Byte 5: PP/HP restore flags, EV boost flags (part 1)
-    pub pp_restore: bool,
-    pub pp_restore_all: bool,
-    pub hp_restore: bool,
-    pub give_hp_evs: bool,
-    pub give_atk_evs: bool,
-    pub give_def_evs: bool,
-    pub give_speed_evs: bool,
-    pub give_spatk_evs: bool,
-
-    // Byte 6: EV boost flags (part 2), Friendship flags
-    pub give_spdef_evs: bool,
-    pub give_friendship_low: bool,
-    pub give_friendship_med: bool,
-    pub give_friendship_high: bool,
-
-    // Bytes 7-17: Raw values (11 bytes)
-    pub hp_evs: i8,
-    pub atk_evs: i8,
-    pub def_evs: i8,
-    pub speed_evs: i8,
-    pub spatk_evs: i8,
-    pub spdef_evs: i8,
-    pub hp_restored: u8,
-    pub pp_restored: u8,
-    pub friendship_low: i8,
-    pub friendship_med: i8,
-    pub friendship_high: i8,
+    #[serde(with = "item_party_use_flags_serde")]
+    flags: ItemPartyUseFlagsBits,
+    values: ItemPartyUseValues,
 }
 
 impl ItemPartyUseParam {
     /// Convert from binary representation
     pub fn from_parts(flags: ItemPartyUseFlagsBits, values: ItemPartyUseValues) -> Self {
-        Self {
-            heal_sleep: flags.heal_sleep(),
-            heal_poison: flags.heal_poison(),
-            heal_burn: flags.heal_burn(),
-            heal_freeze: flags.heal_freeze(),
-            heal_paralysis: flags.heal_paralysis(),
-            heal_confusion: flags.heal_confusion(),
-            heal_attract: flags.heal_attract(),
-            guard_spec: flags.guard_spec(),
-            revive: flags.revive(),
-            revive_all: flags.revive_all(),
-            level_up: flags.level_up(),
-            evolve: flags.evolve(),
-            atk_stages: flags.atk_stages(),
-            def_stages: flags.def_stages(),
-            spatk_stages: flags.spatk_stages(),
-            spdef_stages: flags.spdef_stages(),
-            speed_stages: flags.speed_stages(),
-            acc_stages: flags.acc_stages(),
-            crit_stages: flags.crit_stages(),
-            pp_up: flags.pp_up(),
-            pp_max: flags.pp_max(),
-            pp_restore: flags.pp_restore(),
-            pp_restore_all: flags.pp_restore_all(),
-            hp_restore: flags.hp_restore(),
-            give_hp_evs: flags.give_hp_evs(),
-            give_atk_evs: flags.give_atk_evs(),
-            give_def_evs: flags.give_def_evs(),
-            give_speed_evs: flags.give_speed_evs(),
-            give_spatk_evs: flags.give_spatk_evs(),
-            give_spdef_evs: flags.give_spdef_evs(),
-            give_friendship_low: flags.give_friendship_low(),
-            give_friendship_med: flags.give_friendship_med(),
-            give_friendship_high: flags.give_friendship_high(),
-            hp_evs: values.hp_evs,
-            atk_evs: values.atk_evs,
-            def_evs: values.def_evs,
-            speed_evs: values.speed_evs,
-            spatk_evs: values.spatk_evs,
-            spdef_evs: values.spdef_evs,
-            hp_restored: values.hp_restored,
-            pp_restored: values.pp_restored,
-            friendship_low: values.friendship_low,
-            friendship_med: values.friendship_med,
-            friendship_high: values.friendship_high,
-        }
+        Self { flags, values }
     }
 
     /// Convert to binary representation
     pub fn to_parts(&self) -> (ItemPartyUseFlagsBits, ItemPartyUseValues) {
-        let flags = ItemPartyUseFlagsBits::new()
-            .with_heal_sleep(self.heal_sleep)
-            .with_heal_poison(self.heal_poison)
-            .with_heal_burn(self.heal_burn)
-            .with_heal_freeze(self.heal_freeze)
-            .with_heal_paralysis(self.heal_paralysis)
-            .with_heal_confusion(self.heal_confusion)
-            .with_heal_attract(self.heal_attract)
-            .with_guard_spec(self.guard_spec)
-            .with_revive(self.revive)
-            .with_revive_all(self.revive_all)
-            .with_level_up(self.level_up)
-            .with_evolve(self.evolve)
-            .with_atk_stages(self.atk_stages)
-            .with_def_stages(self.def_stages)
-            .with_spatk_stages(self.spatk_stages)
-            .with_spdef_stages(self.spdef_stages)
-            .with_speed_stages(self.speed_stages)
-            .with_acc_stages(self.acc_stages)
-            .with_crit_stages(self.crit_stages)
-            .with_pp_up(self.pp_up)
-            .with_pp_max(self.pp_max)
-            .with_pp_restore(self.pp_restore)
-            .with_pp_restore_all(self.pp_restore_all)
-            .with_hp_restore(self.hp_restore)
-            .with_give_hp_evs(self.give_hp_evs)
-            .with_give_atk_evs(self.give_atk_evs)
-            .with_give_def_evs(self.give_def_evs)
-            .with_give_speed_evs(self.give_speed_evs)
-            .with_give_spatk_evs(self.give_spatk_evs)
-            .with_give_spdef_evs(self.give_spdef_evs)
-            .with_give_friendship_low(self.give_friendship_low)
-            .with_give_friendship_med(self.give_friendship_med)
-            .with_give_friendship_high(self.give_friendship_high);
+        (self.flags, self.values)
+    }
+}
 
-        let values = ItemPartyUseValues {
-            hp_evs: self.hp_evs,
-            atk_evs: self.atk_evs,
-            def_evs: self.def_evs,
-            speed_evs: self.speed_evs,
-            spatk_evs: self.spatk_evs,
-            spdef_evs: self.spdef_evs,
-            hp_restored: self.hp_restored,
-            pp_restored: self.pp_restored,
-            friendship_low: self.friendship_low,
-            friendship_med: self.friendship_med,
-            friendship_high: self.friendship_high,
-        };
+mod item_party_use_flags_serde {
+    use super::ItemPartyUseFlagsBits;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-        (flags, values)
+    pub fn serialize<S>(flags: &ItemPartyUseFlagsBits, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        flags.into_bytes().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<ItemPartyUseFlagsBits, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let bytes = <[u8; 7]>::deserialize(deserializer)?;
+        Ok(ItemPartyUseFlagsBits::from_bytes(bytes))
     }
 }
 
@@ -329,6 +202,8 @@ pub struct ItemData {
 
 impl ItemData {
     /// Convert from binary representation parts
+    // Explicit positional mapping from the binary layout keeps decode paths straightforward.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts(
         price: u16,
         hold_effect: u8,

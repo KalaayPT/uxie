@@ -5,3 +5,4 @@ mod types;
 
 pub use binary::ITEM_DATA_SIZE;
 pub use types::{BattlePocket, FieldPocket, ItemData, ItemPartyUseParam};
+pub(crate) use types::{ItemPartyUseFlagsBits, ItemPartyUseValues};

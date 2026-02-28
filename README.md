@@ -87,6 +87,9 @@ All commands support `--json` for structured output and `-p/--project` to specif
 
 Use `-d/--decomp` to specify a decompilation project path for symbol resolution.
 
+`item --json` emits `party_use_param` in a binary-shape-aligned form:
+`{ "flags": [..7 bytes..], "values": { ... } }`.
+
 ## Library Usage
 
 ### Workspace API

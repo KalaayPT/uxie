@@ -3,12 +3,17 @@
 //! Parses `res/items/pl_item_data.csv` and converts to `ItemData`.
 
 use super::util::resolve_required_constant;
-use crate::item_data::{BattlePocket, FieldPocket, ItemData, ItemPartyUseParam};
+use crate::item_data::{
+    BattlePocket, FieldPocket, ItemData, ItemPartyUseFlagsBits, ItemPartyUseParam,
+    ItemPartyUseValues,
+};
 use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::path::Path;
 
+// Mirrors decomp CSV schema one-to-one; many boolean switches are intentional.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone)]
 pub struct DecompItemData {
     pub name: String,
@@ -101,40 +106,41 @@ impl DecompItemData {
             "item",
         )? as u8;
 
-        let party_use_param = ItemPartyUseParam {
-            heal_sleep: self.heal_sleep,
-            heal_poison: self.heal_poison,
-            heal_burn: self.heal_burn,
-            heal_freeze: self.heal_freeze,
-            heal_paralysis: self.heal_paralysis,
-            heal_confusion: self.heal_confusion,
-            heal_attract: self.heal_attract,
-            guard_spec: self.guard_spec,
-            revive: self.revive,
-            revive_all: self.revive_all,
-            level_up: self.level_up,
-            evolve: self.evolve,
-            atk_stages: self.atk_stages,
-            def_stages: self.def_stages,
-            spatk_stages: self.spatk_stages,
-            spdef_stages: self.spdef_stages,
-            speed_stages: self.speed_stages,
-            acc_stages: self.acc_stages,
-            crit_stages: self.crit_stages,
-            pp_up: self.pp_up,
-            pp_max: self.pp_max,
-            pp_restore: self.pp_restore,
-            pp_restore_all: self.pp_restore_all,
-            hp_restore: self.hp_restore,
-            give_hp_evs: self.give_hp_evs,
-            give_atk_evs: self.give_atk_evs,
-            give_def_evs: self.give_def_evs,
-            give_speed_evs: self.give_speed_evs,
-            give_spatk_evs: self.give_spatk_evs,
-            give_spdef_evs: self.give_spdef_evs,
-            give_friendship_low: self.give_friendship_low,
-            give_friendship_med: self.give_friendship_med,
-            give_friendship_high: self.give_friendship_high,
+        let party_use_flags = ItemPartyUseFlagsBits::new()
+            .with_heal_sleep(self.heal_sleep)
+            .with_heal_poison(self.heal_poison)
+            .with_heal_burn(self.heal_burn)
+            .with_heal_freeze(self.heal_freeze)
+            .with_heal_paralysis(self.heal_paralysis)
+            .with_heal_confusion(self.heal_confusion)
+            .with_heal_attract(self.heal_attract)
+            .with_guard_spec(self.guard_spec)
+            .with_revive(self.revive)
+            .with_revive_all(self.revive_all)
+            .with_level_up(self.level_up)
+            .with_evolve(self.evolve)
+            .with_atk_stages(self.atk_stages)
+            .with_def_stages(self.def_stages)
+            .with_spatk_stages(self.spatk_stages)
+            .with_spdef_stages(self.spdef_stages)
+            .with_speed_stages(self.speed_stages)
+            .with_acc_stages(self.acc_stages)
+            .with_crit_stages(self.crit_stages)
+            .with_pp_up(self.pp_up)
+            .with_pp_max(self.pp_max)
+            .with_pp_restore(self.pp_restore)
+            .with_pp_restore_all(self.pp_restore_all)
+            .with_hp_restore(self.hp_restore)
+            .with_give_hp_evs(self.give_hp_evs)
+            .with_give_atk_evs(self.give_atk_evs)
+            .with_give_def_evs(self.give_def_evs)
+            .with_give_speed_evs(self.give_speed_evs)
+            .with_give_spatk_evs(self.give_spatk_evs)
+            .with_give_spdef_evs(self.give_spdef_evs)
+            .with_give_friendship_low(self.give_friendship_low)
+            .with_give_friendship_med(self.give_friendship_med)
+            .with_give_friendship_high(self.give_friendship_high);
+        let party_use_values = ItemPartyUseValues {
             hp_evs: self.hp_evs,
             atk_evs: self.atk_evs,
             def_evs: self.def_evs,
@@ -147,6 +153,7 @@ impl DecompItemData {
             friendship_med: self.friendship_med,
             friendship_high: self.friendship_high,
         };
+        let party_use_param = ItemPartyUseParam::from_parts(party_use_flags, party_use_values);
 
         Ok(ItemData {
             price: self.price,
@@ -280,6 +287,9 @@ where
     })
 }
 
+// This mapping is intentionally explicit so each CSV column/alias is readable and
+// tied to field-level parse errors with row/column context.
+#[allow(clippy::too_many_lines)]
 fn parse_csv_row(
     header: &[&str],
     values: &[&str],
