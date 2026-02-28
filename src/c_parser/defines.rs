@@ -1,6 +1,8 @@
 use dashmap::DashMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::hash::BuildHasher;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CDefine {
@@ -236,12 +238,16 @@ impl<'a> Tokenizer<'a> {
     }
 }
 
-pub fn eval_expr_with_context(
+pub fn eval_expr_with_context<SExpr, SResolved>(
     expr: &str,
-    expressions: &FxHashMap<String, String>,
-    resolved: &FxHashMap<String, i64>,
+    expressions: &HashMap<String, String, SExpr>,
+    resolved: &HashMap<String, i64, SResolved>,
     cache: &DashMap<String, i64>,
-) -> Option<i64> {
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
     let mut visiting = FxHashSet::default();
     eval_expr_recursive(
         expr,
@@ -254,13 +260,17 @@ pub fn eval_expr_with_context(
     )
 }
 
-pub fn eval_expr_with_parent(
+pub fn eval_expr_with_parent<SExpr, SResolved>(
     expr: &str,
-    expressions: &FxHashMap<String, String>,
-    resolved: &FxHashMap<String, i64>,
+    expressions: &HashMap<String, String, SExpr>,
+    resolved: &HashMap<String, i64, SResolved>,
     cache: &DashMap<String, i64>,
     parent_resolver: &dyn Fn(&str) -> Option<i64>,
-) -> Option<i64> {
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
     let mut visiting = FxHashSet::default();
     eval_expr_recursive(
         expr,
@@ -273,15 +283,19 @@ pub fn eval_expr_with_parent(
     )
 }
 
-fn eval_expr_recursive(
+fn eval_expr_recursive<SExpr, SResolved>(
     expr: &str,
-    expressions: &FxHashMap<String, String>,
-    resolved: &FxHashMap<String, i64>,
+    expressions: &HashMap<String, String, SExpr>,
+    resolved: &HashMap<String, i64, SResolved>,
     cache: &DashMap<String, i64>,
     visiting: &mut FxHashSet<String>,
     depth: usize,
     parent_resolver: &dyn Fn(&str) -> Option<i64>,
-) -> Option<i64> {
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
     const MAX_DEPTH: usize = 128;
     if depth > MAX_DEPTH {
         return None;
@@ -328,17 +342,15 @@ fn eval_expr_recursive(
         None
     } else {
         let mut pos = 0;
-        let val = parse_expr(
-            &tokens,
-            &mut pos,
-            0,
+        let mut ctx = ParserContext {
             expressions,
             resolved,
             cache,
             visiting,
             depth,
             parent_resolver,
-        );
+        };
+        let val = parse_expr(&tokens, &mut pos, 0, &mut ctx);
         if pos == tokens.len() { val } else { None }
     };
 
@@ -370,27 +382,55 @@ fn get_precedence(tok: &Token) -> u8 {
     }
 }
 
-fn parse_expr(
+struct ParserContext<'a, SExpr, SResolved>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    expressions: &'a HashMap<String, String, SExpr>,
+    resolved: &'a HashMap<String, i64, SResolved>,
+    cache: &'a DashMap<String, i64>,
+    visiting: &'a mut FxHashSet<String>,
+    depth: usize,
+    parent_resolver: &'a dyn Fn(&str) -> Option<i64>,
+}
+
+fn apply_binary_op(op: &Token, left: i64, right: i64) -> Option<i64> {
+    match op {
+        Token::Plus => Some(left + right),
+        Token::Minus => Some(left - right),
+        Token::Star => Some(left * right),
+        Token::Slash => (right != 0).then_some(left / right),
+        Token::Percent => (right != 0).then_some(left % right),
+        Token::And => Some(left & right),
+        Token::Or => Some(left | right),
+        Token::Xor => Some(left ^ right),
+        Token::LShift => Some(left << right),
+        Token::RShift => Some(left >> right),
+        _ => Some(left),
+    }
+}
+
+fn expect_token(tokens: &[Token], pos: &mut usize, expected: Token) -> bool {
+    if *pos < tokens.len() && tokens[*pos] == expected {
+        *pos += 1;
+        true
+    } else {
+        false
+    }
+}
+
+fn parse_expr<SExpr, SResolved>(
     tokens: &[Token],
     pos: &mut usize,
     min_prec: u8,
-    expressions: &FxHashMap<String, String>,
-    resolved: &FxHashMap<String, i64>,
-    cache: &DashMap<String, i64>,
-    visiting: &mut FxHashSet<String>,
-    depth: usize,
-    parent_resolver: &dyn Fn(&str) -> Option<i64>,
-) -> Option<i64> {
-    let mut left = parse_primary(
-        tokens,
-        pos,
-        expressions,
-        resolved,
-        cache,
-        visiting,
-        depth,
-        parent_resolver,
-    )?;
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    let mut left = parse_primary(tokens, pos, ctx)?;
 
     while *pos < tokens.len() {
         let prec = get_precedence(&tokens[*pos]);
@@ -400,216 +440,142 @@ fn parse_expr(
 
         let op = tokens[*pos].clone();
         *pos += 1;
-        let right = parse_expr(
-            tokens,
-            pos,
-            prec + 1,
-            expressions,
-            resolved,
-            cache,
-            visiting,
-            depth,
-            parent_resolver,
-        )?;
-
-        left = match op {
-            Token::Plus => left + right,
-            Token::Minus => left - right,
-            Token::Star => left * right,
-            Token::Slash => {
-                if right == 0 {
-                    return None;
-                } else {
-                    left / right
-                }
-            }
-            Token::Percent => {
-                if right == 0 {
-                    return None;
-                } else {
-                    left % right
-                }
-            }
-            Token::And => left & right,
-            Token::Or => left | right,
-            Token::Xor => left ^ right,
-            Token::LShift => left << right,
-            Token::RShift => left >> right,
-            _ => left,
-        };
+        let right = parse_expr(tokens, pos, prec + 1, ctx)?;
+        left = apply_binary_op(&op, left, right)?;
     }
 
     Some(left)
 }
 
-fn parse_primary(
+fn parse_rgb_call<SExpr, SResolved>(
     tokens: &[Token],
     pos: &mut usize,
-    expressions: &FxHashMap<String, String>,
-    resolved: &FxHashMap<String, i64>,
-    cache: &DashMap<String, i64>,
-    visiting: &mut FxHashSet<String>,
-    depth: usize,
-    parent_resolver: &dyn Fn(&str) -> Option<i64>,
-) -> Option<i64> {
-    if *pos >= tokens.len() {
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    let r = parse_expr(tokens, pos, 0, ctx)?;
+    if !expect_token(tokens, pos, Token::Comma) {
         return None;
     }
+    let g = parse_expr(tokens, pos, 0, ctx)?;
+    if !expect_token(tokens, pos, Token::Comma) {
+        return None;
+    }
+    let b = parse_expr(tokens, pos, 0, ctx)?;
+    if !expect_token(tokens, pos, Token::RParen) {
+        return None;
+    }
+    Some((b << 10) | (g << 5) | r)
+}
 
-    match &tokens[*pos] {
+fn resolve_identifier<SExpr, SResolved>(
+    id: &str,
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    if let Some(&val) = ctx.resolved.get(id) {
+        return Some(val);
+    }
+    if let Some(cached) = ctx.cache.get(id) {
+        return Some(*cached);
+    }
+    if let Some(val) = (ctx.parent_resolver)(id) {
+        return Some(val);
+    }
+    if let Some(expr) = ctx.expressions.get(id) {
+        return eval_expr_recursive(
+            expr,
+            ctx.expressions,
+            ctx.resolved,
+            ctx.cache,
+            ctx.visiting,
+            ctx.depth + 1,
+            ctx.parent_resolver,
+        );
+    }
+    None
+}
+
+fn parse_identifier<SExpr, SResolved>(
+    tokens: &[Token],
+    pos: &mut usize,
+    id: &str,
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    if id == "RGB" && *pos + 1 < tokens.len() && tokens[*pos + 1] == Token::LParen {
+        *pos += 2;
+        return parse_rgb_call(tokens, pos, ctx);
+    }
+    *pos += 1;
+    resolve_identifier(id, ctx)
+}
+
+fn parse_parenthesized<SExpr, SResolved>(
+    tokens: &[Token],
+    pos: &mut usize,
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    *pos += 1;
+    let val = parse_expr(tokens, pos, 0, ctx)?;
+    if !expect_token(tokens, pos, Token::RParen) {
+        return None;
+    }
+    Some(val)
+}
+
+fn parse_unary<SExpr, SResolved>(
+    tokens: &[Token],
+    pos: &mut usize,
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    let op = tokens[*pos].clone();
+    *pos += 1;
+    let val = parse_primary(tokens, pos, ctx)?;
+    match op {
+        Token::Plus => Some(val),
+        Token::Minus => Some(-val),
+        Token::Tilde => Some(!val),
+        Token::Not => Some(i64::from(val == 0)),
+        _ => None,
+    }
+}
+
+fn parse_primary<SExpr, SResolved>(
+    tokens: &[Token],
+    pos: &mut usize,
+    ctx: &mut ParserContext<'_, SExpr, SResolved>,
+) -> Option<i64>
+where
+    SExpr: BuildHasher,
+    SResolved: BuildHasher,
+{
+    let token = tokens.get(*pos)?;
+    match token {
         Token::Number(n) => {
             *pos += 1;
             Some(*n)
         }
-        Token::Ident(id) => {
-            if id == "RGB" && *pos + 1 < tokens.len() && tokens[*pos + 1] == Token::LParen {
-                *pos += 2;
-                let r = parse_expr(
-                    tokens,
-                    pos,
-                    0,
-                    expressions,
-                    resolved,
-                    cache,
-                    visiting,
-                    depth,
-                    parent_resolver,
-                )?;
-                if *pos >= tokens.len() || tokens[*pos] != Token::Comma {
-                    return None;
-                }
-                *pos += 1;
-                let g = parse_expr(
-                    tokens,
-                    pos,
-                    0,
-                    expressions,
-                    resolved,
-                    cache,
-                    visiting,
-                    depth,
-                    parent_resolver,
-                )?;
-                if *pos >= tokens.len() || tokens[*pos] != Token::Comma {
-                    return None;
-                }
-                *pos += 1;
-                let b = parse_expr(
-                    tokens,
-                    pos,
-                    0,
-                    expressions,
-                    resolved,
-                    cache,
-                    visiting,
-                    depth,
-                    parent_resolver,
-                )?;
-                if *pos >= tokens.len() || tokens[*pos] != Token::RParen {
-                    return None;
-                }
-                *pos += 1;
-                return Some((b << 10) | (g << 5) | r);
-            }
-
-            let id_clone = id.clone();
-            *pos += 1;
-            if let Some(&val) = resolved.get(&id_clone) {
-                return Some(val);
-            }
-            if let Some(cached) = cache.get(&id_clone) {
-                return Some(*cached);
-            }
-            if let Some(val) = parent_resolver(&id_clone) {
-                return Some(val);
-            }
-            if let Some(expr) = expressions.get(&id_clone) {
-                return eval_expr_recursive(
-                    expr,
-                    expressions,
-                    resolved,
-                    cache,
-                    visiting,
-                    depth + 1,
-                    parent_resolver,
-                );
-            }
-            None
-        }
-        Token::LParen => {
-            *pos += 1;
-            let val = parse_expr(
-                tokens,
-                pos,
-                0,
-                expressions,
-                resolved,
-                cache,
-                visiting,
-                depth,
-                parent_resolver,
-            )?;
-            if *pos >= tokens.len() || tokens[*pos] != Token::RParen {
-                return None;
-            }
-            *pos += 1;
-            Some(val)
-        }
-        Token::Plus => {
-            *pos += 1;
-            parse_primary(
-                tokens,
-                pos,
-                expressions,
-                resolved,
-                cache,
-                visiting,
-                depth,
-                parent_resolver,
-            )
-        }
-        Token::Minus => {
-            *pos += 1;
-            let val = parse_primary(
-                tokens,
-                pos,
-                expressions,
-                resolved,
-                cache,
-                visiting,
-                depth,
-                parent_resolver,
-            )?;
-            Some(-val)
-        }
-        Token::Tilde => {
-            *pos += 1;
-            let val = parse_primary(
-                tokens,
-                pos,
-                expressions,
-                resolved,
-                cache,
-                visiting,
-                depth,
-                parent_resolver,
-            )?;
-            Some(!val)
-        }
-        Token::Not => {
-            *pos += 1;
-            let val = parse_primary(
-                tokens,
-                pos,
-                expressions,
-                resolved,
-                cache,
-                visiting,
-                depth,
-                parent_resolver,
-            )?;
-            Some(i64::from(val == 0))
-        }
+        Token::Ident(id) => parse_identifier(tokens, pos, id, ctx),
+        Token::LParen => parse_parenthesized(tokens, pos, ctx),
+        Token::Plus | Token::Minus | Token::Tilde | Token::Not => parse_unary(tokens, pos, ctx),
         _ => None,
     }
 }
