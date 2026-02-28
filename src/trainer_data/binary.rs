@@ -145,18 +145,35 @@ impl PartyPokemon {
         writer.write_u16::<LittleEndian>(species_form)?;
 
         if flags.contains(TrainerFlags::HAS_ITEMS) {
-            writer.write_u16::<LittleEndian>(self.held_item.unwrap_or(0))?;
+            let held_item = self.held_item.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Trainer flags require held item, but party entry held_item is missing",
+                )
+            })?;
+            writer.write_u16::<LittleEndian>(held_item)?;
         }
 
         if flags.contains(TrainerFlags::HAS_MOVES) {
-            let moves = self.moves.unwrap_or([0; 4]);
+            let moves = self.moves.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Trainer flags require moves, but party entry moves are missing",
+                )
+            })?;
             for mv in moves {
                 writer.write_u16::<LittleEndian>(mv)?;
             }
         }
 
         if family != GameFamily::DP {
-            writer.write_u16::<LittleEndian>(self.ball_seal.unwrap_or(0))?;
+            let ball_seal = self.ball_seal.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Non-DP trainer party entries require ball_seal, but value is missing",
+                )
+            })?;
+            writer.write_u16::<LittleEndian>(ball_seal)?;
         }
 
         Ok(())
@@ -359,6 +376,72 @@ mod tests {
         assert_eq!(pokemon, parsed);
         assert_eq!(parsed.gender_override(), 1);
         assert_eq!(parsed.ability_override(), 2);
+    }
+
+    #[test]
+    fn test_party_pokemon_missing_held_item_when_flagged_returns_error() {
+        let flags = TrainerFlags::HAS_ITEMS;
+        let family = GameFamily::Platinum;
+        let pokemon = PartyPokemon {
+            difficulty: 10,
+            gender_ability_override: 0,
+            level: 20,
+            species: 25,
+            form: 0,
+            held_item: None,
+            moves: None,
+            ball_seal: Some(0),
+        };
+
+        let err = pokemon
+            .to_binary(&mut Vec::new(), flags, family)
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("held item"));
+    }
+
+    #[test]
+    fn test_party_pokemon_missing_moves_when_flagged_returns_error() {
+        let flags = TrainerFlags::HAS_MOVES;
+        let family = GameFamily::Platinum;
+        let pokemon = PartyPokemon {
+            difficulty: 10,
+            gender_ability_override: 0,
+            level: 20,
+            species: 25,
+            form: 0,
+            held_item: None,
+            moves: None,
+            ball_seal: Some(0),
+        };
+
+        let err = pokemon
+            .to_binary(&mut Vec::new(), flags, family)
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("moves"));
+    }
+
+    #[test]
+    fn test_party_pokemon_missing_ball_seal_non_dp_returns_error() {
+        let flags = TrainerFlags::empty();
+        let family = GameFamily::Platinum;
+        let pokemon = PartyPokemon {
+            difficulty: 10,
+            gender_ability_override: 0,
+            level: 20,
+            species: 25,
+            form: 0,
+            held_item: None,
+            moves: None,
+            ball_seal: None,
+        };
+
+        let err = pokemon
+            .to_binary(&mut Vec::new(), flags, family)
+            .unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("ball_seal"));
     }
 
     #[test]
