@@ -52,137 +52,150 @@ impl Workspace {
     }
 
     fn load_names(&mut self) -> std::io::Result<()> {
-        let internal_names = match self.project_type {
-            ProjectType::Dspre => {
-                let mapname_bin = self
-                    .project_path
-                    .join("data/fielddata/maptable/mapname.bin");
-                if mapname_bin.exists() {
-                    let data = std::fs::read(mapname_bin)?;
-                    Some(
-                        data.chunks_exact(16)
-                            .map(|chunk| {
-                                String::from_utf8_lossy(chunk)
-                                    .trim_end_matches('\0')
-                                    .to_string()
-                            })
-                            .collect(),
-                    )
-                } else {
-                    None
-                }
-            }
-            ProjectType::Decomp => {
-                let maps_txt = self.project_path.join("generated/maps.txt");
-                if maps_txt.exists() {
-                    let content = std::fs::read_to_string(maps_txt)?;
-                    Some(
-                        content
-                            .lines()
-                            .map(str::trim)
-                            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-                            .map(|line| {
-                                if let Some(pos) = line.find('=') {
-                                    line[..pos].trim().to_string()
-                                } else {
-                                    line.to_string()
-                                }
-                            })
-                            .collect(),
-                    )
-                } else {
-                    None
-                }
-            }
-        };
+        self.internal_names = self.load_internal_names()?;
+        self.location_names = self.load_location_names()?;
+        Ok(())
+    }
 
-        self.internal_names = internal_names;
+    fn load_internal_names(&self) -> std::io::Result<Option<Vec<String>>> {
+        match self.project_type {
+            ProjectType::Dspre => self.load_dspre_internal_names(),
+            ProjectType::Decomp => self.load_decomp_internal_names(),
+        }
+    }
 
-        let location_text_id = match self.family {
+    fn load_dspre_internal_names(&self) -> std::io::Result<Option<Vec<String>>> {
+        let mapname_bin = self
+            .project_path
+            .join("data/fielddata/maptable/mapname.bin");
+        if !mapname_bin.exists() {
+            return Ok(None);
+        }
+
+        let data = std::fs::read(mapname_bin)?;
+        Ok(Some(
+            data.chunks_exact(16)
+                .map(|chunk| {
+                    String::from_utf8_lossy(chunk)
+                        .trim_end_matches('\0')
+                        .to_string()
+                })
+                .collect(),
+        ))
+    }
+
+    fn load_decomp_internal_names(&self) -> std::io::Result<Option<Vec<String>>> {
+        let maps_txt = self.project_path.join("generated/maps.txt");
+        if !maps_txt.exists() {
+            return Ok(None);
+        }
+
+        let content = std::fs::read_to_string(maps_txt)?;
+        Ok(Some(
+            content
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with('#'))
+                .map(|line| {
+                    if let Some(pos) = line.find('=') {
+                        line[..pos].trim().to_string()
+                    } else {
+                        line.to_string()
+                    }
+                })
+                .collect(),
+        ))
+    }
+
+    fn location_text_archive_id(&self) -> u16 {
+        match self.family {
             GameFamily::DP => 382,
             GameFamily::Platinum => 433,
             GameFamily::HGSS => 279,
-        };
+        }
+    }
 
-        let location_names = match self.project_type {
-            ProjectType::Dspre => {
-                let archive_path = self
-                    .project_path
-                    .join(format!("unpacked/textArchives/{:04}", location_text_id));
-                if archive_path.exists() {
-                    let mut file = std::fs::File::open(&archive_path)?;
-                    let charmap = chatot::get_default_charmap();
-                    let archive =
-                        chatot::decode_archive(charmap, &mut file, false).map_err(|e| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!(
-                                    "Failed to decode location names archive {}: {e}",
-                                    archive_path.display()
-                                ),
-                            )
-                        })?;
-                    Some(archive.messages)
-                } else {
-                    None
-                }
-            }
-            ProjectType::Decomp => {
-                let location_json = self.project_path.join("res/text/location_names.json");
-                if location_json.exists() {
-                    let content = std::fs::read_to_string(&location_json)?;
-                    let json =
-                        serde_json::from_str::<serde_json::Value>(&content).map_err(|e| {
-                            std::io::Error::new(
-                                std::io::ErrorKind::InvalidData,
-                                format!(
-                                    "Failed to parse location names JSON {}: {e}",
-                                    location_json.display()
-                                ),
-                            )
-                        })?;
+    fn load_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
+        match self.project_type {
+            ProjectType::Dspre => self.load_dspre_location_names(),
+            ProjectType::Decomp => self.load_decomp_location_names(),
+        }
+    }
 
-                    let messages =
-                        json.get("messages")
-                            .and_then(|m| m.as_array())
-                            .ok_or_else(|| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::InvalidData,
-                                    format!(
-                                        "Location names JSON {} is missing a 'messages' array",
-                                        location_json.display()
-                                    ),
-                                )
-                            })?;
+    fn load_dspre_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
+        let location_text_id = self.location_text_archive_id();
+        let archive_path = self
+            .project_path
+            .join(format!("unpacked/textArchives/{:04}", location_text_id));
+        if !archive_path.exists() {
+            return Ok(None);
+        }
 
-                    let mut names = Vec::with_capacity(messages.len());
-                    for (idx, message) in messages.iter().enumerate() {
-                        let value = message
-                            .get("en_US")
-                            .or_else(|| message.get("ja_JP"))
-                            .and_then(|v| v.as_str())
-                            .ok_or_else(|| {
-                                std::io::Error::new(
-                                    std::io::ErrorKind::InvalidData,
-                                    format!(
-                                        "Location names JSON {} has message[{}] missing string 'en_US'/'ja_JP'",
-                                        location_json.display(),
-                                        idx
-                                    ),
-                                )
-                            })?;
-                        names.push(value.to_string());
-                    }
+        let mut file = std::fs::File::open(&archive_path)?;
+        let charmap = chatot::get_default_charmap();
+        let archive = chatot::decode_archive(charmap, &mut file, false).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to decode location names archive {}: {e}",
+                    archive_path.display()
+                ),
+            )
+        })?;
 
-                    Some(names)
-                } else {
-                    None
-                }
-            }
-        };
+        Ok(Some(archive.messages))
+    }
 
-        self.location_names = location_names;
-        Ok(())
+    fn load_decomp_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
+        let location_json = self.project_path.join("res/text/location_names.json");
+        if !location_json.exists() {
+            return Ok(None);
+        }
+
+        let content = std::fs::read_to_string(&location_json)?;
+        let json = serde_json::from_str::<serde_json::Value>(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to parse location names JSON {}: {e}",
+                    location_json.display()
+                ),
+            )
+        })?;
+
+        let messages = json
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Location names JSON {} is missing a 'messages' array",
+                        location_json.display()
+                    ),
+                )
+            })?;
+
+        let mut names = Vec::with_capacity(messages.len());
+        for (idx, message) in messages.iter().enumerate() {
+            let value = message
+                .get("en_US")
+                .or_else(|| message.get("ja_JP"))
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Location names JSON {} has message[{}] missing string 'en_US'/'ja_JP'",
+                            location_json.display(),
+                            idx
+                        ),
+                    )
+                })?;
+            names.push(value.to_string());
+        }
+
+        Ok(Some(names))
     }
 
     pub fn get_map_internal_name(&self, id: u16) -> Option<String> {
