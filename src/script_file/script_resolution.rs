@@ -884,9 +884,9 @@ mod tests {
                 &provider,
             ).unwrap();
 
-            prop_assert_eq!(direct, expected.clone());
-            prop_assert_eq!(by_file, expected.clone());
-            prop_assert_eq!(by_level_file, expected);
+            prop_assert_eq!(&direct, &expected);
+            prop_assert_eq!(&by_file, &expected);
+            prop_assert_eq!(&by_level_file, &expected);
         }
 
         #[test]

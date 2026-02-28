@@ -54,6 +54,7 @@ impl TextBankTable {
 mod tests {
     use super::*;
     use proptest::prelude::*;
+    use std::fmt::Write;
 
     fn unique_names_strategy() -> impl Strategy<Value = Vec<String>> {
         prop::collection::vec(any::<u16>(), 0..64).prop_map(|ids| {
@@ -130,7 +131,7 @@ mod tests {
                 content.push_str("  ");
                 content.push_str(name);
                 content.push_str("   =   ");
-                content.push_str(&format!("0x{:X}", value));
+                write!(&mut content, "0x{:X}", value).unwrap();
                 content.push('\n');
             }
 

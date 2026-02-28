@@ -8,7 +8,7 @@ use std::path::Path;
 /// This keeps decomp conversion code decoupled from any specific symbol source
 /// (for example `Workspace::resolve_constant`) while still failing fast when a
 /// required constant is missing.
-pub(crate) fn resolve_required_constant<F>(
+pub(super) fn resolve_required_constant<F>(
     resolver: &F,
     constant: &str,
     field: &str,
@@ -30,7 +30,7 @@ where
 
 /// Read and deserialize a JSON file into `T`, mapping serde failures to
 /// `InvalidData`.
-pub(crate) fn load_json_file<T>(path: impl AsRef<Path>) -> io::Result<T>
+pub(super) fn load_json_file<T>(path: impl AsRef<Path>) -> io::Result<T>
 where
     T: DeserializeOwned,
 {

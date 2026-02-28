@@ -88,8 +88,7 @@ mod tests {
             ],
         };
 
-        let at_level_10: Vec<_> = learnset.moves_at_level(10).collect();
-        assert_eq!(at_level_10.len(), 3);
+        assert_eq!(learnset.moves_at_level(10).count(), 3);
 
         let learned_at_5: Vec<_> = learnset.moves_learned_at(5).collect();
         assert_eq!(learned_at_5.len(), 1);

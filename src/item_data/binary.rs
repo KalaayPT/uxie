@@ -528,8 +528,8 @@ mod tests {
             }
 
             let mut cursor = Cursor::new(original_bytes.as_slice());
-            let item =
-                ItemData::from_binary(&mut cursor).expect(&format!("Failed to parse item {}", i));
+            let item = ItemData::from_binary(&mut cursor)
+                .unwrap_or_else(|_| panic!("Failed to parse item {}", i));
 
             let serialized = item.to_bytes();
             assert_eq!(
@@ -569,8 +569,8 @@ mod tests {
             }
 
             let mut cursor = Cursor::new(original_bytes.as_slice());
-            let item =
-                ItemData::from_binary(&mut cursor).expect(&format!("Failed to parse item {}", i));
+            let item = ItemData::from_binary(&mut cursor)
+                .unwrap_or_else(|_| panic!("Failed to parse item {}", i));
 
             let serialized = item.to_bytes();
             assert_eq!(

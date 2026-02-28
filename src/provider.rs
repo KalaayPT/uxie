@@ -259,6 +259,7 @@ impl DecompProvider {
             return Ok(headers.clone());
         }
         *cache = Some(parsed.clone());
+        drop(cache);
 
         Ok(parsed)
     }

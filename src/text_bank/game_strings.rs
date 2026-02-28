@@ -453,7 +453,7 @@ mod tests {
         (any::<u16>(), 0u8..6).prop_map(|(id, variant)| {
             let base = format!("Poke Name {}", id % 24);
             match variant {
-                0 => base.clone(),
+                0 => base,
                 1 => base.replace(' ', ""),
                 2 => base.to_lowercase(),
                 3 => base.to_uppercase(),

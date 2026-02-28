@@ -143,7 +143,7 @@ mod c_parser_tests {
 
         let main_path = create_file(&local_dir, "main.h", "#include \"config.h\"");
 
-        let mut table = SymbolTable::with_source_manager(sm.clone());
+        let mut table = SymbolTable::with_source_manager(sm);
         table.load_recursive(&main_path, &[global_dir]).unwrap();
 
         assert_eq!(table.resolve_constant("CONF"), Some(2));

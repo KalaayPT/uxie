@@ -212,7 +212,7 @@ impl DecompTrainerData {
             party_count: self.party.len() as u8,
             items,
             ai_flags,
-            double_battle: if self.double_battle { 1 } else { 0 },
+            double_battle: u32::from(self.double_battle),
         };
 
         let party: Vec<PartyPokemon> = self

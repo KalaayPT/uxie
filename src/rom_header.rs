@@ -629,7 +629,7 @@ arm9_config: arm9.yaml
         assert_eq!(header.detect_game_family(), Some(GameFamily::HGSS));
         assert!(matches!(
             header.detect_game(),
-            Some(Game::HeartGold) | Some(Game::SoulSilver)
+            Some(Game::HeartGold | Game::SoulSilver)
         ));
     }
 
