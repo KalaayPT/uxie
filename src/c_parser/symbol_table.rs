@@ -95,7 +95,11 @@ impl SymbolTable {
         tag: SymbolTag,
     ) -> std::io::Result<()> {
         let path = path.as_ref();
-        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+        let canonical = if let Some(sm) = &self.source_manager {
+            sm.canonicalize_strict(path)?
+        } else {
+            path.canonicalize()?
+        };
         if self.loaded_files.contains(&canonical) {
             return Ok(());
         }
@@ -188,7 +192,7 @@ impl SymbolTable {
         visited: &mut FxHashSet<PathBuf>,
         tag: SymbolTag,
     ) -> std::io::Result<()> {
-        let canonical = sm.canonicalize(path);
+        let canonical = sm.canonicalize_strict(path)?;
         if !visited.insert(canonical.clone()) {
             return Ok(());
         }
