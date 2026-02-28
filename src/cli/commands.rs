@@ -8,7 +8,7 @@ use uxie::{
     PersonalData, RomHeader, SymbolTable, TrainerData, Workspace,
 };
 
-pub fn cmd_header(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::Error>> {
+pub fn cmd_header(path: &Path, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let header = RomHeader::open(path)?;
 
     if json {
@@ -63,11 +63,11 @@ pub fn cmd_header(path: &PathBuf, json: bool) -> Result<(), Box<dyn std::error::
 
 pub fn cmd_map(
     id: u16,
-    path: &PathBuf,
+    path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(path, decomp.as_deref())?;
 
     let header = ws.provider.get_map_header(id)?;
 
@@ -82,11 +82,11 @@ pub fn cmd_map(
 
 pub fn cmd_event(
     id: u32,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let dspre = DspreProject::open(project_path)?;
     let bin_event = dspre.load_event_file(id)?;
@@ -102,11 +102,11 @@ pub fn cmd_event(
 
 pub fn cmd_encounter(
     id: u32,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let narc_path = match ws.family {
         GameFamily::DP => project_path.join("data/fielddata/encountdata/d_enc_data.narc"),
@@ -148,7 +148,7 @@ pub fn cmd_encounter(
 }
 
 pub fn cmd_parse_header(
-    path: &PathBuf,
+    path: &Path,
     only_defines: bool,
     only_enums: bool,
     json: bool,
@@ -247,8 +247,8 @@ pub fn cmd_parse_header(
 }
 
 pub fn cmd_resolve_script(
-    path: &PathBuf,
-    decomp_path: &PathBuf,
+    path: &Path,
+    decomp_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
     let ws = Workspace::open(decomp_path)?;
@@ -258,11 +258,11 @@ pub fn cmd_resolve_script(
 
 pub fn cmd_personal(
     id: &str,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
@@ -330,11 +330,11 @@ pub fn cmd_personal(
 
 pub fn cmd_move(
     id: &str,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let id = resolve_id(id, "MOVE_", &ws.symbols, &ws.game_strings)?;
 
@@ -381,11 +381,11 @@ pub fn cmd_move(
 
 pub fn cmd_item(
     id: &str,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let id = resolve_id(id, "ITEM_", &ws.symbols, &ws.game_strings)?;
 
@@ -434,11 +434,11 @@ pub fn cmd_item(
 
 pub fn cmd_trainer(
     id: u16,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let trdata_path = project_path.join("data/poketool/trainer/trdata.narc");
     let trpoke_path = project_path.join("data/poketool/trainer/trpoke.narc");
@@ -515,11 +515,11 @@ pub fn cmd_trainer(
 
 pub fn cmd_evolution(
     id: &str,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
@@ -580,11 +580,11 @@ pub fn cmd_evolution(
 
 pub fn cmd_learnset(
     id: &str,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
@@ -627,11 +627,11 @@ pub fn cmd_learnset(
 
 pub fn cmd_egg_moves(
     species: Option<String>,
-    project_path: &PathBuf,
+    project_path: &Path,
     decomp: Option<PathBuf>,
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let ws = open_workspace_with_decomp(project_path, decomp.as_ref())?;
+    let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
     let egg_data = load_egg_move_data(project_path, ws.family)?;
 
@@ -699,12 +699,12 @@ pub fn cmd_egg_moves(
 
 pub fn open_workspace_with_decomp(
     project_path: &Path,
-    decomp: Option<&PathBuf>,
+    decomp: Option<&Path>,
 ) -> Result<Workspace, Box<dyn std::error::Error>> {
     let mut ws = Workspace::open(project_path)?;
     if let Some(d) = decomp {
         let mut symbols = (*ws.symbols).clone();
-        load_symbols_from_decomp(&mut symbols, d.as_path())?;
+        load_symbols_from_decomp(&mut symbols, d)?;
         ws.symbols = Arc::new(symbols);
     }
     Ok(ws)
@@ -787,7 +787,7 @@ pub fn load_symbols_from_decomp(
 }
 
 fn load_egg_move_data(
-    project_path: &PathBuf,
+    project_path: &Path,
     family: GameFamily,
 ) -> Result<EggMoveData, Box<dyn std::error::Error>> {
     match family {
@@ -818,7 +818,7 @@ fn load_egg_move_data(
     }
 }
 
-fn load_narc(path: &PathBuf) -> Result<Narc, Box<dyn std::error::Error>> {
+fn load_narc(path: &Path) -> Result<Narc, Box<dyn std::error::Error>> {
     let mut file = std::fs::File::open(path)?;
     Ok(Narc::from_binary(&mut file)?)
 }
