@@ -72,6 +72,8 @@ impl BinaryEncounterFile {
         }
     }
 
+    // Fixed-layout binary decode path; explicit per-section reads mirror on-disk format.
+    #[allow(clippy::too_many_lines)]
     fn from_binary_dppt<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
         let walking_rate = reader.read_u32::<LittleEndian>()?;
 
@@ -247,6 +249,8 @@ impl BinaryEncounterFile {
         })
     }
 
+    // Fixed-layout binary decode path; explicit per-section reads mirror on-disk format.
+    #[allow(clippy::too_many_lines)]
     fn from_binary_hgss<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
         let walking_rate = reader.read_u8()? as u32;
         let surf_rate = reader.read_u8()? as u32;
