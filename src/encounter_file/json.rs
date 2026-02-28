@@ -160,6 +160,16 @@ impl JsonEncounterFile {
             _ => Default::default(),
         };
 
+        let rock_smash_rate = match family {
+            GameFamily::HGSS => self.rock_smash_rate.ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Missing required HGSS encounter field 'rock_smash_rate'",
+                )
+            })?,
+            _ => 0,
+        };
+
         Ok(BinaryEncounterFile {
             walking_rate: self.land_rate,
             grass_encounters: collect_encounter_array(&self.land_encounters, &resolve)?,
@@ -189,7 +199,7 @@ impl JsonEncounterFile {
             good_rod_encounters: collect_water_array(&self.good_rod_encounters, &resolve)?,
             super_rod_rate: self.super_rod_rate,
             super_rod_encounters: collect_water_array(&self.super_rod_encounters, &resolve)?,
-            rock_smash_rate: self.rock_smash_rate.unwrap_or(0),
+            rock_smash_rate,
             rock_smash_encounters,
             morning_encounters,
         })

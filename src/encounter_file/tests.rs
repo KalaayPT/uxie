@@ -274,6 +274,32 @@ mod encounter_tests {
     }
 
     #[test]
+    fn test_encounter_json_missing_hgss_rock_smash_rate_returns_error() {
+        let symbols = SymbolTable::new();
+        let json = r#"{
+            "land_rate": 30,
+            "land_encounters": [],
+            "swarms": [],
+            "day": [], "night": [], "radar": [],
+            "rate_form0": 0, "rate_form1": 0, "rate_form2": 0, "rate_form3": 0, "rate_form4": 0,
+            "unown_table": 0,
+            "ruby": [], "sapphire": [], "emerald": [], "firered": [], "leafgreen": [],
+            "surf_rate": 0, "surf_encounters": [],
+            "old_rod_rate": 0, "old_rod_encounters": [],
+            "good_rod_rate": 0, "good_rod_encounters": [],
+            "super_rod_rate": 0, "super_rod_encounters": [],
+            "music": [],
+            "rock_smash_encounters": [],
+            "morning": []
+        }"#;
+        let encounter: JsonEncounterFile = serde_json::from_str(json).unwrap();
+
+        let err = encounter.to_binary(&symbols, GameFamily::HGSS).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("rock_smash_rate"));
+    }
+
+    #[test]
     #[ignore = "requires local Platinum DSPRE fixture via UXIE_TEST_PLATINUM_DSPRE_PATH"]
     fn integration_load_encounter_platinum_real_fixture() {
         let Some(project_root) = crate::test_env::existing_path_from_env(
