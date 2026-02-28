@@ -236,8 +236,7 @@ fn test_resolve_map_script_by_file_dspre() {
     )
     .expect("Failed to resolve map script");
 
-    if result.is_some() {
-        let resolution = result.unwrap();
+    if let Some(resolution) = result {
         assert!(
             resolution.is_map_script(),
             "Should be resolved as map script"
@@ -263,8 +262,7 @@ fn test_resolve_level_script_by_file_dspre() {
     )
     .expect("Failed to resolve level script by file");
 
-    if result.is_some() {
-        let resolution = result.unwrap();
+    if let Some(resolution) = result {
         assert_eq!(
             resolution.script_file_id(),
             header.script_file_id(),
@@ -292,8 +290,7 @@ fn test_resolve_script_id_by_level_script_file_dspre() {
     )
     .expect("Failed to resolve script by level script file");
 
-    if result.is_some() {
-        let resolution = result.unwrap();
+    if let Some(resolution) = result {
         assert!(
             resolution.is_map_script(),
             "Should be resolved as map script"
