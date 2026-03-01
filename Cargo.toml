@@ -83,9 +83,6 @@ map_unwrap_or = "allow"
 # Collapsible if - often intentionally structured for clarity
 collapsible_if = "allow"
 
-# Wildcard imports are sometimes appropriate (e.g., preludes, test imports)
-wildcard_imports = "allow"
-
 # These are valid patterns that clippy is overly aggressive about
 redundant_closure = "allow"
 or_fun_call = "allow"

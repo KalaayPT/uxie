@@ -1,4 +1,4 @@
-use super::types::*;
+use super::types::{MapHeaderHGSS, MapHeaderPt};
 use crate::c_parser::SymbolTable;
 use regex::Regex;
 use std::collections::HashMap;

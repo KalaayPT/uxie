@@ -1,4 +1,4 @@
-use super::types::*;
+use super::types::{MAP_HEADER_SIZE, MapHeader, MapHeaderDP, MapHeaderHGSS, MapHeaderPt};
 use crate::game::GameFamily;
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::io::{self, Read, Seek, SeekFrom};
