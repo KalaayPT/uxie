@@ -68,8 +68,8 @@ mod c_parser_tests {
     fn spawn_single_response_server(
         status_line: &str,
         body: &str,
-    ) -> (String, thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    ) -> std::io::Result<(String, thread::JoinHandle<()>)> {
+        let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr().unwrap();
         let status_line = status_line.to_string();
         let body = body.to_string();
@@ -88,7 +88,7 @@ mod c_parser_tests {
             stream.flush().unwrap();
         });
 
-        (format!("http://{}/symbols.h", addr), handle)
+        Ok((format!("http://{}/symbols.h", addr), handle))
     }
 
     #[test]
@@ -386,7 +386,17 @@ mod c_parser_tests {
             return;
         }
 
-        let (url, handle) = spawn_single_response_server("HTTP/1.1 404 Not Found", "missing");
+        let (url, handle) = match spawn_single_response_server("HTTP/1.1 404 Not Found", "missing")
+        {
+            Ok(values) => values,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!(
+                    "Skipping: local loopback bind is not permitted in this environment ({err})"
+                );
+                return;
+            }
+            Err(err) => panic!("failed to start local HTTP fixture server: {err}"),
+        };
         let mut table = SymbolTable::new();
 
         let err = table.load_from_url(&url).unwrap_err();
@@ -404,8 +414,19 @@ mod c_parser_tests {
             return;
         }
 
-        let (url, handle) =
-            spawn_single_response_server("HTTP/1.1 200 OK", "#define TEST_REMOTE_CONST 123");
+        let (url, handle) = match spawn_single_response_server(
+            "HTTP/1.1 200 OK",
+            "#define TEST_REMOTE_CONST 123",
+        ) {
+            Ok(values) => values,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                eprintln!(
+                    "Skipping: local loopback bind is not permitted in this environment ({err})"
+                );
+                return;
+            }
+            Err(err) => panic!("failed to start local HTTP fixture server: {err}"),
+        };
         let mut table = SymbolTable::new();
 
         table.load_from_url(&url).unwrap();
