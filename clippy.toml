@@ -12,9 +12,6 @@ pass-by-value-size-limit = 256
 unnecessary-box-size = 128
 vec-box-size-threshold = 4096
 
-# Import and wildcard settings
-warn-on-all-wildcard-imports = true
-
 # Allow common panic/unwrap patterns in tests
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true

@@ -98,10 +98,10 @@ impl PartyPokemon {
             None
         };
 
-        let ball_seal = if family != GameFamily::DP {
-            Some(reader.read_u16::<LittleEndian>()?)
-        } else {
+        let ball_seal = if family == GameFamily::DP {
             None
+        } else {
+            Some(reader.read_u16::<LittleEndian>()?)
         };
 
         Ok(Self {
@@ -605,10 +605,10 @@ mod tests {
             Just(None).boxed()
         };
 
-        let ball_seal = if family != GameFamily::DP {
-            any::<u16>().prop_map(Some).boxed()
-        } else {
+        let ball_seal = if family == GameFamily::DP {
             Just(None).boxed()
+        } else {
+            any::<u16>().prop_map(Some).boxed()
         };
 
         (

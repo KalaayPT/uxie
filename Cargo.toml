@@ -74,7 +74,6 @@ similar_names = "allow"
 
 # Style preferences that add noise without much benefit
 redundant_else = "allow"
-if_not_else = "allow"
 match_bool = "allow"
 items_after_statements = "allow"
 
