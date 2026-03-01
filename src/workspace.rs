@@ -97,11 +97,8 @@ impl Workspace {
                 .map(str::trim)
                 .filter(|line| !line.is_empty() && !line.starts_with('#'))
                 .map(|line| {
-                    if let Some(pos) = line.find('=') {
-                        line[..pos].trim().to_string()
-                    } else {
-                        line.to_string()
-                    }
+                    line.find('=')
+                        .map_or_else(|| line.to_string(), |pos| line[..pos].trim().to_string())
                 })
                 .collect(),
         ))

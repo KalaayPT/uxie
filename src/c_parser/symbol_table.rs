@@ -402,22 +402,25 @@ impl SymbolTable {
             return Some(val);
         }
 
-        if let Some(parent) = &self.parent {
-            crate::c_parser::defines::eval_expr_with_parent(
-                expr,
-                &self.pending,
-                &self.symbols,
-                &self.eval_cache,
-                &|n| parent.resolve_constant(n),
-            )
-        } else {
-            crate::c_parser::defines::eval_expr_with_context(
-                expr,
-                &self.pending,
-                &self.symbols,
-                &self.eval_cache,
-            )
-        }
+        self.parent.as_ref().map_or_else(
+            || {
+                crate::c_parser::defines::eval_expr_with_context(
+                    expr,
+                    &self.pending,
+                    &self.symbols,
+                    &self.eval_cache,
+                )
+            },
+            |parent| {
+                crate::c_parser::defines::eval_expr_with_parent(
+                    expr,
+                    &self.pending,
+                    &self.symbols,
+                    &self.eval_cache,
+                    &|n| parent.resolve_constant(n),
+                )
+            },
+        )
     }
 
     pub fn resolve_all(&mut self) {
@@ -581,12 +584,10 @@ impl SymbolTable {
                     .insert(tag.clone());
             } else {
                 // Strip inline comments (e.g., "CONSTANT  # comment")
-                let name = if let Some(comment_pos) = line.find('#') {
-                    line[..comment_pos].trim()
-                } else {
-                    line
-                }
-                .to_string();
+                let name = line
+                    .find('#')
+                    .map_or(line, |comment_pos| line[..comment_pos].trim())
+                    .to_string();
                 if name.is_empty() {
                     continue;
                 }
@@ -924,11 +925,10 @@ impl SymbolTable {
     }
 
     pub fn get_all_defines(&self) -> HashMap<String, i64> {
-        let mut res = if let Some(parent) = &self.parent {
-            parent.get_all_defines()
-        } else {
-            HashMap::with_capacity(self.symbols.len() + self.eval_cache.len())
-        };
+        let mut res = self.parent.as_ref().map_or_else(
+            || HashMap::with_capacity(self.symbols.len() + self.eval_cache.len()),
+            |parent| parent.get_all_defines(),
+        );
 
         for (k, v) in &self.symbols {
             res.insert(k.clone(), *v);

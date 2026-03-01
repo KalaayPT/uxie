@@ -57,7 +57,6 @@ missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 use_self = "allow"
 uninlined_format_args = "allow"
-option_if_let_else = "allow"
 missing_const_for_fn = "allow"
 
 # Binary parsing code requires many intentional casts between integer types

@@ -669,11 +669,9 @@ pub fn load_symbols_from_decomp(
             let repo = d_str.replace("git@github.com:", "").replace(".git", "");
             format!("https://raw.githubusercontent.com/{}/master/", repo)
         } else if d_str.contains("github.com") && !d_str.contains("raw.githubusercontent.com") {
-            let repo_path = if let Some(pos) = d_str.find("github.com/") {
-                &d_str[pos + 11..]
-            } else {
-                &d_str
-            };
+            let repo_path = d_str
+                .find("github.com/")
+                .map_or(d_str.as_ref(), |pos| &d_str[pos + 11..]);
             let repo_path = repo_path.trim_end_matches('/');
             format!("https://raw.githubusercontent.com/{}/master/", repo_path)
         } else {

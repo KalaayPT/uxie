@@ -944,10 +944,7 @@ mod tests {
                 .find_map(|(idx, h)| (h.level_script_id() == level_script_file_id).then_some(idx as u16));
             let provider = MockProvider { headers };
 
-            let expected = match map_id {
-                Some(id) => resolve_level_script(id, &table, &provider).unwrap(),
-                None => None,
-            };
+            let expected = map_id.and_then(|id| resolve_level_script(id, &table, &provider).unwrap());
             let actual = resolve_level_script_by_file(level_script_file_id, &table, &provider).unwrap();
             prop_assert_eq!(actual, expected);
         }

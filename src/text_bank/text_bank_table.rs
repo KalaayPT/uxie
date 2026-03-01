@@ -23,11 +23,9 @@ impl TextBankTable {
             if line.is_empty() || line.starts_with('#') || line.starts_with("//") {
                 continue;
             }
-            let name = if let Some(pos) = line.find('=') {
-                line[..pos].trim().to_string()
-            } else {
-                line.to_string()
-            };
+            let name = line
+                .find('=')
+                .map_or_else(|| line.to_string(), |pos| line[..pos].trim().to_string());
 
             if !self.name_to_id.contains_key(&name) {
                 self.name_to_id.insert(name.clone(), self.names.len());
