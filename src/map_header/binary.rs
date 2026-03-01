@@ -1,6 +1,6 @@
 use super::types::{MAP_HEADER_SIZE, MapHeader, MapHeaderDP, MapHeaderHGSS, MapHeaderPt};
 use crate::game::GameFamily;
-use byteorder::{LittleEndian, ReadBytesExt};
+use binrw::{BinRead, BinWrite};
 use std::io::{self, Read, Seek, SeekFrom};
 
 pub fn read_map_header_from_bytes(data: &[u8], family: GameFamily) -> io::Result<MapHeader> {
@@ -41,170 +41,244 @@ pub fn read_map_headers_from_arm9<R: Read + Seek>(
     Ok(headers)
 }
 
-fn read_dp_header<R: Read>(reader: &mut R) -> io::Result<MapHeaderDP> {
-    let mut h = MapHeaderDP::default();
-    h.area_data_id = reader.read_u8()?;
-    h.unknown1 = reader.read_u8()?;
-    h.matrix_id = reader.read_u16::<LittleEndian>()?;
-    h.script_file_id = reader.read_u16::<LittleEndian>()?;
-    h.level_script_id = reader.read_u16::<LittleEndian>()?;
-    h.text_archive_id = reader.read_u16::<LittleEndian>()?;
-    h.music_day_id = reader.read_u16::<LittleEndian>()?;
-    h.music_night_id = reader.read_u16::<LittleEndian>()?;
-    h.wild_pokemon = reader.read_u16::<LittleEndian>()?;
-    h.event_file_id = reader.read_u16::<LittleEndian>()?;
-    h.location_name = reader.read_u16::<LittleEndian>()?;
-    h.weather_id = reader.read_u8()?;
-    h.camera_angle_id = reader.read_u8()?;
-    h.location_specifier = reader.read_u8()?;
-
-    let map_settings = reader.read_u8()?;
-    h.battle_background = map_settings & 0b_1111;
-    h.flags = (map_settings >> 4) & 0b_1111;
-
-    Ok(h)
+#[derive(Debug, Clone, Copy, BinRead, BinWrite)]
+#[brw(little)]
+struct MapHeaderDPRaw {
+    area_data_id: u8,
+    unknown1: u8,
+    matrix_id: u16,
+    script_file_id: u16,
+    level_script_id: u16,
+    text_archive_id: u16,
+    music_day_id: u16,
+    music_night_id: u16,
+    wild_pokemon: u16,
+    event_file_id: u16,
+    location_name: u16,
+    weather_id: u8,
+    camera_angle_id: u8,
+    location_specifier: u8,
+    map_settings: u8,
 }
 
-fn read_pt_header<R: Read>(reader: &mut R) -> io::Result<MapHeaderPt> {
-    let mut h = MapHeaderPt::default();
-    h.area_data_id = reader.read_u8()?;
-    h.unknown1 = reader.read_u8()?;
-    h.matrix_id = reader.read_u16::<LittleEndian>()?;
-    h.script_file_id = reader.read_u16::<LittleEndian>()?;
-    h.level_script_id = reader.read_u16::<LittleEndian>()?;
-    h.text_archive_id = reader.read_u16::<LittleEndian>()?;
-    h.music_day_id = reader.read_u16::<LittleEndian>()?;
-    h.music_night_id = reader.read_u16::<LittleEndian>()?;
-    h.wild_pokemon = reader.read_u16::<LittleEndian>()?;
-    h.event_file_id = reader.read_u16::<LittleEndian>()?;
-    h.location_name = reader.read_u8()?;
-    h.area_icon = reader.read_u8()?;
-    h.weather_id = reader.read_u8()?;
-    h.camera_angle_id = reader.read_u8()?;
-
-    // Bitfield packing: mapType:7 | battleBG:5 | flags:4
-    let map_settings = reader.read_u16::<LittleEndian>()?;
-    h.location_specifier = (map_settings & 0b_0111_1111) as u8;
-    h.battle_background = ((map_settings >> 7) & 0b_1_1111) as u8;
-    h.flags = ((map_settings >> 12) & 0b_1111) as u8;
-
-    Ok(h)
+#[derive(Debug, Clone, Copy, BinRead, BinWrite)]
+#[brw(little)]
+struct MapHeaderPtRaw {
+    area_data_id: u8,
+    unknown1: u8,
+    matrix_id: u16,
+    script_file_id: u16,
+    level_script_id: u16,
+    text_archive_id: u16,
+    music_day_id: u16,
+    music_night_id: u16,
+    wild_pokemon: u16,
+    event_file_id: u16,
+    location_name: u8,
+    area_icon: u8,
+    weather_id: u8,
+    camera_angle_id: u8,
+    map_settings: u16,
 }
 
-fn read_hgss_header<R: Read>(reader: &mut R) -> io::Result<MapHeaderHGSS> {
-    let mut h = MapHeaderHGSS::default();
-    h.wild_pokemon = reader.read_u8()?;
-    h.area_data_id = reader.read_u8()?;
+#[derive(Debug, Clone, Copy, BinRead, BinWrite)]
+#[brw(little)]
+struct MapHeaderHGSSRaw {
+    wild_pokemon: u8,
+    area_data_id: u8,
+    coords: u16,
+    matrix_id: u16,
+    script_file_id: u16,
+    level_script_id: u16,
+    text_archive_id: u16,
+    music_day_id: u16,
+    music_night_id: u16,
+    event_file_id: u16,
+    location_name: u8,
+    area_props: u8,
+    last32: u32,
+}
 
-    // Bitfield: unknown0:4 | worldmapX:6 | worldmapY:6
-    let coords = reader.read_u16::<LittleEndian>()?;
-    h.unknown0 = (coords & 0b_1111) as u8;
-    h.worldmap_x = ((coords >> 4) & 0b_11_1111) as u8;
-    h.worldmap_y = ((coords >> 10) & 0b_11_1111) as u8;
+fn binrw_to_io_error(err: binrw::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, err)
+}
 
-    h.matrix_id = reader.read_u16::<LittleEndian>()?;
-    h.script_file_id = reader.read_u16::<LittleEndian>()?;
-    h.level_script_id = reader.read_u16::<LittleEndian>()?;
-    h.text_archive_id = reader.read_u16::<LittleEndian>()?;
-    h.music_day_id = reader.read_u16::<LittleEndian>()?;
-    h.music_night_id = reader.read_u16::<LittleEndian>()?;
-    h.event_file_id = reader.read_u16::<LittleEndian>()?;
-    h.location_name = reader.read_u8()?;
+fn dp_from_raw(raw: MapHeaderDPRaw) -> MapHeaderDP {
+    MapHeaderDP {
+        area_data_id: raw.area_data_id,
+        unknown1: raw.unknown1,
+        matrix_id: raw.matrix_id,
+        script_file_id: raw.script_file_id,
+        level_script_id: raw.level_script_id,
+        text_archive_id: raw.text_archive_id,
+        music_day_id: raw.music_day_id,
+        music_night_id: raw.music_night_id,
+        wild_pokemon: raw.wild_pokemon,
+        event_file_id: raw.event_file_id,
+        location_name: raw.location_name,
+        weather_id: raw.weather_id,
+        camera_angle_id: raw.camera_angle_id,
+        location_specifier: raw.location_specifier,
+        battle_background: raw.map_settings & 0b_1111,
+        flags: (raw.map_settings >> 4) & 0b_1111,
+    }
+}
 
-    // Bitfield: areaIcon:4 | unknown1:4
-    let area_props = reader.read_u8()?;
-    h.area_icon = area_props & 0b_1111;
-    h.unknown1 = (area_props >> 4) & 0b_1111;
+fn dp_to_raw(header: &MapHeaderDP) -> MapHeaderDPRaw {
+    MapHeaderDPRaw {
+        area_data_id: header.area_data_id,
+        unknown1: header.unknown1,
+        matrix_id: header.matrix_id,
+        script_file_id: header.script_file_id,
+        level_script_id: header.level_script_id,
+        text_archive_id: header.text_archive_id,
+        music_day_id: header.music_day_id,
+        music_night_id: header.music_night_id,
+        wild_pokemon: header.wild_pokemon,
+        event_file_id: header.event_file_id,
+        location_name: header.location_name,
+        weather_id: header.weather_id,
+        camera_angle_id: header.camera_angle_id,
+        location_specifier: header.location_specifier,
+        map_settings: (header.battle_background & 0b_1111) | ((header.flags & 0b_1111) << 4),
+    }
+}
 
-    // Last 4 bytes: complex bitfield
-    // kantoFlag:1 | weatherID:7 | locationType:4 | cameraAngleID:6 | followMode:2 | battleBG:5 | flags:7
-    let last32 = reader.read_u32::<LittleEndian>()?;
-    h.kanto_flag = (last32 & 0b_1) == 1;
-    h.weather_id = ((last32 >> 1) & 0b_111_1111) as u8;
-    h.location_type = ((last32 >> 8) & 0b_1111) as u8;
-    h.camera_angle_id = ((last32 >> 12) & 0b_11_1111) as u8;
-    h.follow_mode = ((last32 >> 18) & 0b_11) as u8;
-    h.battle_background = ((last32 >> 20) & 0b_1_1111) as u8;
-    h.flags = ((last32 >> 25) & 0b_111_1111) as u8;
+fn pt_from_raw(raw: MapHeaderPtRaw) -> MapHeaderPt {
+    MapHeaderPt {
+        area_data_id: raw.area_data_id,
+        unknown1: raw.unknown1,
+        matrix_id: raw.matrix_id,
+        script_file_id: raw.script_file_id,
+        level_script_id: raw.level_script_id,
+        text_archive_id: raw.text_archive_id,
+        music_day_id: raw.music_day_id,
+        music_night_id: raw.music_night_id,
+        wild_pokemon: raw.wild_pokemon,
+        event_file_id: raw.event_file_id,
+        location_name: raw.location_name,
+        area_icon: raw.area_icon,
+        weather_id: raw.weather_id,
+        camera_angle_id: raw.camera_angle_id,
+        location_specifier: (raw.map_settings & 0b_0111_1111) as u8,
+        battle_background: ((raw.map_settings >> 7) & 0b_1_1111) as u8,
+        flags: ((raw.map_settings >> 12) & 0b_1111) as u8,
+    }
+}
 
-    Ok(h)
+fn pt_to_raw(header: &MapHeaderPt) -> MapHeaderPtRaw {
+    MapHeaderPtRaw {
+        area_data_id: header.area_data_id,
+        unknown1: header.unknown1,
+        matrix_id: header.matrix_id,
+        script_file_id: header.script_file_id,
+        level_script_id: header.level_script_id,
+        text_archive_id: header.text_archive_id,
+        music_day_id: header.music_day_id,
+        music_night_id: header.music_night_id,
+        wild_pokemon: header.wild_pokemon,
+        event_file_id: header.event_file_id,
+        location_name: header.location_name,
+        area_icon: header.area_icon,
+        weather_id: header.weather_id,
+        camera_angle_id: header.camera_angle_id,
+        map_settings: (header.location_specifier as u16 & 0b_0111_1111)
+            | ((header.battle_background as u16 & 0b_1_1111) << 7)
+            | ((header.flags as u16 & 0b_1111) << 12),
+    }
+}
+
+fn hgss_from_raw(raw: MapHeaderHGSSRaw) -> MapHeaderHGSS {
+    MapHeaderHGSS {
+        wild_pokemon: raw.wild_pokemon,
+        area_data_id: raw.area_data_id,
+        unknown0: (raw.coords & 0b_1111) as u8,
+        worldmap_x: ((raw.coords >> 4) & 0b_11_1111) as u8,
+        worldmap_y: ((raw.coords >> 10) & 0b_11_1111) as u8,
+        matrix_id: raw.matrix_id,
+        script_file_id: raw.script_file_id,
+        level_script_id: raw.level_script_id,
+        text_archive_id: raw.text_archive_id,
+        music_day_id: raw.music_day_id,
+        music_night_id: raw.music_night_id,
+        event_file_id: raw.event_file_id,
+        location_name: raw.location_name,
+        area_icon: raw.area_props & 0b_1111,
+        unknown1: (raw.area_props >> 4) & 0b_1111,
+        kanto_flag: (raw.last32 & 0b_1) == 1,
+        weather_id: ((raw.last32 >> 1) & 0b_111_1111) as u8,
+        location_type: ((raw.last32 >> 8) & 0b_1111) as u8,
+        camera_angle_id: ((raw.last32 >> 12) & 0b_11_1111) as u8,
+        follow_mode: ((raw.last32 >> 18) & 0b_11) as u8,
+        battle_background: ((raw.last32 >> 20) & 0b_1_1111) as u8,
+        flags: ((raw.last32 >> 25) & 0b_111_1111) as u8,
+    }
+}
+
+fn hgss_to_raw(header: &MapHeaderHGSS) -> MapHeaderHGSSRaw {
+    let coords = (header.unknown0 as u16 & 0b_1111)
+        | ((header.worldmap_x as u16 & 0b_11_1111) << 4)
+        | ((header.worldmap_y as u16 & 0b_11_1111) << 10);
+    let area_props = (header.area_icon & 0b_1111) | ((header.unknown1 & 0b_1111) << 4);
+    let mut last32: u32 = 0;
+    if header.kanto_flag {
+        last32 |= 1;
+    }
+    last32 |= (header.weather_id as u32 & 0b_111_1111) << 1;
+    last32 |= (header.location_type as u32 & 0b_1111) << 8;
+    last32 |= (header.camera_angle_id as u32 & 0b_11_1111) << 12;
+    last32 |= (header.follow_mode as u32 & 0b_11) << 18;
+    last32 |= (header.battle_background as u32 & 0b_1_1111) << 20;
+    last32 |= (header.flags as u32 & 0b_111_1111) << 25;
+
+    MapHeaderHGSSRaw {
+        wild_pokemon: header.wild_pokemon,
+        area_data_id: header.area_data_id,
+        coords,
+        matrix_id: header.matrix_id,
+        script_file_id: header.script_file_id,
+        level_script_id: header.level_script_id,
+        text_archive_id: header.text_archive_id,
+        music_day_id: header.music_day_id,
+        music_night_id: header.music_night_id,
+        event_file_id: header.event_file_id,
+        location_name: header.location_name,
+        area_props,
+        last32,
+    }
+}
+
+fn read_dp_header<R: Read + Seek>(reader: &mut R) -> io::Result<MapHeaderDP> {
+    MapHeaderDPRaw::read_le(reader)
+        .map(dp_from_raw)
+        .map_err(binrw_to_io_error)
+}
+
+fn read_pt_header<R: Read + Seek>(reader: &mut R) -> io::Result<MapHeaderPt> {
+    MapHeaderPtRaw::read_le(reader)
+        .map(pt_from_raw)
+        .map_err(binrw_to_io_error)
+}
+
+fn read_hgss_header<R: Read + Seek>(reader: &mut R) -> io::Result<MapHeaderHGSS> {
+    MapHeaderHGSSRaw::read_le(reader)
+        .map(hgss_from_raw)
+        .map_err(binrw_to_io_error)
 }
 
 pub fn write_map_header_to_bytes(header: &MapHeader) -> Vec<u8> {
-    use byteorder::WriteBytesExt;
-    let mut buf = Vec::with_capacity(MAP_HEADER_SIZE);
+    let mut cursor = io::Cursor::new(Vec::with_capacity(MAP_HEADER_SIZE));
 
-    match header {
-        MapHeader::DP(h) => {
-            buf.write_u8(h.area_data_id).unwrap();
-            buf.write_u8(h.unknown1).unwrap();
-            buf.write_u16::<LittleEndian>(h.matrix_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.script_file_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.level_script_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.text_archive_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.music_day_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.music_night_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.wild_pokemon).unwrap();
-            buf.write_u16::<LittleEndian>(h.event_file_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.location_name).unwrap();
-            buf.write_u8(h.weather_id).unwrap();
-            buf.write_u8(h.camera_angle_id).unwrap();
-            buf.write_u8(h.location_specifier).unwrap();
-            let map_settings = (h.battle_background & 0b_1111) | ((h.flags & 0b_1111) << 4);
-            buf.write_u8(map_settings).unwrap();
-        }
-        MapHeader::Pt(h) => {
-            buf.write_u8(h.area_data_id).unwrap();
-            buf.write_u8(h.unknown1).unwrap();
-            buf.write_u16::<LittleEndian>(h.matrix_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.script_file_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.level_script_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.text_archive_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.music_day_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.music_night_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.wild_pokemon).unwrap();
-            buf.write_u16::<LittleEndian>(h.event_file_id).unwrap();
-            buf.write_u8(h.location_name).unwrap();
-            buf.write_u8(h.area_icon).unwrap();
-            buf.write_u8(h.weather_id).unwrap();
-            buf.write_u8(h.camera_angle_id).unwrap();
-            let map_settings: u16 = (h.location_specifier as u16 & 0b_0111_1111)
-                | ((h.battle_background as u16 & 0b_1_1111) << 7)
-                | ((h.flags as u16 & 0b_1111) << 12);
-            buf.write_u16::<LittleEndian>(map_settings).unwrap();
-        }
-        MapHeader::HGSS(h) => {
-            buf.write_u8(h.wild_pokemon).unwrap();
-            buf.write_u8(h.area_data_id).unwrap();
-            let coords: u16 = (h.unknown0 as u16 & 0b_1111)
-                | ((h.worldmap_x as u16 & 0b_11_1111) << 4)
-                | ((h.worldmap_y as u16 & 0b_11_1111) << 10);
-            buf.write_u16::<LittleEndian>(coords).unwrap();
-            buf.write_u16::<LittleEndian>(h.matrix_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.script_file_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.level_script_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.text_archive_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.music_day_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.music_night_id).unwrap();
-            buf.write_u16::<LittleEndian>(h.event_file_id).unwrap();
-            buf.write_u8(h.location_name).unwrap();
-            let area_props = (h.area_icon & 0b_1111) | ((h.unknown1 & 0b_1111) << 4);
-            buf.write_u8(area_props).unwrap();
-            let mut last32: u32 = 0;
-            if h.kanto_flag {
-                last32 |= 1;
-            }
-            last32 |= (h.weather_id as u32 & 0b_111_1111) << 1;
-            last32 |= (h.location_type as u32 & 0b_1111) << 8;
-            last32 |= (h.camera_angle_id as u32 & 0b_11_1111) << 12;
-            last32 |= (h.follow_mode as u32 & 0b_11) << 18;
-            last32 |= (h.battle_background as u32 & 0b_1_1111) << 20;
-            last32 |= (h.flags as u32 & 0b_111_1111) << 25;
-            buf.write_u32::<LittleEndian>(last32).unwrap();
-        }
-    }
+    let result = match header {
+        MapHeader::DP(h) => dp_to_raw(h).write_le(&mut cursor),
+        MapHeader::Pt(h) => pt_to_raw(h).write_le(&mut cursor),
+        MapHeader::HGSS(h) => hgss_to_raw(h).write_le(&mut cursor),
+    };
+    result.map_err(binrw_to_io_error).unwrap();
 
-    buf
+    let bytes = cursor.into_inner();
+    debug_assert_eq!(bytes.len(), MAP_HEADER_SIZE);
+    bytes
 }
 
 #[cfg(test)]

@@ -104,6 +104,3 @@ match_same_arms = "allow"
 
 # Extension comparisons - we control the input data format
 case_sensitive_file_extension_comparisons = "allow"
-
-# Struct field initialization style preferences
-field_reassign_with_default = "allow"
