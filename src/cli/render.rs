@@ -1,6 +1,136 @@
 use uxie::encounter_file::json::WaterEncounterEntryJson;
 use uxie::{GameFamily, JsonEncounterFile, JsonEventFile, MapHeader, SymbolTable, Workspace};
 
+fn resolve_map_symbol(symbols: &SymbolTable, val: i64, prefix: &str) -> String {
+    symbols
+        .resolve_name(val, prefix)
+        .unwrap_or_else(|| val.to_string())
+}
+
+fn print_map_header_intro(
+    header: &MapHeader,
+    id: u16,
+    ws: &Workspace,
+    game_name: &str,
+    divider_len: usize,
+) {
+    let internal_name = ws
+        .get_map_internal_name(id)
+        .unwrap_or_else(|| "Unknown".to_string());
+    let location_id = match header {
+        MapHeader::DP(h) => h.location_name as u16,
+        MapHeader::Pt(h) => h.location_name as u16,
+        MapHeader::HGSS(h) => h.location_name as u16,
+    };
+    let pretty_name = ws
+        .get_map_location_name(location_id as u8)
+        .unwrap_or_else(|| "Unknown".to_string());
+
+    println!("Map Header {} ({})", id, game_name);
+    println!("Internal Name:   {}", internal_name);
+    println!("Pretty Name:     {}", pretty_name);
+    println!("{}", "=".repeat(divider_len));
+    println!("Area Data ID:    {}", header.area_data_id());
+    println!("Matrix ID:       {}", header.matrix_id());
+    println!("Script File ID:  {}", header.script_file_id());
+    println!("Level Script ID: {}", header.level_script_id());
+    println!("Text Archive ID: {}", header.text_archive_id());
+}
+
+fn print_map_header_dp(h: &uxie::map_header::MapHeaderDP, symbols: &SymbolTable) {
+    println!(
+        "Music Day:       {}",
+        resolve_map_symbol(symbols, h.music_day_id as i64, "SEQ_")
+    );
+    println!(
+        "Music Night:     {}",
+        resolve_map_symbol(symbols, h.music_night_id as i64, "SEQ_")
+    );
+    println!("Wild Pokemon:    {}", h.wild_pokemon);
+    println!("Event File ID:   {}", h.event_file_id);
+    println!(
+        "Location Name:   {}",
+        resolve_map_symbol(symbols, h.location_name as i64, "MAPSEC_")
+    );
+    println!(
+        "Weather:         {}",
+        resolve_map_symbol(symbols, h.weather_id as i64, "OVERWORLD_WEATHER_")
+    );
+    println!(
+        "Camera:          {}",
+        resolve_map_symbol(symbols, h.camera_angle_id as i64, "CAMERA_TYPE_")
+    );
+    println!(
+        "Battle BG:       {}",
+        resolve_map_symbol(symbols, h.battle_background as i64, "BATTLE_BG_")
+    );
+    println!("Flags:           0x{:02X}", h.flags);
+}
+
+fn print_map_header_pt(h: &uxie::map_header::MapHeaderPt, symbols: &SymbolTable) {
+    println!(
+        "Music Day:       {}",
+        resolve_map_symbol(symbols, h.music_day_id as i64, "SEQ_")
+    );
+    println!(
+        "Music Night:     {}",
+        resolve_map_symbol(symbols, h.music_night_id as i64, "SEQ_")
+    );
+    println!("Wild Pokemon:    {}", h.wild_pokemon);
+    println!("Event File ID:   {}", h.event_file_id);
+    println!(
+        "Location Name:   {}",
+        resolve_map_symbol(symbols, h.location_name as i64, "MAPSEC_")
+    );
+    println!("Area Icon:       {}", h.area_icon);
+    println!(
+        "Weather:         {}",
+        resolve_map_symbol(symbols, h.weather_id as i64, "OVERWORLD_WEATHER_")
+    );
+    println!(
+        "Camera:          {}",
+        resolve_map_symbol(symbols, h.camera_angle_id as i64, "CAMERA_TYPE_")
+    );
+    println!(
+        "Battle BG:       {}",
+        resolve_map_symbol(symbols, h.battle_background as i64, "BATTLE_BG_")
+    );
+    println!("Flags:           0x{:02X}", h.flags);
+}
+
+fn print_map_header_hgss(h: &uxie::map_header::MapHeaderHGSS, symbols: &SymbolTable) {
+    println!(
+        "Music Day:       {}",
+        resolve_map_symbol(symbols, h.music_day_id as i64, "SEQ_")
+    );
+    println!(
+        "Music Night:     {}",
+        resolve_map_symbol(symbols, h.music_night_id as i64, "SEQ_")
+    );
+    println!("Wild Pokemon:    {}", h.wild_pokemon);
+    println!("Event File ID:   {}", h.event_file_id);
+    println!(
+        "Location Name:   {}",
+        resolve_map_symbol(symbols, h.location_name as i64, "MAPSEC_")
+    );
+    println!("Area Icon:       {}", h.area_icon);
+    println!(
+        "Weather:         {}",
+        resolve_map_symbol(symbols, h.weather_id as i64, "OVERWORLD_WEATHER_")
+    );
+    println!(
+        "Camera:          {}",
+        resolve_map_symbol(symbols, h.camera_angle_id as i64, "CAMERA_TYPE_")
+    );
+    println!("Worldmap:        ({}, {})", h.worldmap_x, h.worldmap_y);
+    println!("Kanto:           {}", h.kanto_flag);
+    println!(
+        "Battle BG:       {}",
+        resolve_map_symbol(symbols, h.battle_background as i64, "BATTLE_BG_")
+    );
+    println!("Flags:           0x{:02X}", h.flags);
+}
+
 pub fn print_event_file(event: &JsonEventFile, id: u32) {
     println!("Event File {}", id);
     println!("============");
@@ -151,126 +281,11 @@ pub fn print_map_header(header: &MapHeader, id: u16, symbols: &SymbolTable, ws: 
         MapHeader::HGSS(_) => ("HeartGold/SoulSilver", 36),
     };
 
-    let resolve = |val: i64, prefix: &str| -> String {
-        symbols
-            .resolve_name(val, prefix)
-            .unwrap_or_else(|| val.to_string())
-    };
-
-    let internal_name = ws
-        .get_map_internal_name(id)
-        .unwrap_or_else(|| "Unknown".to_string());
-    let location_id = match header {
-        MapHeader::DP(h) => h.location_name as u16,
-        MapHeader::Pt(h) => h.location_name as u16,
-        MapHeader::HGSS(h) => h.location_name as u16,
-    };
-    let pretty_name = ws
-        .get_map_location_name(location_id as u8)
-        .unwrap_or_else(|| "Unknown".to_string());
-
-    println!("Map Header {} ({})", id, game_name);
-    println!("Internal Name:   {}", internal_name);
-    println!("Pretty Name:     {}", pretty_name);
-    println!("{}", "=".repeat(divider_len));
-
-    println!("Area Data ID:    {}", header.area_data_id());
-    println!("Matrix ID:       {}", header.matrix_id());
-    println!("Script File ID:  {}", header.script_file_id());
-    println!("Level Script ID: {}", header.level_script_id());
-    println!("Text Archive ID: {}", header.text_archive_id());
+    print_map_header_intro(header, id, ws, game_name, divider_len);
 
     match header {
-        MapHeader::DP(h) => {
-            println!(
-                "Music Day:       {}",
-                resolve(h.music_day_id as i64, "SEQ_")
-            );
-            println!(
-                "Music Night:     {}",
-                resolve(h.music_night_id as i64, "SEQ_")
-            );
-            println!("Wild Pokemon:    {}", h.wild_pokemon);
-            println!("Event File ID:   {}", h.event_file_id);
-            println!(
-                "Location Name:   {}",
-                resolve(h.location_name as i64, "MAPSEC_")
-            );
-            println!(
-                "Weather:         {}",
-                resolve(h.weather_id as i64, "OVERWORLD_WEATHER_")
-            );
-            println!(
-                "Camera:          {}",
-                resolve(h.camera_angle_id as i64, "CAMERA_TYPE_")
-            );
-            println!(
-                "Battle BG:       {}",
-                resolve(h.battle_background as i64, "BATTLE_BG_")
-            );
-            println!("Flags:           0x{:02X}", h.flags);
-        }
-        MapHeader::Pt(h) => {
-            println!(
-                "Music Day:       {}",
-                resolve(h.music_day_id as i64, "SEQ_")
-            );
-            println!(
-                "Music Night:     {}",
-                resolve(h.music_night_id as i64, "SEQ_")
-            );
-            println!("Wild Pokemon:    {}", h.wild_pokemon);
-            println!("Event File ID:   {}", h.event_file_id);
-            println!(
-                "Location Name:   {}",
-                resolve(h.location_name as i64, "MAPSEC_")
-            );
-            println!("Area Icon:       {}", h.area_icon);
-            println!(
-                "Weather:         {}",
-                resolve(h.weather_id as i64, "OVERWORLD_WEATHER_")
-            );
-            println!(
-                "Camera:          {}",
-                resolve(h.camera_angle_id as i64, "CAMERA_TYPE_")
-            );
-            println!(
-                "Battle BG:       {}",
-                resolve(h.battle_background as i64, "BATTLE_BG_")
-            );
-            println!("Flags:           0x{:02X}", h.flags);
-        }
-        MapHeader::HGSS(h) => {
-            println!(
-                "Music Day:       {}",
-                resolve(h.music_day_id as i64, "SEQ_")
-            );
-            println!(
-                "Music Night:     {}",
-                resolve(h.music_night_id as i64, "SEQ_")
-            );
-            println!("Wild Pokemon:    {}", h.wild_pokemon);
-            println!("Event File ID:   {}", h.event_file_id);
-            println!(
-                "Location Name:   {}",
-                resolve(h.location_name as i64, "MAPSEC_")
-            );
-            println!("Area Icon:       {}", h.area_icon);
-            println!(
-                "Weather:         {}",
-                resolve(h.weather_id as i64, "OVERWORLD_WEATHER_")
-            );
-            println!(
-                "Camera:          {}",
-                resolve(h.camera_angle_id as i64, "CAMERA_TYPE_")
-            );
-            println!("Worldmap:        ({}, {})", h.worldmap_x, h.worldmap_y);
-            println!("Kanto:           {}", h.kanto_flag);
-            println!(
-                "Battle BG:       {}",
-                resolve(h.battle_background as i64, "BATTLE_BG_")
-            );
-            println!("Flags:           0x{:02X}", h.flags);
-        }
+        MapHeader::DP(h) => print_map_header_dp(h, symbols),
+        MapHeader::Pt(h) => print_map_header_pt(h, symbols),
+        MapHeader::HGSS(h) => print_map_header_hgss(h, symbols),
     }
 }
