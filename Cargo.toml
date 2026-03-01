@@ -97,17 +97,11 @@ unusual_byte_groupings = "allow"
 trivially_copy_pass_by_ref = "allow"
 needless_pass_by_value = "allow"
 
-# Same-type casts sometimes needed for clarity or macro expansion
-unnecessary_cast = "allow"
-
 # Redundant closures are sometimes clearer than point-free style
 redundant_closure_for_method_calls = "allow"
 
 # cloned vs copied - both work, not worth warning about
 cloned_instead_of_copied = "allow"
-
-# let-else is newer syntax, don't force migration
-manual_let_else = "allow"
 
 # Match arms with identical bodies can be intentional for clarity
 match_same_arms = "allow"

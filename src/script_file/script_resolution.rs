@@ -278,9 +278,8 @@ pub fn resolve_level_script_by_file(
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
     let map_id = first_map_for_level_script_file(level_script_file_id, provider)?;
-    let map_id = match map_id {
-        Some(id) => id,
-        None => return Ok(None),
+    let Some(map_id) = map_id else {
+        return Ok(None);
     };
 
     resolve_level_script(map_id, global_table, provider)

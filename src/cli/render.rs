@@ -18,7 +18,7 @@ fn print_map_header_intro(
         .get_map_internal_name(id)
         .unwrap_or_else(|| "Unknown".to_string());
     let location_id = match header {
-        MapHeader::DP(h) => h.location_name as u16,
+        MapHeader::DP(h) => h.location_name,
         MapHeader::Pt(h) => h.location_name as u16,
         MapHeader::HGSS(h) => h.location_name as u16,
     };
