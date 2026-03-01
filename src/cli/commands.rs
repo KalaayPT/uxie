@@ -1,5 +1,4 @@
 use super::render::{print_encounter_file, print_event_file, print_map_header};
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use uxie::{
@@ -147,12 +146,7 @@ pub fn cmd_encounter(
     Ok(())
 }
 
-pub fn cmd_parse_header(
-    path: &Path,
-    only_defines: bool,
-    only_enums: bool,
-    json: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn cmd_parse_header(path: &Path, json: bool) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
     let mut symbols = SymbolTable::new();
 
@@ -166,80 +160,35 @@ pub fn cmd_parse_header(
         _ => symbols.load_header_str(&content)?,
     }
 
+    let mut constants: Vec<_> = symbols.get_all_defines().into_iter().collect();
+    constants.sort_by(|(a, _), (b, _)| a.cmp(b));
+
     if json {
         #[derive(serde::Serialize)]
-        struct HeaderOutput {
-            defines: Option<Vec<uxie::c_parser::defines::CDefine>>,
-            enums: Option<HashMap<String, Vec<(String, Option<i64>)>>>,
+        struct ConstantOutput {
+            name: String,
+            value: i64,
         }
 
-        let defines = if !only_enums {
-            Some(
-                symbols
-                    .get_all_defines()
-                    .iter()
-                    .map(|(n, v)| uxie::c_parser::defines::CDefine {
-                        name: n.clone(),
-                        value: v.to_string(),
-                        resolved: Some(*v),
-                    })
-                    .collect(),
-            )
-        } else {
-            None
-        };
+        #[derive(serde::Serialize)]
+        struct HeaderOutput {
+            constants: Vec<ConstantOutput>,
+        }
 
         let output = HeaderOutput {
-            defines,
-            enums: if !only_defines {
-                // Return all symbols as a single "default" enum if requested
-                let mut map = HashMap::new();
-                let mut all_syms: Vec<_> = symbols
-                    .get_all_defines()
-                    .into_iter()
-                    .map(|(n, v)| (n, Some(v)))
-                    .collect();
-                all_syms.sort_by_key(|(n, _)| n.clone());
-                map.insert("Symbols".to_string(), all_syms);
-                Some(map)
-            } else {
-                None
-            },
+            constants: constants
+                .iter()
+                .map(|(name, value)| ConstantOutput {
+                    name: name.clone(),
+                    value: *value,
+                })
+                .collect(),
         };
         println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        if !only_enums {
-            let mut defs: Vec<_> = symbols
-                .get_all_defines()
-                .into_iter()
-                .map(|(n, v)| uxie::c_parser::defines::CDefine {
-                    name: n,
-                    value: v.to_string(),
-                    resolved: Some(v),
-                })
-                .collect();
-            defs.sort_by_key(|d| d.name.clone());
-            if !defs.is_empty() {
-                println!("Symbols:");
-                for d in defs {
-                    if let Some(resolved) = d.resolved {
-                        println!("  {} = {}", d.name, resolved);
-                    } else {
-                        println!("  {}", d.name);
-                    }
-                }
-            }
-        }
-        let enums = symbols.get_enums_std();
-        if !only_defines && !enums.is_empty() {
-            println!("\nEnums:");
-            for (name, variants) in &enums {
-                println!("  enum {} {{", name);
-                for (v_name, v_val) in variants {
-                    println!("    {} = {:?},", v_name, v_val);
-                }
-                println!("  }}");
-            }
+    } else if !constants.is_empty() {
+        println!("Constants:");
+        for (name, value) in &constants {
+            println!("  {} = {}", name, value);
         }
     }
 

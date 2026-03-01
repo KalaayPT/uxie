@@ -65,12 +65,6 @@ enum Commands {
         path: PathBuf,
 
         #[arg(long)]
-        only_defines: bool,
-
-        #[arg(long)]
-        only_enums: bool,
-
-        #[arg(long)]
         json: bool,
     },
 
@@ -141,12 +135,7 @@ fn main() {
         Commands::Encounter { id, args } => {
             cmd_encounter(id, &args.project, args.decomp, args.json)
         }
-        Commands::Symbols {
-            path,
-            only_defines,
-            only_enums,
-            json,
-        } => cmd_parse_header(&path, only_defines, only_enums, json),
+        Commands::Symbols { path, json } => cmd_parse_header(&path, json),
         Commands::ResolveScript { path, decomp } => cmd_resolve_script(&path, &decomp),
         Commands::Personal { id, args } => cmd_personal(&id, &args.project, args.decomp, args.json),
         Commands::Move { id, args } => cmd_move(&id, &args.project, args.decomp, args.json),
