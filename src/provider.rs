@@ -12,7 +12,7 @@ use crate::map_header::{
 };
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Trait for accessing ROM data regardless of source format
 ///
@@ -80,6 +80,8 @@ pub struct Arm9Provider {
     header_table_offset: u64,
     header_count: usize,
     game_family: GameFamily,
+    headers_cache: OnceLock<Arc<Vec<MapHeader>>>,
+    headers_init_lock: Mutex<()>,
 }
 
 impl Arm9Provider {
@@ -102,6 +104,8 @@ impl Arm9Provider {
             header_table_offset,
             header_count,
             game_family,
+            headers_cache: OnceLock::new(),
+            headers_init_lock: Mutex::new(()),
         }
     }
 
@@ -112,7 +116,7 @@ impl Arm9Provider {
         Self::new(arm9_path, 0xE601C, 559, GameFamily::Platinum)
     }
 
-    fn read_all_headers(&self) -> Result<Vec<MapHeader>> {
+    fn parse_all_headers(&self) -> Result<Vec<MapHeader>> {
         let mut file = File::open(&self.arm9_path)?;
         Ok(read_map_headers_from_arm9(
             &mut file,
@@ -120,6 +124,26 @@ impl Arm9Provider {
             self.header_count,
             self.game_family,
         )?)
+    }
+
+    fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
+        if let Some(headers) = self.headers_cache.get() {
+            return Ok(headers.clone());
+        }
+
+        let init_guard = self
+            .headers_init_lock
+            .lock()
+            .map_err(|_| UxieError::invalid_format("Arm9 header init lock poisoned"))?;
+        if let Some(headers) = self.headers_cache.get() {
+            return Ok(headers.clone());
+        }
+
+        let parsed = Arc::new(self.parse_all_headers()?);
+        let _ = self.headers_cache.set(parsed.clone());
+        drop(init_guard);
+
+        Ok(parsed)
     }
 }
 
@@ -148,12 +172,12 @@ impl DataProvider for Arm9Provider {
     }
 
     fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
-        let headers = self.read_all_headers()?;
+        let headers = self.load_all_headers()?;
         Ok(find_text_archive_in_headers(&headers, script_file_id))
     }
 
     fn find_maps_by_script_file_id(&self, script_file_id: u16) -> Result<Vec<u16>> {
-        let headers = self.read_all_headers()?;
+        let headers = self.load_all_headers()?;
         Ok(find_maps_by_script_file_in_headers(
             &headers,
             script_file_id,
@@ -161,7 +185,7 @@ impl DataProvider for Arm9Provider {
     }
 
     fn find_maps_by_level_script_file_id(&self, level_script_file_id: u16) -> Result<Vec<u16>> {
-        let headers = self.read_all_headers()?;
+        let headers = self.load_all_headers()?;
         Ok(find_maps_by_level_script_in_headers(
             &headers,
             level_script_file_id,
@@ -367,7 +391,7 @@ mod tests {
     use crate::map_header::write_map_header_to_bytes;
     use proptest::prelude::*;
     use std::fs;
-    use std::io::Write;
+    use std::io::{Seek, Write};
     use tempfile::NamedTempFile;
 
     fn create_test_pt_header(script_id: u16, text_id: u16) -> MapHeader {
@@ -563,6 +587,49 @@ mod tests {
         assert_eq!(
             provider.find_maps_by_level_script_file_id(999).unwrap(),
             Vec::<u16>::new()
+        );
+    }
+
+    #[test]
+    fn test_arm9_provider_caches_headers_after_first_full_table_load() {
+        let initial_headers = vec![
+            create_test_pt_header(10, 100),
+            create_test_pt_header(20, 200),
+            create_test_pt_header(30, 300),
+        ];
+        let updated_headers = vec![
+            create_test_pt_header(10, 111),
+            create_test_pt_header(20, 222),
+            create_test_pt_header(30, 333),
+        ];
+        let mut file = create_test_arm9_file(&initial_headers);
+
+        let provider = Arm9Provider::new(file.path(), 0, 3, GameFamily::Platinum);
+
+        assert_eq!(
+            provider.get_text_archive_for_script_file(20).unwrap(),
+            Some(200)
+        );
+
+        {
+            let inner = file.as_file_mut();
+            inner.set_len(0).unwrap();
+            inner.rewind().unwrap();
+            for header in &updated_headers {
+                let bytes = write_map_header_to_bytes(header);
+                inner.write_all(&bytes).unwrap();
+            }
+            inner.flush().unwrap();
+        }
+
+        assert_eq!(
+            provider.get_text_archive_for_script_file(20).unwrap(),
+            Some(200)
+        );
+        assert_eq!(provider.find_maps_by_script_file_id(10).unwrap(), vec![0]);
+        assert_eq!(
+            provider.find_maps_by_level_script_file_id(0).unwrap(),
+            vec![0, 1, 2]
         );
     }
 
