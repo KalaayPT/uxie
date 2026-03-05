@@ -39,7 +39,7 @@ The name comes from [Uxie](https://bulbapedia.bulbagarden.net/wiki/Uxie_(Pok%C3%
 - **Unified ROM Access**: Auto-detects and reads data from DSPRE projects and decompilation sources
 - **High-Level Workspace**: Unified API for managing symbols, script mappings, text banks, and global script tables
 - **Global Script Table**: Automatic resolution of `CallCommonScript` IDs to their script files and text banks (supports HGSS binary reading and Platinum hardcoded tables)
-- **Full C Expression Evaluation**: Pratt parser with correct operator precedence for all C operators
+- **Strict Constant Expression Evaluation**: Pratt parser for arithmetic/bitwise/shift/comparison/logical constant expressions; unsupported constructs fail explicitly
 - **Parallel Loading**: Multi-threaded header file loading via rayon (~200ms for 50,000+ symbols)
 - **Bidirectional Script Resolution**: Resolve constants from names to values AND values to names
 

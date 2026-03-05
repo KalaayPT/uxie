@@ -213,13 +213,25 @@ mod c_parser_tests {
     }
 
     #[test]
-    fn test_load_list_file_str_rejects_unsupported_operator_expression() {
+    fn test_load_list_file_str_supports_comparison_and_logical_expression() {
         let mut table = SymbolTable::new();
-        let err = table.load_list_file_str("CONST_A = 1 < 2\n").unwrap_err();
+        table
+            .load_list_file_str("CONST_A = 1 < 2\nCONST_B = CONST_A && 0\n")
+            .unwrap();
+        assert_eq!(table.resolve_constant("CONST_A"), Some(1));
+        assert_eq!(table.resolve_constant("CONST_B"), Some(0));
+    }
+
+    #[test]
+    fn test_load_list_file_str_rejects_unsupported_ternary_expression() {
+        let mut table = SymbolTable::new();
+        let err = table
+            .load_list_file_str("CONST_A = 1 ? 2 : 3\n")
+            .unwrap_err();
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("CONST_A"));
-        assert!(err.to_string().contains("1 < 2"));
+        assert!(err.to_string().contains("1 ? 2 : 3"));
     }
 
     #[test]
@@ -270,11 +282,26 @@ mod c_parser_tests {
     }
 
     #[test]
-    fn test_load_python_enum_str_rejects_unsupported_operator_expression() {
+    fn test_load_python_enum_str_supports_comparison_and_logical_expression() {
+        let mut table = SymbolTable::new();
+        table
+            .load_python_enum_str_with_tag(
+                "SPECIES_OK = 1 < 2\nSPECIES_BOOL = SPECIES_OK && 0\n",
+                Path::new("inline.py"),
+                crate::c_parser::SymbolTag::Global,
+            )
+            .unwrap();
+
+        assert_eq!(table.resolve_constant("SPECIES_OK"), Some(1));
+        assert_eq!(table.resolve_constant("SPECIES_BOOL"), Some(0));
+    }
+
+    #[test]
+    fn test_load_python_enum_str_rejects_unsupported_ternary_expression() {
         let mut table = SymbolTable::new();
         let err = table
             .load_python_enum_str_with_tag(
-                "SPECIES_BAD = 1 < 2\n",
+                "SPECIES_BAD = 1 ? 2 : 3\n",
                 Path::new("inline.py"),
                 crate::c_parser::SymbolTag::Global,
             )
@@ -282,7 +309,7 @@ mod c_parser_tests {
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("SPECIES_BAD"));
-        assert!(err.to_string().contains("1 < 2"));
+        assert!(err.to_string().contains("1 ? 2 : 3"));
     }
 
     #[test]

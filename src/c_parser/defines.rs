@@ -68,9 +68,17 @@ enum Token {
     Star,
     Slash,
     Percent,
-    And,
-    Or,
+    BitAnd,
+    BitOr,
     Xor,
+    LogicalAnd,
+    LogicalOr,
+    Less,
+    LessEqual,
+    Greater,
+    GreaterEqual,
+    EqualEqual,
+    NotEqual,
     Tilde,
     Not,
     LShift,
@@ -105,80 +113,83 @@ impl<'a> Tokenizer<'a> {
         match b {
             b'0'..=b'9' => self.read_number(),
             b'a'..=b'z' | b'A'..=b'Z' | b'_' => self.read_ident(),
-            b'+' => {
-                self.pos += 1;
-                Token::Plus
-            }
-            b'-' => {
-                self.pos += 1;
-                Token::Minus
-            }
-            b'*' => {
-                self.pos += 1;
-                Token::Star
-            }
-            b'/' => {
-                self.pos += 1;
-                Token::Slash
-            }
-            b'%' => {
-                self.pos += 1;
-                Token::Percent
-            }
+            _ => self.read_symbol_token(b),
+        }
+    }
+
+    fn read_symbol_token(&mut self, symbol: u8) -> Token {
+        match symbol {
+            b'+' => self.take_single(Token::Plus),
+            b'-' => self.take_single(Token::Minus),
+            b'*' => self.take_single(Token::Star),
+            b'/' => self.take_single(Token::Slash),
+            b'%' => self.take_single(Token::Percent),
             b'&' => {
-                self.pos += 1;
-                Token::And
+                if self.match_two(b'&') {
+                    Token::LogicalAnd
+                } else {
+                    self.take_single(Token::BitAnd)
+                }
             }
             b'|' => {
-                self.pos += 1;
-                Token::Or
+                if self.match_two(b'|') {
+                    Token::LogicalOr
+                } else {
+                    self.take_single(Token::BitOr)
+                }
             }
-            b'^' => {
-                self.pos += 1;
-                Token::Xor
-            }
-            b'~' => {
-                self.pos += 1;
-                Token::Tilde
-            }
+            b'^' => self.take_single(Token::Xor),
+            b'~' => self.take_single(Token::Tilde),
             b'!' => {
-                self.pos += 1;
-                Token::Not
+                if self.match_two(b'=') {
+                    Token::NotEqual
+                } else {
+                    self.take_single(Token::Not)
+                }
+            }
+            b'=' => {
+                if self.match_two(b'=') {
+                    Token::EqualEqual
+                } else {
+                    self.take_single(Token::Invalid)
+                }
             }
             b'<' => {
-                if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'<' {
-                    self.pos += 2;
+                if self.match_two(b'<') {
                     Token::LShift
+                } else if self.match_two(b'=') {
+                    Token::LessEqual
                 } else {
-                    self.pos += 1;
-                    Token::Invalid
+                    self.take_single(Token::Less)
                 }
             }
             b'>' => {
-                if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'>' {
-                    self.pos += 2;
+                if self.match_two(b'>') {
                     Token::RShift
+                } else if self.match_two(b'=') {
+                    Token::GreaterEqual
                 } else {
-                    self.pos += 1;
-                    Token::Invalid
+                    self.take_single(Token::Greater)
                 }
             }
-            b'(' => {
-                self.pos += 1;
-                Token::LParen
-            }
-            b')' => {
-                self.pos += 1;
-                Token::RParen
-            }
-            b',' => {
-                self.pos += 1;
-                Token::Comma
-            }
-            _ => {
-                self.pos += 1;
-                Token::Invalid
-            }
+            b'(' => self.take_single(Token::LParen),
+            b')' => self.take_single(Token::RParen),
+            b',' => self.take_single(Token::Comma),
+            _ => self.take_single(Token::Invalid),
+        }
+    }
+
+    fn take_single(&mut self, token: Token) -> Token {
+        self.pos += 1;
+        token
+    }
+
+    fn match_two(&mut self, second: u8) -> bool {
+        if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == second {
+            self.pos += 2;
+            true
+        } else {
+            false
         }
     }
 
@@ -372,12 +383,16 @@ fn try_parse_numeric(s: &str) -> Option<i64> {
 
 fn get_precedence(tok: &Token) -> u8 {
     match tok {
-        Token::Or => 1,
-        Token::Xor => 2,
-        Token::And => 3,
-        Token::LShift | Token::RShift => 4,
-        Token::Plus | Token::Minus => 5,
-        Token::Star | Token::Slash | Token::Percent => 6,
+        Token::LogicalOr => 1,
+        Token::LogicalAnd => 2,
+        Token::BitOr => 3,
+        Token::Xor => 4,
+        Token::BitAnd => 5,
+        Token::EqualEqual | Token::NotEqual => 6,
+        Token::Less | Token::LessEqual | Token::Greater | Token::GreaterEqual => 7,
+        Token::LShift | Token::RShift => 8,
+        Token::Plus | Token::Minus => 9,
+        Token::Star | Token::Slash | Token::Percent => 10,
         _ => 0,
     }
 }
@@ -402,12 +417,20 @@ fn apply_binary_op(op: &Token, left: i64, right: i64) -> Option<i64> {
         Token::Star => Some(left * right),
         Token::Slash => (right != 0).then_some(left / right),
         Token::Percent => (right != 0).then_some(left % right),
-        Token::And => Some(left & right),
-        Token::Or => Some(left | right),
+        Token::BitAnd => Some(left & right),
+        Token::BitOr => Some(left | right),
         Token::Xor => Some(left ^ right),
+        Token::LogicalAnd => Some(i64::from(left != 0 && right != 0)),
+        Token::LogicalOr => Some(i64::from(left != 0 || right != 0)),
+        Token::Less => Some(i64::from(left < right)),
+        Token::LessEqual => Some(i64::from(left <= right)),
+        Token::Greater => Some(i64::from(left > right)),
+        Token::GreaterEqual => Some(i64::from(left >= right)),
+        Token::EqualEqual => Some(i64::from(left == right)),
+        Token::NotEqual => Some(i64::from(left != right)),
         Token::LShift => Some(left << right),
         Token::RShift => Some(left >> right),
-        _ => Some(left),
+        _ => None,
     }
 }
 
@@ -726,13 +749,79 @@ mod tests {
     }
 
     #[test]
-    fn test_unsupported_comparison_operators_return_none() {
+    fn test_comparison_and_logical_operators() {
         let cache = DashMap::new();
         let exprs = FxHashMap::default();
         let res = FxHashMap::default();
 
-        assert_eq!(eval_expr_with_context("1 < 2", &exprs, &res, &cache), None);
-        assert_eq!(eval_expr_with_context("1 > 2", &exprs, &res, &cache), None);
+        assert_eq!(
+            eval_expr_with_context("1 < 2", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 > 2", &exprs, &res, &cache),
+            Some(0)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 <= 2", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 >= 2", &exprs, &res, &cache),
+            Some(0)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 == 2", &exprs, &res, &cache),
+            Some(0)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 != 2", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 && 2", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("0 && 2", &exprs, &res, &cache),
+            Some(0)
+        );
+        assert_eq!(
+            eval_expr_with_context("0 || 2", &exprs, &res, &cache),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_comparison_and_logical_precedence() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+
+        assert_eq!(
+            eval_expr_with_context("1 + 2 > 2 && 0 || 1", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 | 2 == 3", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 << 2 > 3", &exprs, &res, &cache),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_unsupported_ternary_operator_returns_none() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+
+        assert_eq!(
+            eval_expr_with_context("1 ? 2 : 3", &exprs, &res, &cache),
+            None
+        );
     }
 
     #[test]
