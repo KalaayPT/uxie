@@ -201,7 +201,8 @@ pub struct DecompProvider {
     pub root: PathBuf,
     pub symbols: crate::c_parser::SymbolTable,
     pub family: GameFamily,
-    headers_cache: Mutex<Option<Arc<Vec<MapHeader>>>>,
+    headers_cache: OnceLock<Arc<Vec<MapHeader>>>,
+    headers_init_lock: Mutex<()>,
 }
 
 impl DecompProvider {
@@ -220,7 +221,8 @@ impl DecompProvider {
             root: root.as_ref().to_path_buf(),
             symbols,
             family,
-            headers_cache: Mutex::new(None),
+            headers_cache: OnceLock::new(),
+            headers_init_lock: Mutex::new(()),
         }
     }
 
@@ -263,27 +265,21 @@ impl DecompProvider {
     }
 
     fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
-        {
-            let cache = self
-                .headers_cache
-                .lock()
-                .map_err(|_| UxieError::invalid_format("Decomp header cache lock poisoned"))?;
-            if let Some(headers) = cache.as_ref() {
-                return Ok(headers.clone());
-            }
+        if let Some(headers) = self.headers_cache.get() {
+            return Ok(headers.clone());
+        }
+
+        let init_guard = self
+            .headers_init_lock
+            .lock()
+            .map_err(|_| UxieError::invalid_format("Decomp header init lock poisoned"))?;
+        if let Some(headers) = self.headers_cache.get() {
+            return Ok(headers.clone());
         }
 
         let parsed = Arc::new(self.parse_all_headers()?);
-
-        let mut cache = self
-            .headers_cache
-            .lock()
-            .map_err(|_| UxieError::invalid_format("Decomp header cache lock poisoned"))?;
-        if let Some(headers) = cache.as_ref() {
-            return Ok(headers.clone());
-        }
-        *cache = Some(parsed.clone());
-        drop(cache);
+        let _ = self.headers_cache.set(parsed.clone());
+        drop(init_guard);
 
         Ok(parsed)
     }
@@ -822,6 +818,57 @@ mod tests {
         let err = provider.get_map_header(0).unwrap_err();
         assert!(err.to_string().contains("MAP_HEADER_BAD_HG"));
         assert!(err.to_string().contains("bikeAllowed"));
+    }
+
+    #[test]
+    fn test_decomp_provider_does_not_cache_parse_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_BAD] = {
+            .scriptsArchiveID = not-a-valid-literal,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+        assert!(provider.get_map_header(0).is_err());
+
+        fs::write(
+            &header_path,
+            r"
+        [MAP_HEADER_GOOD] = {
+            .areaDataArchiveID = 1,
+            .unk_01 = 2,
+            .mapMatrixID = 3,
+            .scriptsArchiveID = 4,
+            .initScriptsArchiveID = 5,
+            .msgArchiveID = 6,
+            .dayMusicID = 7,
+            .nightMusicID = 8,
+            .wildEncountersArchiveID = 9,
+            .eventsArchiveID = 10,
+            .mapLabelTextID = 11,
+            .mapLabelWindowID = 12,
+            .weather = 13,
+            .cameraType = 14,
+            .mapType = 15,
+            .battleBG = 16,
+            .isBikeAllowed = TRUE,
+            .isRunningAllowed = FALSE,
+            .isEscapeRopeAllowed = TRUE,
+            .isFlyAllowed = FALSE,
+        },
+        ",
+        )
+        .unwrap();
+
+        let header = provider.get_map_header(0).unwrap();
+        assert_eq!(header.script_file_id(), 4);
     }
 
     #[test]
