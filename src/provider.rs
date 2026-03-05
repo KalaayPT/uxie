@@ -630,6 +630,36 @@ mod tests {
     }
 
     #[test]
+    fn test_arm9_provider_does_not_cache_parse_failures() {
+        let dir = tempfile::tempdir().unwrap();
+        let arm9_path = dir.path().join("arm9.bin");
+        let provider = Arm9Provider::new(&arm9_path, 0, 2, GameFamily::Platinum);
+
+        assert!(provider.get_text_archive_for_script_file(10).is_err());
+
+        let headers = [
+            create_test_pt_header(10, 100),
+            create_test_pt_header(20, 200),
+        ];
+        let mut file = std::fs::File::create(&arm9_path).unwrap();
+        for header in headers {
+            let bytes = write_map_header_to_bytes(&header);
+            file.write_all(&bytes).unwrap();
+        }
+        file.flush().unwrap();
+
+        assert_eq!(
+            provider.get_text_archive_for_script_file(10).unwrap(),
+            Some(100)
+        );
+        assert_eq!(provider.find_maps_by_script_file_id(20).unwrap(), vec![1]);
+        assert_eq!(
+            provider.find_maps_by_level_script_file_id(0).unwrap(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
     fn test_default_find_map_by_level_script_file_id_uses_first_match() {
         struct LevelOnlyProvider;
 
