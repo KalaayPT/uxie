@@ -1,6 +1,7 @@
 use super::render::{print_encounter_file, print_event_file, print_map_header};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use uxie::decomp_data::DecompPaths;
 use uxie::{
     BinaryEncounterFile, DspreProject, EggMoveData, EvolutionData, EvolutionMethod, GameFamily,
     GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeaderJson, MoveData, Narc,
@@ -107,10 +108,13 @@ pub fn cmd_encounter(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
+    let paths = DecompPaths::new(project_path);
     let narc_path = match ws.family {
-        GameFamily::DP => project_path.join("data/fielddata/encountdata/d_enc_data.narc"),
-        GameFamily::Platinum => project_path.join("data/fielddata/encountdata/pl_enc_data.narc"),
-        GameFamily::HGSS => project_path.join("data/a/0/3/7"),
+        GameFamily::DP => paths
+            .root()
+            .join("data/fielddata/encountdata/d_enc_data.narc"),
+        GameFamily::Platinum => paths.dspre_encounters_narc(),
+        GameFamily::HGSS => paths.root().join("data/a/0/3/7"),
     };
 
     let bin = if narc_path.exists() {
@@ -215,7 +219,11 @@ pub fn cmd_personal(
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
-    let narc_path = project_path.join("data/poketool/personal/pl_personal.narc");
+    let paths = DecompPaths::new(project_path);
+    let narc_path = match ws.family {
+        GameFamily::DP | GameFamily::Platinum => paths.dspre_personal_narc(),
+        GameFamily::HGSS => paths.root().join("data/pbr/personal.narc"),
+    };
     let narc = load_narc(&narc_path)?;
 
     let data = narc
@@ -233,7 +241,7 @@ pub fn cmd_personal(
         let symbols = &ws.symbols;
         let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
 
-        println!("Personal Data {} (Platinum)", id);
+        println!("Personal Data {} ({})", id, family_name(ws.family));
         println!("========================");
         println!("Species:         {}", resolve(id, "SPECIES_"));
         println!("HP:              {}", personal.hp);
@@ -287,7 +295,11 @@ pub fn cmd_move(
 
     let id = resolve_id(id, "MOVE_", &ws.symbols, &ws.game_strings)?;
 
-    let narc_path = project_path.join("data/poketool/waza/pl_waza_tbl.narc");
+    let paths = DecompPaths::new(project_path);
+    let narc_path = match ws.family {
+        GameFamily::DP | GameFamily::Platinum => paths.dspre_moves_narc(),
+        GameFamily::HGSS => paths.root().join("data/data/kowaza.narc"),
+    };
     let narc = load_narc(&narc_path)?;
 
     let data = narc
@@ -305,7 +317,7 @@ pub fn cmd_move(
         let symbols = &ws.symbols;
         let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
 
-        println!("Move Data {} (Platinum)", id);
+        println!("Move Data {} ({})", id, family_name(ws.family));
         println!("===================");
         println!("Move:            {}", resolve(id, "MOVE_"));
         println!("Effect:          {}", move_data.battle_effect);
@@ -338,7 +350,11 @@ pub fn cmd_item(
 
     let id = resolve_id(id, "ITEM_", &ws.symbols, &ws.game_strings)?;
 
-    let narc_path = project_path.join("data/itemtool/itemdata/pl_item_data.narc");
+    let paths = DecompPaths::new(project_path);
+    let narc_path = match ws.family {
+        GameFamily::DP | GameFamily::Platinum => paths.dspre_items_narc(),
+        GameFamily::HGSS => paths.root().join("data/pbr/item_data.narc"),
+    };
     let narc = load_narc(&narc_path)?;
 
     let data = narc
@@ -356,7 +372,7 @@ pub fn cmd_item(
         let symbols = &ws.symbols;
         let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
 
-        println!("Item Data {} (Platinum)", id);
+        println!("Item Data {} ({})", id, family_name(ws.family));
         println!("===================");
         println!("Item:            {}", resolve(id, "ITEM_"));
         println!("Price:           {}", item.price);
@@ -389,8 +405,16 @@ pub fn cmd_trainer(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
-    let trdata_path = project_path.join("data/poketool/trainer/trdata.narc");
-    let trpoke_path = project_path.join("data/poketool/trainer/trpoke.narc");
+    let paths = DecompPaths::new(project_path);
+    let (trdata_path, trpoke_path) = match ws.family {
+        GameFamily::DP | GameFamily::Platinum => {
+            (paths.dspre_trdata_narc(), paths.dspre_trpoke_narc())
+        }
+        GameFamily::HGSS => (
+            paths.root().join("data/a/0/5/5"),
+            paths.root().join("data/a/0/5/6"),
+        ),
+    };
 
     let trdata_narc = load_narc(&trdata_path)?;
     let trpoke_narc = load_narc(&trpoke_path)?;
@@ -416,7 +440,7 @@ pub fn cmd_trainer(
         let symbols = &ws.symbols;
         let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
 
-        println!("Trainer Data {} (Platinum)", id);
+        println!("Trainer Data {} ({})", id, family_name(ws.family));
         println!("======================");
         println!("Flags:           {:?}", trainer.properties.flags);
         println!(
@@ -472,7 +496,11 @@ pub fn cmd_evolution(
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
-    let narc_path = project_path.join("data/poketool/personal/evo.narc");
+    let paths = DecompPaths::new(project_path);
+    let narc_path = match ws.family {
+        GameFamily::DP | GameFamily::Platinum => paths.dspre_evo_narc(),
+        GameFamily::HGSS => paths.root().join("data/a/0/3/4"),
+    };
     let narc = load_narc(&narc_path)?;
 
     let data = narc
@@ -490,7 +518,11 @@ pub fn cmd_evolution(
         let symbols = &ws.symbols;
         let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
 
-        println!("Evolution Data for {} (Platinum)", resolve(id, "SPECIES_"));
+        println!(
+            "Evolution Data for {} ({})",
+            resolve(id, "SPECIES_"),
+            family_name(ws.family)
+        );
         println!("================================");
 
         let active: Vec<_> = evo.active_evolutions().collect();
@@ -537,7 +569,11 @@ pub fn cmd_learnset(
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
-    let narc_path = project_path.join("data/poketool/personal/wotbl.narc");
+    let paths = DecompPaths::new(project_path);
+    let narc_path = match ws.family {
+        GameFamily::DP | GameFamily::Platinum => paths.dspre_wotbl_narc(),
+        GameFamily::HGSS => paths.root().join("data/pbr/pms.narc"),
+    };
     let narc = load_narc(&narc_path)?;
 
     let data = narc
@@ -555,7 +591,11 @@ pub fn cmd_learnset(
         let symbols = &ws.symbols;
         let resolve = |val: u16, prefix: &str| -> String { resolve_name(val, prefix, symbols, gs) };
 
-        println!("Learnset for {} (Platinum)", resolve(id, "SPECIES_"));
+        println!(
+            "Learnset for {} ({})",
+            resolve(id, "SPECIES_"),
+            family_name(ws.family)
+        );
         println!("==========================");
 
         if learnset.entries.is_empty() {
@@ -737,9 +777,11 @@ fn load_egg_move_data(
     project_path: &Path,
     family: GameFamily,
 ) -> Result<EggMoveData, Box<dyn std::error::Error>> {
+    let paths = DecompPaths::new(project_path);
+
     match family {
         GameFamily::HGSS => {
-            let narc_path = project_path.join("data/data/kowaza.narc");
+            let narc_path = paths.root().join("data/data/kowaza.narc");
             if !narc_path.exists() {
                 return Err("HGSS egg moves NARC not found (data/data/kowaza.narc)".into());
             }
@@ -749,7 +791,7 @@ fn load_egg_move_data(
             Ok(EggMoveData::from_binary(&mut cursor)?)
         }
         GameFamily::Platinum | GameFamily::DP => {
-            let overlay_path = project_path.join("overlay/overlay_0005.bin");
+            let overlay_path = paths.root().join("overlay/overlay_0005.bin");
             if !overlay_path.exists() {
                 return Err("Overlay 5 not found (DPPt egg moves are in ARM9 overlay 5)".into());
             }
@@ -768,6 +810,14 @@ fn load_egg_move_data(
 fn load_narc(path: &Path) -> Result<Narc, Box<dyn std::error::Error>> {
     let mut file = std::fs::File::open(path)?;
     Ok(Narc::from_binary(&mut file)?)
+}
+
+fn family_name(family: GameFamily) -> &'static str {
+    match family {
+        GameFamily::DP => "Diamond/Pearl",
+        GameFamily::Platinum => "Platinum",
+        GameFamily::HGSS => "HeartGold/SoulSilver",
+    }
 }
 
 fn resolve_id(
