@@ -1,7 +1,11 @@
+use super::paths::{
+    egg_move_narc_path, egg_move_overlay_path, encounter_narc_path, evolution_narc_path,
+    family_name, item_narc_path, learnset_narc_path, move_narc_path, personal_narc_path,
+    trainer_data_narc_path, trainer_party_narc_path,
+};
 use super::render::{print_encounter_file, print_event_file, print_map_header};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use uxie::decomp_data::DecompPaths;
 use uxie::{
     BinaryEncounterFile, DspreProject, EggMoveData, EvolutionData, EvolutionMethod, GameFamily,
     GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeaderJson, MoveData, Narc,
@@ -108,14 +112,7 @@ pub fn cmd_encounter(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
-    let paths = DecompPaths::new(project_path);
-    let narc_path = match ws.family {
-        GameFamily::DP => paths
-            .root()
-            .join("data/fielddata/encountdata/d_enc_data.narc"),
-        GameFamily::Platinum => paths.dspre_encounters_narc(),
-        GameFamily::HGSS => paths.root().join("data/a/0/3/7"),
-    };
+    let narc_path = encounter_narc_path(project_path, ws.family);
 
     let bin = if narc_path.exists() {
         let mut file = std::fs::File::open(narc_path)?;
@@ -219,12 +216,7 @@ pub fn cmd_personal(
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
-    let paths = DecompPaths::new(project_path);
-    let narc_path = match ws.family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_personal_narc(),
-        GameFamily::HGSS => paths.root().join("data/pbr/personal.narc"),
-    };
-    let narc = load_narc(&narc_path)?;
+    let narc = load_narc(&personal_narc_path(project_path, ws.family))?;
 
     let data = narc
         .members
@@ -295,12 +287,7 @@ pub fn cmd_move(
 
     let id = resolve_id(id, "MOVE_", &ws.symbols, &ws.game_strings)?;
 
-    let paths = DecompPaths::new(project_path);
-    let narc_path = match ws.family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_moves_narc(),
-        GameFamily::HGSS => paths.root().join("data/data/kowaza.narc"),
-    };
-    let narc = load_narc(&narc_path)?;
+    let narc = load_narc(&move_narc_path(project_path, ws.family))?;
 
     let data = narc
         .members
@@ -350,12 +337,7 @@ pub fn cmd_item(
 
     let id = resolve_id(id, "ITEM_", &ws.symbols, &ws.game_strings)?;
 
-    let paths = DecompPaths::new(project_path);
-    let narc_path = match ws.family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_items_narc(),
-        GameFamily::HGSS => paths.root().join("data/pbr/item_data.narc"),
-    };
-    let narc = load_narc(&narc_path)?;
+    let narc = load_narc(&item_narc_path(project_path, ws.family))?;
 
     let data = narc
         .members
@@ -405,19 +387,8 @@ pub fn cmd_trainer(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
-    let paths = DecompPaths::new(project_path);
-    let (trdata_path, trpoke_path) = match ws.family {
-        GameFamily::DP | GameFamily::Platinum => {
-            (paths.dspre_trdata_narc(), paths.dspre_trpoke_narc())
-        }
-        GameFamily::HGSS => (
-            paths.root().join("data/a/0/5/5"),
-            paths.root().join("data/a/0/5/6"),
-        ),
-    };
-
-    let trdata_narc = load_narc(&trdata_path)?;
-    let trpoke_narc = load_narc(&trpoke_path)?;
+    let trdata_narc = load_narc(&trainer_data_narc_path(project_path, ws.family))?;
+    let trpoke_narc = load_narc(&trainer_party_narc_path(project_path, ws.family))?;
 
     let props_data = trdata_narc
         .members
@@ -496,12 +467,7 @@ pub fn cmd_evolution(
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
-    let paths = DecompPaths::new(project_path);
-    let narc_path = match ws.family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_evo_narc(),
-        GameFamily::HGSS => paths.root().join("data/a/0/3/4"),
-    };
-    let narc = load_narc(&narc_path)?;
+    let narc = load_narc(&evolution_narc_path(project_path, ws.family))?;
 
     let data = narc
         .members
@@ -569,12 +535,7 @@ pub fn cmd_learnset(
 
     let id = resolve_id(id, "SPECIES_", &ws.symbols, &ws.game_strings)?;
 
-    let paths = DecompPaths::new(project_path);
-    let narc_path = match ws.family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_wotbl_narc(),
-        GameFamily::HGSS => paths.root().join("data/pbr/pms.narc"),
-    };
-    let narc = load_narc(&narc_path)?;
+    let narc = load_narc(&learnset_narc_path(project_path, ws.family))?;
 
     let data = narc
         .members
@@ -777,47 +738,32 @@ fn load_egg_move_data(
     project_path: &Path,
     family: GameFamily,
 ) -> Result<EggMoveData, Box<dyn std::error::Error>> {
-    let paths = DecompPaths::new(project_path);
-
-    match family {
-        GameFamily::HGSS => {
-            let narc_path = paths.root().join("data/data/kowaza.narc");
-            if !narc_path.exists() {
-                return Err("HGSS egg moves NARC not found (data/data/kowaza.narc)".into());
-            }
-            let narc = load_narc(&narc_path)?;
-            let data = narc.members.first().ok_or("Empty kowaza.narc")?;
-            let mut cursor = std::io::Cursor::new(data);
-            Ok(EggMoveData::from_binary(&mut cursor)?)
-        }
-        GameFamily::Platinum | GameFamily::DP => {
-            let overlay_path = paths.root().join("overlay/overlay_0005.bin");
-            if !overlay_path.exists() {
-                return Err("Overlay 5 not found (DPPt egg moves are in ARM9 overlay 5)".into());
-            }
-            let overlay_data = std::fs::read(&overlay_path)?;
-            let offset = match family {
-                GameFamily::Platinum => 0x29222,
-                GameFamily::DP => 0x20668,
-                GameFamily::HGSS => unreachable!(),
-            };
-            let mut cursor = std::io::Cursor::new(&overlay_data[offset..]);
-            Ok(EggMoveData::from_binary(&mut cursor)?)
-        }
+    let overlay_path = egg_move_overlay_path(project_path, family);
+    if overlay_path.exists() {
+        let overlay_data = std::fs::read(&overlay_path)?;
+        let offset = match family {
+            GameFamily::Platinum => 0x29222,
+            GameFamily::DP => 0x20668,
+            GameFamily::HGSS => unreachable!(),
+        };
+        let mut cursor = std::io::Cursor::new(&overlay_data[offset..]);
+        return Ok(EggMoveData::from_binary(&mut cursor)?);
     }
+
+    let narc_path = egg_move_narc_path(project_path, family);
+    if !narc_path.exists() {
+        return Err("Egg move data not found for this game family".into());
+    }
+
+    let narc = load_narc(&narc_path)?;
+    let data = narc.members.first().ok_or("Empty egg move archive")?;
+    let mut cursor = std::io::Cursor::new(data);
+    Ok(EggMoveData::from_binary(&mut cursor)?)
 }
 
 fn load_narc(path: &Path) -> Result<Narc, Box<dyn std::error::Error>> {
     let mut file = std::fs::File::open(path)?;
     Ok(Narc::from_binary(&mut file)?)
-}
-
-fn family_name(family: GameFamily) -> &'static str {
-    match family {
-        GameFamily::DP => "Diamond/Pearl",
-        GameFamily::Platinum => "Platinum",
-        GameFamily::HGSS => "HeartGold/SoulSilver",
-    }
 }
 
 fn resolve_id(
