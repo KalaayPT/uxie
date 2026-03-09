@@ -415,8 +415,20 @@ fn apply_binary_op(op: &Token, left: i64, right: i64) -> Option<i64> {
         Token::Plus => Some(left + right),
         Token::Minus => Some(left - right),
         Token::Star => Some(left * right),
-        Token::Slash => (right != 0).then_some(left / right),
-        Token::Percent => (right != 0).then_some(left % right),
+        Token::Slash => {
+            if right == 0 {
+                None
+            } else {
+                Some(left / right)
+            }
+        }
+        Token::Percent => {
+            if right == 0 {
+                None
+            } else {
+                Some(left % right)
+            }
+        }
         Token::BitAnd => Some(left & right),
         Token::BitOr => Some(left | right),
         Token::Xor => Some(left ^ right),
@@ -443,6 +455,82 @@ fn expect_token(tokens: &[Token], pos: &mut usize, expected: Token) -> bool {
     }
 }
 
+fn parse_expr_syntax(tokens: &[Token], pos: &mut usize, min_prec: u8) -> bool {
+    if !parse_primary_syntax(tokens, pos) {
+        return false;
+    }
+
+    while *pos < tokens.len() {
+        let prec = get_precedence(&tokens[*pos]);
+        if prec < min_prec || prec == 0 {
+            break;
+        }
+        *pos += 1;
+        if !parse_expr_syntax(tokens, pos, prec + 1) {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn parse_rgb_call_syntax(tokens: &[Token], pos: &mut usize) -> bool {
+    if !parse_expr_syntax(tokens, pos, 0) {
+        return false;
+    }
+    if !expect_token(tokens, pos, Token::Comma) {
+        return false;
+    }
+    if !parse_expr_syntax(tokens, pos, 0) {
+        return false;
+    }
+    if !expect_token(tokens, pos, Token::Comma) {
+        return false;
+    }
+    if !parse_expr_syntax(tokens, pos, 0) {
+        return false;
+    }
+    expect_token(tokens, pos, Token::RParen)
+}
+
+fn parse_parenthesized_syntax(tokens: &[Token], pos: &mut usize) -> bool {
+    *pos += 1;
+    if !parse_expr_syntax(tokens, pos, 0) {
+        return false;
+    }
+    expect_token(tokens, pos, Token::RParen)
+}
+
+fn parse_unary_syntax(tokens: &[Token], pos: &mut usize) -> bool {
+    *pos += 1;
+    parse_primary_syntax(tokens, pos)
+}
+
+fn parse_primary_syntax(tokens: &[Token], pos: &mut usize) -> bool {
+    let Some(token) = tokens.get(*pos) else {
+        return false;
+    };
+
+    match token {
+        Token::Number(_) => {
+            *pos += 1;
+            true
+        }
+        Token::Ident(id) => {
+            if id == "RGB" && *pos + 1 < tokens.len() && tokens[*pos + 1] == Token::LParen {
+                *pos += 2;
+                parse_rgb_call_syntax(tokens, pos)
+            } else {
+                *pos += 1;
+                true
+            }
+        }
+        Token::LParen => parse_parenthesized_syntax(tokens, pos),
+        Token::Plus | Token::Minus | Token::Tilde | Token::Not => parse_unary_syntax(tokens, pos),
+        _ => false,
+    }
+}
+
 fn parse_expr<SExpr, SResolved>(
     tokens: &[Token],
     pos: &mut usize,
@@ -463,6 +551,16 @@ where
 
         let op = tokens[*pos].clone();
         *pos += 1;
+
+        // Preserve C short-circuit semantics while still validating RHS syntax.
+        if (op == Token::LogicalAnd && left == 0) || (op == Token::LogicalOr && left != 0) {
+            if !parse_expr_syntax(tokens, pos, prec + 1) {
+                return None;
+            }
+            left = i64::from(op != Token::LogicalAnd);
+            continue;
+        }
+
         let right = parse_expr(tokens, pos, prec + 1, ctx)?;
         left = apply_binary_op(&op, left, right)?;
     }
@@ -809,6 +907,47 @@ mod tests {
         assert_eq!(
             eval_expr_with_context("1 << 2 > 3", &exprs, &res, &cache),
             Some(1)
+        );
+    }
+
+    #[test]
+    fn test_logical_short_circuit_semantics() {
+        let cache = DashMap::new();
+        let exprs = FxHashMap::default();
+        let res = FxHashMap::default();
+
+        assert_eq!(
+            eval_expr_with_context("0 && UNKNOWN_SYMBOL", &exprs, &res, &cache),
+            Some(0)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 || UNKNOWN_SYMBOL", &exprs, &res, &cache),
+            Some(1)
+        );
+        assert_eq!(
+            eval_expr_with_context("0 && (1 / 0)", &exprs, &res, &cache),
+            Some(0)
+        );
+        assert_eq!(
+            eval_expr_with_context("1 || (1 / 0)", &exprs, &res, &cache),
+            Some(1)
+        );
+
+        assert_eq!(
+            eval_expr_with_context("1 && UNKNOWN_SYMBOL", &exprs, &res, &cache),
+            None
+        );
+        assert_eq!(
+            eval_expr_with_context("0 || UNKNOWN_SYMBOL", &exprs, &res, &cache),
+            None
+        );
+        assert_eq!(
+            eval_expr_with_context("1 && (1 / 0)", &exprs, &res, &cache),
+            None
+        );
+        assert_eq!(
+            eval_expr_with_context("0 || (1 / 0)", &exprs, &res, &cache),
+            None
         );
     }
 

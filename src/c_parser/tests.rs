@@ -223,6 +223,16 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_load_list_file_str_supports_logical_short_circuit() {
+        let mut table = SymbolTable::new();
+        table
+            .load_list_file_str("CONST_A = 0 && UNKNOWN_SYMBOL\nCONST_B = 1 || UNKNOWN_SYMBOL\n")
+            .unwrap();
+        assert_eq!(table.resolve_constant("CONST_A"), Some(0));
+        assert_eq!(table.resolve_constant("CONST_B"), Some(1));
+    }
+
+    #[test]
     fn test_load_list_file_str_rejects_unsupported_ternary_expression() {
         let mut table = SymbolTable::new();
         let err = table
@@ -294,6 +304,21 @@ mod c_parser_tests {
 
         assert_eq!(table.resolve_constant("SPECIES_OK"), Some(1));
         assert_eq!(table.resolve_constant("SPECIES_BOOL"), Some(0));
+    }
+
+    #[test]
+    fn test_load_python_enum_str_supports_logical_short_circuit() {
+        let mut table = SymbolTable::new();
+        table
+            .load_python_enum_str_with_tag(
+                "SPECIES_A = 0 && UNKNOWN_SYMBOL\nSPECIES_B = 1 || UNKNOWN_SYMBOL\n",
+                Path::new("inline.py"),
+                crate::c_parser::SymbolTag::Global,
+            )
+            .unwrap();
+
+        assert_eq!(table.resolve_constant("SPECIES_A"), Some(0));
+        assert_eq!(table.resolve_constant("SPECIES_B"), Some(1));
     }
 
     #[test]
