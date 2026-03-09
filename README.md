@@ -11,6 +11,7 @@ ROM data from DSPRE projects and decompilation sources.
 - [Background](#background)
 - [Features](#features)
 - [Install](#install)
+- [Development Setup](#development-setup)
 - [CLI Usage](#cli-usage)
 - [Library Usage](#library-usage)
 - [Contributing](#contributing)
@@ -65,6 +66,24 @@ uxie = "0.4.0"
 ```
 
 For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).
+
+## Development Setup
+
+This repository keeps `nitroarc` as a git submodule at the project root in `nitroarc/`.
+
+Clone recursively, then build:
+
+```shell
+git clone --recursive https://github.com/KalaayPT/uxie.git
+cd uxie
+cargo build
+```
+
+If you already cloned without submodules, run `git submodule update --init --recursive`.
+
+`uxie` uses the `nitroarc_ffi` shared library for NARC support, so you will need a working Rust toolchain plus a C compiler available on your system.
+
+If the submodule is missing, builds will fail because the NARC implementation now comes from `nitroarc` rather than the previous in-house parser.
 
 ## CLI Usage
 
@@ -159,7 +178,9 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, fixture-based
 
 ## License
 
-MIT License. See [LICENSE](./LICENSE) for details.
+This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
+
+Note: the repository currently includes `nitroarc` as a git submodule, and it is licensed separately under the GNU LGPL-3.0-or-later. If you redistribute builds that include it, make sure you also comply with that dependency's license terms. The intended model is to ship `nitroarc_ffi` as a separate shared library alongside `uxie`.
 
 --- 
 

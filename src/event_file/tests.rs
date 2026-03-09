@@ -255,26 +255,26 @@ mod event_file_tests {
         let decomp_narc = crate::Narc::from_binary(&mut decomp_reader).unwrap();
 
         assert_eq!(
-            dspre_narc.members.len(),
-            decomp_narc.members.len(),
+            dspre_narc.len(),
+            decomp_narc.len(),
             "zone_event member count mismatch between {} and {}",
             dspre_narc_path.display(),
             decomp_narc_path.display()
         );
         assert!(
-            !dspre_narc.members.is_empty(),
+            !dspre_narc.is_empty(),
             "expected non-empty zone_event NARC at {}",
             dspre_narc_path.display()
         );
 
-        for event_id in 0..usize::min(20, dspre_narc.members.len()) {
-            let dspre_member = &dspre_narc.members[event_id];
-            let decomp_member = &decomp_narc.members[event_id];
+        for event_id in 0..usize::min(20, dspre_narc.len()) {
+            let dspre_member = dspre_narc.member(event_id).unwrap();
+            let decomp_member = decomp_narc.member(event_id).unwrap();
 
-            let mut dspre_cursor = Cursor::new(dspre_member.as_slice());
+            let mut dspre_cursor = Cursor::new(dspre_member);
             let dspre_event = BinaryEventFile::from_binary(&mut dspre_cursor).unwrap();
 
-            let mut decomp_cursor = Cursor::new(decomp_member.as_slice());
+            let mut decomp_cursor = Cursor::new(decomp_member);
             let decomp_event = BinaryEventFile::from_binary(&mut decomp_cursor).unwrap();
 
             assert_eq!(

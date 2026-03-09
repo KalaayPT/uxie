@@ -26,17 +26,18 @@ mod encounter_tests {
         if narc_path.exists() {
             let mut file = std::fs::File::open(&narc_path)?;
             let narc = Narc::from_binary(&mut file)?;
-            let data = narc.members.get(id as usize).ok_or_else(|| {
+            let data = narc.member(id as usize).map_err(|err| {
                 io::Error::new(
                     io::ErrorKind::InvalidInput,
                     format!(
-                        "Encounter ID {} out of range in {}",
+                        "Encounter ID {} out of range in {}: {}",
                         id,
-                        narc_path.display()
+                        narc_path.display(),
+                        err
                     ),
                 )
             })?;
-            let mut reader = Cursor::new(data.as_slice());
+            let mut reader = Cursor::new(data);
             BinaryEncounterFile::from_binary(&mut reader, family)
         } else {
             let unpacked_path = project_root

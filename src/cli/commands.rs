@@ -117,11 +117,8 @@ pub fn cmd_encounter(
     let bin = if narc_path.exists() {
         let mut file = std::fs::File::open(narc_path)?;
         let narc = uxie::narc::Narc::from_binary(&mut file)?;
-        let data = narc
-            .members
-            .get(id as usize)
-            .ok_or("Encounter ID out of range in NARC")?;
-        let mut reader = std::io::Cursor::new(data.as_slice());
+        let data = narc.member(id as usize)?;
+        let mut reader = std::io::Cursor::new(data);
         BinaryEncounterFile::from_binary(&mut reader, ws.family)?
     } else {
         let unpacked_path = project_path
@@ -218,10 +215,7 @@ pub fn cmd_personal(
 
     let narc = load_narc(&personal_narc_path(project_path, ws.family))?;
 
-    let data = narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Personal data ID {} out of range", id))?;
+    let data = narc.member(id as usize)?;
 
     let mut cursor = std::io::Cursor::new(data);
     let personal = PersonalData::from_binary(&mut cursor)?;
@@ -289,10 +283,7 @@ pub fn cmd_move(
 
     let narc = load_narc(&move_narc_path(project_path, ws.family))?;
 
-    let data = narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Move data ID {} out of range", id))?;
+    let data = narc.member(id as usize)?;
 
     let mut cursor = std::io::Cursor::new(data);
     let move_data = MoveData::from_binary(&mut cursor)?;
@@ -339,10 +330,7 @@ pub fn cmd_item(
 
     let narc = load_narc(&item_narc_path(project_path, ws.family))?;
 
-    let data = narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Item data ID {} out of range", id))?;
+    let data = narc.member(id as usize)?;
 
     let mut cursor = std::io::Cursor::new(data);
     let item = ItemData::from_binary(&mut cursor)?;
@@ -390,14 +378,8 @@ pub fn cmd_trainer(
     let trdata_narc = load_narc(&trainer_data_narc_path(project_path, ws.family))?;
     let trpoke_narc = load_narc(&trainer_party_narc_path(project_path, ws.family))?;
 
-    let props_data = trdata_narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Trainer data ID {} out of range", id))?;
-    let party_data = trpoke_narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Trainer party ID {} out of range", id))?;
+    let props_data = trdata_narc.member(id as usize)?;
+    let party_data = trpoke_narc.member(id as usize)?;
 
     let mut props_cursor = std::io::Cursor::new(props_data);
     let mut party_cursor = std::io::Cursor::new(party_data);
@@ -469,10 +451,7 @@ pub fn cmd_evolution(
 
     let narc = load_narc(&evolution_narc_path(project_path, ws.family))?;
 
-    let data = narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Evolution data ID {} out of range", id))?;
+    let data = narc.member(id as usize)?;
 
     let mut cursor = std::io::Cursor::new(data);
     let evo = EvolutionData::from_binary(&mut cursor)?;
@@ -537,10 +516,7 @@ pub fn cmd_learnset(
 
     let narc = load_narc(&learnset_narc_path(project_path, ws.family))?;
 
-    let data = narc
-        .members
-        .get(id as usize)
-        .ok_or_else(|| format!("Learnset data ID {} out of range", id))?;
+    let data = narc.member(id as usize)?;
 
     let mut cursor = std::io::Cursor::new(data);
     let learnset = LearnsetData::from_binary(&mut cursor)?;
@@ -756,14 +732,13 @@ fn load_egg_move_data(
     }
 
     let narc = load_narc(&narc_path)?;
-    let data = narc.members.first().ok_or("Empty egg move archive")?;
+    let data = narc.first_member()?;
     let mut cursor = std::io::Cursor::new(data);
     Ok(EggMoveData::from_binary(&mut cursor)?)
 }
 
 fn load_narc(path: &Path) -> Result<Narc, Box<dyn std::error::Error>> {
-    let mut file = std::fs::File::open(path)?;
-    Ok(Narc::from_binary(&mut file)?)
+    Ok(Narc::open(path)?)
 }
 
 fn resolve_id(

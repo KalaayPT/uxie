@@ -424,7 +424,8 @@ mod tests {
         let mut reader = BufReader::new(file);
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load NARC");
 
-        for (i, original_bytes) in narc.members.iter().enumerate().take(100) {
+        let members = narc.members_owned().unwrap();
+        for (i, original_bytes) in members.iter().enumerate().take(100) {
             if original_bytes.len() != ITEM_DATA_SIZE {
                 continue;
             }
@@ -465,7 +466,8 @@ mod tests {
         let mut reader = BufReader::new(file);
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load NARC");
 
-        for (i, original_bytes) in narc.members.iter().enumerate().take(100) {
+        let members = narc.members_owned().unwrap();
+        for (i, original_bytes) in members.iter().enumerate().take(100) {
             if original_bytes.len() != ITEM_DATA_SIZE {
                 continue;
             }

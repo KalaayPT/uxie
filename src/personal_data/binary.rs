@@ -234,7 +234,8 @@ mod tests {
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load personal NARC");
 
         let mut roundtripped_members = 0usize;
-        for (i, original_bytes) in narc.members.iter().enumerate().take(600) {
+        let members = narc.members_owned().unwrap();
+        for (i, original_bytes) in members.iter().enumerate().take(600) {
             if original_bytes.len() != PERSONAL_DATA_SIZE {
                 continue;
             }

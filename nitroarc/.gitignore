@@ -1,0 +1,5 @@
+.cache/
+bin/
+test/
+compile_commands.json
+TODO.txt

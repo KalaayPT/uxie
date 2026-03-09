@@ -5,12 +5,25 @@ This project values correctness for ROM data workflows first, then ergonomics an
 ## Development Setup
 
 1. Install current stable Rust.
-2. Clone the repository.
+2. Clone the repository recursively:
+
+```shell
+git clone --recursive <repo-url>
+```
+
+If you already cloned without submodules, run:
+
+```shell
+git submodule update --init --recursive
+```
+
 3. Build once:
 
 ```shell
 cargo build
 ```
+
+The build links against the `nitroarc` shared FFI library, so you need a working C toolchain in addition to Rust.
 
 ## Local Validation Commands
 
@@ -101,3 +114,14 @@ If env vars are missing, tests should skip cleanly instead of failing.
 Update docs in the same PR when behavior changes:
 
 - `README.md` for user-facing behavior, CLI semantics, setup, or testing workflow changes.
+- If dependency, packaging, or distribution behavior changes, document submodule/setup expectations and any third-party license implications in the relevant contributor or release docs.
+
+## Third-Party Dependency Note
+
+`uxie` keeps `nitroarc` as a git submodule at the repository root in `nitroarc/`.
+
+- `uxie` itself is MIT-licensed.
+- The `nitroarc` dependency is LGPL-3.0-or-later.
+- The project links against the `nitroarc` shared FFI library.
+- If you change how `nitroarc` is built, linked, bundled, or distributed, make sure the resulting distribution remains compliant with the LGPL obligations for that dependency.
+- At minimum, keep the dependency notices accurate and avoid removing or obscuring the upstream license files shipped with the submodule.

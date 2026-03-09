@@ -200,7 +200,8 @@ mod tests {
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load move-data NARC");
 
         let mut roundtripped_members = 0usize;
-        for (i, original_bytes) in narc.members.iter().enumerate().take(700) {
+        let members = narc.members_owned().unwrap();
+        for (i, original_bytes) in members.iter().enumerate().take(700) {
             if original_bytes.len() != MOVE_DATA_SIZE {
                 continue;
             }

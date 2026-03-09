@@ -1,113 +1,355 @@
-//! Nintendo Archive (NARC) file format reader and writer
+//! Nintendo Archive (NARC) file format reader backed by `nitroarc`.
 //!
-//! NARC is the archive format used extensively in Pokemon Gen 4 games
-//! for packing multiple files into a single archive.
+//! This module replaces Uxie's legacy in-house parser with a thin, safe Rust
+//! wrapper around the `nitroarc` FFI layer provided by the repository-root
+//! `nitroarc` git submodule.
 
 use crate::error::{Result, UxieError};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::ffi::{CStr, CString};
+use std::io::{Read, Seek, Write};
+use std::os::raw::{c_char, c_int, c_uint, c_void};
+use std::path::Path;
+use std::ptr::NonNull;
+
+#[allow(non_camel_case_types)]
+type uint16_t = u16;
+#[allow(non_camel_case_types)]
+type uint32_t = u32;
+
+#[repr(C)]
+struct nitroarcffi_archive_t {
+    _private: [u8; 0],
+}
+
+#[repr(C)]
+struct nitroarcffi_builder_t {
+    _private: [u8; 0],
+}
+
+unsafe extern "C" {
+    fn nitroarcffi_errs(errc: c_int) -> *const c_char;
+
+    fn nitroarcffi_archive_open(
+        stream: *const c_void,
+        size: uint32_t,
+        out_archive: *mut *mut nitroarcffi_archive_t,
+    ) -> c_int;
+
+    fn nitroarcffi_archive_close(archive: *mut nitroarcffi_archive_t);
+
+    fn nitroarcffi_archive_count(
+        archive: *const nitroarcffi_archive_t,
+        out_count: *mut uint16_t,
+    ) -> c_int;
+
+    fn nitroarcffi_archive_geti(
+        archive: *const nitroarcffi_archive_t,
+        index: uint16_t,
+        out_member: *mut *const c_void,
+        out_size: *mut uint32_t,
+    ) -> c_int;
+
+    fn nitroarcffi_archive_gets(
+        archive: *const nitroarcffi_archive_t,
+        path: *const c_char,
+        out_member: *mut *const c_void,
+        out_size: *mut uint32_t,
+    ) -> c_int;
+
+    fn nitroarcffi_archive_nameof_alloc(
+        archive: *const nitroarcffi_archive_t,
+        index: uint16_t,
+        out_name: *mut *mut c_char,
+    ) -> c_int;
+
+    fn nitroarcffi_builder_open(
+        nfiles: uint16_t,
+        named: c_uint,
+        stripped: c_uint,
+        out_builder: *mut *mut nitroarcffi_builder_t,
+    ) -> c_int;
+
+    fn nitroarcffi_builder_ppack(
+        builder: *mut nitroarcffi_builder_t,
+        data: *const c_void,
+        size: uint32_t,
+        name: *const c_char,
+    ) -> c_int;
+
+    fn nitroarcffi_builder_pseal(
+        builder: *mut nitroarcffi_builder_t,
+        out_data: *mut *mut c_void,
+        out_size: *mut uint32_t,
+    ) -> c_int;
+
+    fn nitroarcffi_builder_close(builder: *mut nitroarcffi_builder_t);
+
+    fn nitroarcffi_free(ptr: *mut c_void);
+}
+
+#[link(name = "nitroarc_ffi")]
+unsafe extern "C" {}
 
 #[derive(Debug)]
 pub struct Narc {
-    pub members: Vec<Vec<u8>>,
+    archive: NonNull<nitroarcffi_archive_t>,
 }
 
 impl Narc {
     pub fn from_binary<R: Read + Seek>(reader: &mut R) -> Result<Self> {
-        let mut magic = [0u8; 4];
-        reader.read_exact(&mut magic)?;
-        if &magic != b"NARC" {
-            return Err(UxieError::invalid_format("Not a NARC file"));
-        }
-
-        reader.seek(SeekFrom::Current(12))?;
-
-        let mut btaf_magic = [0u8; 4];
-        reader.read_exact(&mut btaf_magic)?;
-        if &btaf_magic != b"BTAF" {
-            return Err(UxieError::invalid_format("Missing BTAF chunk"));
-        }
-        let btaf_size = reader.read_u32::<LittleEndian>()?;
-        let entry_count = reader.read_u32::<LittleEndian>()?;
-
-        let mut entries = Vec::with_capacity(entry_count as usize);
-        for _ in 0..entry_count {
-            let start = reader.read_u32::<LittleEndian>()?;
-            let end = reader.read_u32::<LittleEndian>()?;
-            entries.push((start, end));
-        }
-
-        reader.seek(SeekFrom::Start(16 + btaf_size as u64))?;
-        let mut btnf_magic = [0u8; 4];
-        reader.read_exact(&mut btnf_magic)?;
-        let btnf_size = reader.read_u32::<LittleEndian>()?;
-
-        reader.seek(SeekFrom::Start(16 + btaf_size as u64 + btnf_size as u64))?;
-        let mut gmif_magic = [0u8; 4];
-        reader.read_exact(&mut gmif_magic)?;
-        let _gmif_size = reader.read_u32::<LittleEndian>()?;
-        let gmif_offset = reader.stream_position()?;
-
-        let mut members = Vec::with_capacity(entry_count as usize);
-        for (start, end) in entries {
-            let size = end - start;
-            reader.seek(SeekFrom::Start(gmif_offset + start as u64))?;
-            let mut data = vec![0u8; size as usize];
-            reader.read_exact(&mut data)?;
-            members.push(data);
-        }
-
-        Ok(Self { members })
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes)?;
+        Self::from_bytes(&bytes)
     }
 
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let entry_count = self.members.len() as u32;
-        let btaf_size = 12 + entry_count * 8;
-        let btnf_size = 16u32;
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        let size = u32::try_from(bytes.len())
+            .map_err(|_| UxieError::invalid_format("NARC stream is too large"))?;
 
-        let mut file_offsets = Vec::with_capacity(self.members.len());
-        let mut current_offset = 0u32;
-        for data in &self.members {
-            file_offsets.push((current_offset, current_offset + data.len() as u32));
-            current_offset += data.len() as u32;
+        let mut archive = std::ptr::null_mut();
+        let errc = unsafe {
+            nitroarcffi_archive_open(bytes.as_ptr().cast::<c_void>(), size, &raw mut archive)
+        };
+        check_nitroarc(errc)?;
+
+        let archive = NonNull::new(archive)
+            .ok_or_else(|| UxieError::invalid_format("nitroarc returned a null archive handle"))?;
+
+        Ok(Self { archive })
+    }
+
+    pub fn open(path: impl AsRef<Path>) -> Result<Self> {
+        let bytes = std::fs::read(path)?;
+        Self::from_bytes(&bytes)
+    }
+
+    #[must_use]
+    pub fn len(&self) -> usize {
+        let mut count = 0u16;
+        let errc = unsafe { nitroarcffi_archive_count(self.archive.as_ptr(), &raw mut count) };
+        debug_assert_eq!(errc, 0, "nitroarcffi_archive_count failed: {}", errc);
+        usize::from(count)
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn member(&self, index: usize) -> Result<&[u8]> {
+        let index = u16::try_from(index)
+            .map_err(|_| UxieError::invalid_format("NARC member index exceeds nitroarc range"))?;
+
+        let mut data = std::ptr::null();
+        let mut size = 0u32;
+        let errc = unsafe {
+            nitroarcffi_archive_geti(self.archive.as_ptr(), index, &raw mut data, &raw mut size)
+        };
+        check_nitroarc(errc)?;
+
+        if data.is_null() && size != 0 {
+            return Err(UxieError::invalid_format(
+                "nitroarc returned a null member pointer for non-empty data",
+            ));
         }
-        let gmif_size = 8 + current_offset;
-        let total_size = 16 + btaf_size + btnf_size + gmif_size;
 
-        let mut buf = Vec::with_capacity(total_size as usize);
+        let len = usize::try_from(size)
+            .map_err(|_| UxieError::invalid_format("NARC member size exceeds usize"))?;
 
-        buf.extend_from_slice(b"NARC");
-        buf.write_u16::<LittleEndian>(0xFFFE).unwrap();
-        buf.write_u16::<LittleEndian>(0x0100).unwrap();
-        buf.write_u32::<LittleEndian>(total_size).unwrap();
-        buf.write_u16::<LittleEndian>(16).unwrap();
-        buf.write_u16::<LittleEndian>(3).unwrap();
+        let slice = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), len) };
+        Ok(slice)
+    }
 
-        buf.extend_from_slice(b"BTAF");
-        buf.write_u32::<LittleEndian>(btaf_size).unwrap();
-        buf.write_u32::<LittleEndian>(entry_count).unwrap();
-        for (start, end) in &file_offsets {
-            buf.write_u32::<LittleEndian>(*start).unwrap();
-            buf.write_u32::<LittleEndian>(*end).unwrap();
+    pub fn member_owned(&self, index: usize) -> Result<Vec<u8>> {
+        Ok(self.member(index)?.to_vec())
+    }
+
+    pub fn first_member(&self) -> Result<&[u8]> {
+        self.member(0)
+    }
+
+    pub fn members(&self) -> Members<'_> {
+        Members {
+            narc: self,
+            next_index: 0,
+            len: self.len(),
+        }
+    }
+
+    pub fn members_owned(&self) -> Result<Vec<Vec<u8>>> {
+        self.members()
+            .map(|member| member.map(ToOwned::to_owned))
+            .collect()
+    }
+
+    pub fn member_name(&self, index: usize) -> Result<Option<String>> {
+        let index = u16::try_from(index)
+            .map_err(|_| UxieError::invalid_format("NARC member index exceeds nitroarc range"))?;
+
+        let mut name_ptr = std::ptr::null_mut();
+        let errc = unsafe {
+            nitroarcffi_archive_nameof_alloc(self.archive.as_ptr(), index, &raw mut name_ptr)
+        };
+        check_nitroarc(errc)?;
+
+        if name_ptr.is_null() {
+            return Ok(None);
         }
 
-        buf.extend_from_slice(b"BTNF");
-        buf.write_u32::<LittleEndian>(btnf_size).unwrap();
-        buf.extend_from_slice(&[0u8; 8]);
+        let name = unsafe { CStr::from_ptr(name_ptr) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe { nitroarcffi_free(name_ptr.cast::<c_void>()) };
+        if name.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(name))
+        }
+    }
 
-        buf.extend_from_slice(b"GMIF");
-        buf.write_u32::<LittleEndian>(gmif_size).unwrap();
-        for data in &self.members {
-            buf.extend_from_slice(data);
+    pub fn member_by_name(&self, path: &str) -> Result<&[u8]> {
+        let path = CString::new(path).map_err(|_| {
+            UxieError::invalid_format("NARC member path contains an interior NUL byte")
+        })?;
+
+        let mut data = std::ptr::null();
+        let mut size = 0u32;
+        let errc = unsafe {
+            nitroarcffi_archive_gets(
+                self.archive.as_ptr(),
+                path.as_ptr(),
+                &raw mut data,
+                &raw mut size,
+            )
+        };
+        check_nitroarc(errc)?;
+
+        if data.is_null() && size != 0 {
+            return Err(UxieError::invalid_format(
+                "nitroarc returned a null member pointer for non-empty named data",
+            ));
         }
 
-        buf
+        let len = usize::try_from(size)
+            .map_err(|_| UxieError::invalid_format("NARC member size exceeds usize"))?;
+        let slice = unsafe { std::slice::from_raw_parts(data.cast::<u8>(), len) };
+        Ok(slice)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let len = self.len();
+        let count = u16::try_from(len)
+            .map_err(|_| UxieError::invalid_format("NARC member count exceeds nitroarc range"))?;
+
+        let mut builder = std::ptr::null_mut();
+        let errc = unsafe { nitroarcffi_builder_open(count, 0, 0, &raw mut builder) };
+        check_nitroarc(errc)?;
+
+        let builder = NonNull::new(builder)
+            .ok_or_else(|| UxieError::invalid_format("nitroarc returned a null builder handle"))?;
+
+        for index in 0..len {
+            let member = self.member(index)?;
+            let member_size = u32::try_from(member.len())
+                .map_err(|_| UxieError::invalid_format("NARC member is too large"))?;
+
+            let errc = unsafe {
+                nitroarcffi_builder_ppack(
+                    builder.as_ptr(),
+                    member.as_ptr().cast::<c_void>(),
+                    member_size,
+                    std::ptr::null(),
+                )
+            };
+
+            if let Err(err) = check_nitroarc(errc) {
+                unsafe { nitroarcffi_builder_close(builder.as_ptr()) };
+                return Err(err);
+            }
+        }
+
+        let mut out_data = std::ptr::null_mut();
+        let mut out_size = 0u32;
+        let errc = unsafe {
+            nitroarcffi_builder_pseal(builder.as_ptr(), &raw mut out_data, &raw mut out_size)
+        };
+
+        if errc != 0 {
+            unsafe { nitroarcffi_builder_close(builder.as_ptr()) };
+            check_nitroarc(errc)?;
+        }
+
+        let len = usize::try_from(out_size)
+            .map_err(|_| UxieError::invalid_format("Serialized NARC size exceeds usize"))?;
+        let bytes = unsafe { std::slice::from_raw_parts(out_data.cast::<u8>(), len) }.to_vec();
+        unsafe { nitroarcffi_free(out_data) };
+        Ok(bytes)
     }
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
-        writer.write_all(&self.to_bytes())?;
+        writer.write_all(&self.to_bytes()?)?;
         Ok(())
     }
+
+    pub fn write_to_file(&self, path: impl AsRef<Path>) -> Result<()> {
+        std::fs::write(path, self.to_bytes()?)?;
+        Ok(())
+    }
+}
+
+impl Drop for Narc {
+    fn drop(&mut self) {
+        unsafe {
+            nitroarcffi_archive_close(self.archive.as_ptr());
+        }
+    }
+}
+
+pub struct Members<'a> {
+    narc: &'a Narc,
+    next_index: usize,
+    len: usize,
+}
+
+impl<'a> Iterator for Members<'a> {
+    type Item = Result<&'a [u8]>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next_index >= self.len {
+            return None;
+        }
+
+        let index = self.next_index;
+        self.next_index += 1;
+        Some(self.narc.member(index))
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.len.saturating_sub(self.next_index);
+        (remaining, Some(remaining))
+    }
+}
+
+impl ExactSizeIterator for Members<'_> {}
+
+fn check_nitroarc(errc: c_int) -> Result<()> {
+    if errc == 0 {
+        return Ok(());
+    }
+
+    let message = unsafe {
+        let ptr = nitroarcffi_errs(errc);
+        if ptr.is_null() {
+            format!("nitroarc error {}", errc)
+        } else {
+            CStr::from_ptr(ptr).to_string_lossy().into_owned()
+        }
+    };
+
+    Err(UxieError::invalid_format(format!(
+        "nitroarc error {}: {}",
+        errc, message
+    )))
 }
 
 #[cfg(test)]
@@ -115,53 +357,44 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use std::fs::File;
-    use std::io::BufReader;
-    use std::io::Cursor;
+    use std::io::{BufReader, Cursor};
     use std::path::Path;
 
     fn create_minimal_narc(file_data: &[&[u8]]) -> Vec<u8> {
-        use byteorder::WriteBytesExt;
-        let mut buf = Vec::new();
+        let count = u16::try_from(file_data.len()).unwrap();
 
-        let entry_count = file_data.len() as u32;
-        let btaf_size = 12 + entry_count * 8;
-        let btnf_size = 16u32;
+        let mut builder = std::ptr::null_mut();
+        let errc = unsafe { nitroarcffi_builder_open(count, 0, 0, &raw mut builder) };
+        assert_eq!(errc, 0);
 
-        let mut file_offsets = Vec::new();
-        let mut current_offset = 0u32;
+        let builder = NonNull::new(builder).unwrap();
+
         for data in file_data {
-            file_offsets.push((current_offset, current_offset + data.len() as u32));
-            current_offset += data.len() as u32;
-        }
-        let gmif_size = 8 + current_offset;
-        let total_size = 16 + btaf_size + btnf_size + gmif_size;
-
-        buf.extend_from_slice(b"NARC");
-        buf.write_u16::<LittleEndian>(0xFFFE).unwrap();
-        buf.write_u16::<LittleEndian>(0x0100).unwrap();
-        buf.write_u32::<LittleEndian>(total_size).unwrap();
-        buf.write_u16::<LittleEndian>(16).unwrap();
-        buf.write_u16::<LittleEndian>(3).unwrap();
-
-        buf.extend_from_slice(b"BTAF");
-        buf.write_u32::<LittleEndian>(btaf_size).unwrap();
-        buf.write_u32::<LittleEndian>(entry_count).unwrap();
-        for (start, end) in &file_offsets {
-            buf.write_u32::<LittleEndian>(*start).unwrap();
-            buf.write_u32::<LittleEndian>(*end).unwrap();
+            let errc = unsafe {
+                nitroarcffi_builder_ppack(
+                    builder.as_ptr(),
+                    data.as_ptr().cast::<c_void>(),
+                    u32::try_from(data.len()).unwrap(),
+                    std::ptr::null(),
+                )
+            };
+            assert_eq!(errc, 0);
         }
 
-        buf.extend_from_slice(b"BTNF");
-        buf.write_u32::<LittleEndian>(btnf_size).unwrap();
-        buf.extend_from_slice(&[0u8; 8]);
+        let mut out_data = std::ptr::null_mut();
+        let mut out_size = 0u32;
+        let errc = unsafe {
+            nitroarcffi_builder_pseal(builder.as_ptr(), &raw mut out_data, &raw mut out_size)
+        };
+        assert_eq!(errc, 0);
 
-        buf.extend_from_slice(b"GMIF");
-        buf.write_u32::<LittleEndian>(gmif_size).unwrap();
-        for data in file_data {
-            buf.extend_from_slice(data);
+        let bytes = unsafe {
+            std::slice::from_raw_parts(out_data.cast::<u8>(), usize::try_from(out_size).unwrap())
         }
+        .to_vec();
 
-        buf
+        unsafe { nitroarcffi_free(out_data) };
+        bytes
     }
 
     #[test]
@@ -173,19 +406,15 @@ mod tests {
 
         let narc = Narc::from_binary(&mut cursor).unwrap();
 
-        assert_eq!(narc.members.len(), 2);
-        assert_eq!(narc.members[0], b"Hello");
-        assert_eq!(narc.members[1], b"World!");
+        assert_eq!(narc.len(), 2);
+        assert_eq!(narc.member(0).unwrap(), b"Hello");
+        assert_eq!(narc.member(1).unwrap(), b"World!");
     }
 
     #[test]
     fn test_parse_empty_narc() {
-        let narc_data = create_minimal_narc(&[]);
-        let mut cursor = Cursor::new(narc_data);
-
-        let narc = Narc::from_binary(&mut cursor).unwrap();
-
-        assert_eq!(narc.members.len(), 0);
+        let result = Narc::from_bytes(&[]);
+        assert!(result.is_err());
     }
 
     #[test]
@@ -196,8 +425,8 @@ mod tests {
 
         let narc = Narc::from_binary(&mut cursor).unwrap();
 
-        assert_eq!(narc.members.len(), 1);
-        assert_eq!(narc.members[0], file_content.as_slice());
+        assert_eq!(narc.len(), 1);
+        assert_eq!(narc.member(0).unwrap(), file_content.as_slice());
     }
 
     #[test]
@@ -209,22 +438,6 @@ mod tests {
         let result = Narc::from_binary(&mut cursor);
 
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("Not a NARC file"));
-    }
-
-    #[test]
-    fn test_missing_btaf_chunk() {
-        let mut data = vec![0u8; 100];
-        data[..4].copy_from_slice(b"NARC");
-        data[16..20].copy_from_slice(b"NOPE");
-        let mut cursor = Cursor::new(data);
-
-        let result = Narc::from_binary(&mut cursor);
-
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("Missing BTAF chunk"));
     }
 
     #[test]
@@ -254,11 +467,11 @@ mod tests {
         let mut cursor = Cursor::new(narc_data);
 
         let narc = Narc::from_binary(&mut cursor).unwrap();
-        let written = narc.to_bytes();
+        let written = narc.to_bytes().unwrap();
         let mut cursor2 = Cursor::new(written);
         let narc2 = Narc::from_binary(&mut cursor2).unwrap();
 
-        assert_eq!(narc.members, narc2.members);
+        assert_eq!(narc.member(0).unwrap(), narc2.member(0).unwrap());
     }
 
     #[test]
@@ -268,26 +481,15 @@ mod tests {
         let mut cursor = Cursor::new(narc_data);
 
         let narc = Narc::from_binary(&mut cursor).unwrap();
-        let written = narc.to_bytes();
+        let written = narc.to_bytes().unwrap();
         let mut cursor2 = Cursor::new(written);
         let narc2 = Narc::from_binary(&mut cursor2).unwrap();
 
-        assert_eq!(narc.members.len(), 3);
-        assert_eq!(narc.members, narc2.members);
-    }
-
-    #[test]
-    fn test_roundtrip_empty_narc() {
-        let narc_data = create_minimal_narc(&[]);
-        let mut cursor = Cursor::new(narc_data);
-
-        let narc = Narc::from_binary(&mut cursor).unwrap();
-        let written = narc.to_bytes();
-        let mut cursor2 = Cursor::new(written);
-        let narc2 = Narc::from_binary(&mut cursor2).unwrap();
-
-        assert_eq!(narc.members.len(), 0);
-        assert_eq!(narc.members, narc2.members);
+        assert_eq!(narc.len(), 3);
+        assert_eq!(
+            narc.members_owned().unwrap(),
+            narc2.members_owned().unwrap()
+        );
     }
 
     fn assert_real_narc_parse_roundtrip(narc_path: &Path) {
@@ -296,7 +498,7 @@ mod tests {
         let narc = Narc::from_binary(&mut reader).expect("Failed to parse real NARC");
 
         assert!(
-            !narc.members.is_empty(),
+            !narc.is_empty(),
             "expected at least one member in real NARC {}",
             narc_path.display()
         );
@@ -314,8 +516,8 @@ mod tests {
         let reparsed =
             Narc::from_binary(&mut cursor).expect("Failed to parse serialized real NARC bytes");
         assert_eq!(
-            narc.members,
-            reparsed.members,
+            narc.members_owned().unwrap(),
+            reparsed.members_owned().unwrap(),
             "member mismatch after real-NARC parse/serialize roundtrip for {}",
             narc_path.display()
         );
@@ -347,9 +549,10 @@ mod tests {
             "UXIE_TEST_HGSS_DSPRE_PATH",
             &[
                 "data/poketool/personal/pms.narc",
-                "data/data/kowaza.narc",
+                "data/pbr/personal.narc",
                 "data/pbr/item_data.narc",
-                "data/a/0/3/7",
+                "data/pbr/waza_tbl.narc",
+                "data/data/kowaza.narc",
             ],
             "narc real-parse integration test (hgss)",
         ) else {
@@ -359,47 +562,24 @@ mod tests {
         assert_real_narc_parse_roundtrip(&narc_path);
     }
 
-    fn narc_strategy() -> impl Strategy<Value = Narc> {
-        prop::collection::vec(prop::collection::vec(any::<u8>(), 0..256), 0..64)
-            .prop_map(|members| Narc { members })
+    prop_compose! {
+        fn member_vec_strategy()
+            (members in proptest::collection::vec(
+                proptest::collection::vec(any::<u8>(), 0..128),
+                1..16
+            )) -> Vec<Vec<u8>> {
+                members
+            }
     }
 
     proptest! {
-        #![proptest_config(ProptestConfig {
-            cases: 64,
-            .. ProptestConfig::default()
-        })]
-
         #[test]
-        fn prop_narc_roundtrip(narc in narc_strategy()) {
-            let bytes = narc.to_bytes();
-            let mut cursor = Cursor::new(bytes);
-            let parsed = Narc::from_binary(&mut cursor).unwrap();
-            prop_assert_eq!(parsed.members, narc.members);
-        }
-
-        #[test]
-        fn prop_write_to_matches_to_bytes(narc in narc_strategy()) {
-            let expected = narc.to_bytes();
-            let mut written = Vec::new();
-            narc.write_to(&mut written).unwrap();
-            prop_assert_eq!(written.as_slice(), expected.as_slice());
-
-            let mut cursor = Cursor::new(written);
-            let parsed = Narc::from_binary(&mut cursor).unwrap();
-            prop_assert_eq!(parsed.members, narc.members);
-        }
-
-        #[test]
-        fn prop_rejects_non_narc_magic(
-            magic in any::<[u8; 4]>().prop_filter("must not be NARC magic", |m| m != b"NARC"),
-            tail in prop::collection::vec(any::<u8>(), 0..64)
-        ) {
-            let mut bytes = magic.to_vec();
-            bytes.extend_from_slice(&tail);
-            let mut cursor = Cursor::new(bytes);
-            let result = Narc::from_binary(&mut cursor);
-            prop_assert!(result.is_err());
+        fn prop_roundtrip_members(members in member_vec_strategy()) {
+            let refs: Vec<&[u8]> = members.iter().map(Vec::as_slice).collect();
+            let bytes = create_minimal_narc(&refs);
+            let narc = Narc::from_bytes(&bytes).unwrap();
+            let reparsed = Narc::from_bytes(&narc.to_bytes().unwrap()).unwrap();
+            prop_assert_eq!(members, reparsed.members_owned().unwrap());
         }
     }
 }

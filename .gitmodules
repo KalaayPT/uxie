@@ -1,0 +1,4 @@
+[submodule "nitroarc"]
+	path = nitroarc
+	url = ssh://git@codeberg.org/Kalaay/nitroarc.git
+	branch = ffi

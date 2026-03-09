@@ -757,31 +757,29 @@ mod tests {
             crate::Narc::from_binary(&mut trpoke_reader).expect("Failed to load trpoke NARC");
 
         assert_eq!(
-            trdata_narc.members.len(),
-            trpoke_narc.members.len(),
+            trdata_narc.len(),
+            trpoke_narc.len(),
             "trdata/trpoke member-count mismatch: {} vs {}",
-            trdata_narc.members.len(),
-            trpoke_narc.members.len()
+            trdata_narc.len(),
+            trpoke_narc.len()
         );
         assert!(
-            !trdata_narc.members.is_empty(),
+            !trdata_narc.is_empty(),
             "expected non-empty trainer NARCs: {} and {}",
             trdata_path.display(),
             trpoke_path.display()
         );
 
-        for i in 0..trdata_narc.members.len().min(400) {
+        for i in 0..trdata_narc.len().min(400) {
             let props_data = trdata_narc
-                .members
-                .get(i)
+                .member(i)
                 .expect("trdata member index out of range");
             let party_data = trpoke_narc
-                .members
-                .get(i)
+                .member(i)
                 .expect("trpoke member index out of range");
 
-            let mut props_cursor = Cursor::new(props_data.as_slice());
-            let mut party_cursor = Cursor::new(party_data.as_slice());
+            let mut props_cursor = Cursor::new(props_data);
+            let mut party_cursor = Cursor::new(party_data);
             let trainer =
                 TrainerData::from_binary_parts(&mut props_cursor, &mut party_cursor, family)
                     .unwrap_or_else(|_| panic!("Failed to parse trainer member {}", i));
@@ -793,13 +791,13 @@ mod tests {
                 .unwrap_or_else(|_| panic!("Failed to serialize trainer member {}", i));
 
             assert_eq!(
-                props_data.as_slice(),
+                props_data,
                 props_out.as_slice(),
                 "trdata roundtrip failed for trainer member {}",
                 i
             );
             assert_eq!(
-                party_data.as_slice(),
+                party_data,
                 party_out.as_slice(),
                 "trpoke roundtrip failed for trainer member {}",
                 i

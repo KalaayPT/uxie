@@ -152,7 +152,8 @@ mod tests {
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load learnset NARC");
 
         let mut roundtripped_members = 0usize;
-        for (i, original_bytes) in narc.members.iter().enumerate().take(700) {
+        let members = narc.members_owned().unwrap();
+        for (i, original_bytes) in members.iter().enumerate().take(700) {
             let mut cursor = Cursor::new(original_bytes.as_slice());
             let learnset = LearnsetData::from_binary(&mut cursor)
                 .unwrap_or_else(|_| panic!("Failed to parse learnset member {}", i));

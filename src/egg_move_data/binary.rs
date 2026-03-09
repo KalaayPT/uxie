@@ -304,10 +304,9 @@ mod tests {
         let mut reader = BufReader::new(file);
         let narc = crate::Narc::from_binary(&mut reader).expect("Failed to load HGSS kowaza NARC");
         let member = narc
-            .members
-            .first()
+            .first_member()
             .expect("Expected first member in HGSS kowaza NARC");
-        let mut cursor = Cursor::new(member.as_slice());
+        let mut cursor = Cursor::new(member);
         let data =
             EggMoveData::from_binary(&mut cursor).expect("Failed to parse HGSS egg move data");
 
@@ -318,7 +317,7 @@ mod tests {
         );
         let serialized = data.to_bytes();
         assert!(
-            member.as_slice().starts_with(serialized.as_slice()),
+            member.starts_with(serialized.as_slice()),
             "serialized HGSS egg move table is not a prefix of source member in {}",
             narc_path.display()
         );
