@@ -246,7 +246,7 @@ impl DecompProvider {
 
     fn parse_all_headers(&self) -> Result<Vec<MapHeader>> {
         let path = self.map_headers_path();
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(&path)?;
         let parsed = crate::map_header::parse_map_headers_from_c(&content);
 
         let mut headers = Vec::new();
@@ -262,6 +262,16 @@ impl DecompProvider {
             headers.push(header);
         }
         Ok(headers)
+    }
+
+    fn count_headers(&self) -> Result<usize> {
+        if let Some(headers) = self.headers_cache.get() {
+            return Ok(headers.len());
+        }
+
+        let path = self.map_headers_path();
+        let content = std::fs::read_to_string(path)?;
+        Ok(crate::map_header::parse_map_headers_from_c(&content).len())
     }
 
     fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
@@ -298,8 +308,7 @@ impl DataProvider for DecompProvider {
     }
 
     fn get_map_header_count(&self) -> Result<usize> {
-        let headers = self.load_all_headers()?;
-        Ok(headers.len())
+        self.count_headers()
     }
 
     fn get_text_archive_for_script_file(&self, script_file_id: u16) -> Result<Option<u16>> {
@@ -801,11 +810,70 @@ mod tests {
                 assert_eq!(h.script_file_id, 7);
                 assert_eq!(h.level_script_id, 8);
                 assert_eq!(h.text_archive_id, 9);
+                assert_eq!(h.flags, 0b0101_0101);
                 assert!(h.kanto_flag);
-                assert_eq!(h.flags, 0x55);
             }
             _ => panic!("expected HGSS map header variant"),
         }
+    }
+
+    #[test]
+    fn test_decomp_provider_header_count_does_not_parse_invalid_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_VALID] = {
+            .scriptsArchiveID = 4,
+        },
+        [MAP_INVALID] = {
+            .scriptsArchiveID = NOT_A_REAL_CONSTANT,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+
+        assert_eq!(provider.get_map_header_count().unwrap(), 2);
+        assert!(provider.get_map_header(1).is_err());
+    }
+
+    #[test]
+    fn test_decomp_provider_header_count_uses_cached_headers_after_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let header_path = dir.path().join("include/data/map_headers.h");
+        fs::create_dir_all(header_path.parent().unwrap()).unwrap();
+        fs::write(
+            &header_path,
+            r"
+        [MAP_FIRST] = {
+            .scriptsArchiveID = 10,
+        },
+        [MAP_SECOND] = {
+            .scriptsArchiveID = 20,
+        },
+        ",
+        )
+        .unwrap();
+
+        let provider = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+
+        assert_eq!(provider.get_map_header(0).unwrap().script_file_id(), 10);
+
+        fs::write(
+            &header_path,
+            r"
+        [MAP_ONLY] = {
+            .scriptsArchiveID = 99,
+        },
+        ",
+        )
+        .unwrap();
+
+        assert_eq!(provider.get_map_header_count().unwrap(), 2);
     }
 
     #[test]
