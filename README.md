@@ -11,7 +11,7 @@ ROM data from DSPRE projects and decompilation sources.
 - [Background](#background)
 - [Features](#features)
 - [Install](#install)
-- [Development Setup](#development-setup)
+- [Build from Source](#build-from-source)
 - [CLI Usage](#cli-usage)
 - [Library Usage](#library-usage)
 - [Contributing](#contributing)
@@ -39,7 +39,7 @@ The name comes from [Uxie](https://bulbapedia.bulbagarden.net/wiki/Uxie_(Pok%C3%
 - **Smart Discovery**: Automatically detects game version, internal project names, and table offsets
 - **Unified ROM Access**: Auto-detects and reads data from DSPRE projects and decompilation sources
 - **High-Level Workspace**: Unified API for managing symbols, script mappings, text banks, and global script tables
-- **Global Script Table**: Automatic resolution of `CallCommonScript` IDs to their script files and text banks (supports HGSS binary reading and Platinum hardcoded tables)
+- **Global Script Table**: Automatic resolution of `CallCommonScript` IDs to their script files and text banks
 - **Strict Constant Expression Evaluation**: Pratt parser for arithmetic/bitwise/shift/comparison/logical constant expressions; unsupported constructs fail explicitly
 - **Parallel Loading**: Multi-threaded header file loading via rayon (~200ms for 50,000+ symbols)
 - **Bidirectional Script Resolution**: Resolve constants from names to values AND values to names
@@ -62,12 +62,12 @@ Or add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-uxie = "0.4.0"
+uxie = "0.5.0"
 ```
 
 For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).
 
-## Development Setup
+## Build from Source
 
 This repository keeps `nitroarc` as a git submodule at the project root in `nitroarc/`.
 
@@ -162,11 +162,11 @@ println!("Region: {:?}", header.region());      // Some("USA")
 
 ## Contributing
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, fixture-based integration testing setup, lint/test expectations, and documentation update policy.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, testing setup, lint expectations, and documentation update policy.
 
 ## Supported Games
 
-> **Note**: This library is a work in progress. Platinum is the primary target and has the most complete support. HeartGold/SoulSilver support is partial—some NARC paths and data structures differ and are not yet fully implemented.
+> **Note**: Platinum is the primary target and has the most complete support. HeartGold/SoulSilver support has improved substantially, but remains partial in some workflows.
 
 | Game | Code | Family |
 |------|------|--------|

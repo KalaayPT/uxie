@@ -4,6 +4,9 @@
 //! the "Being of Knowledge", this library provides unified access to ROM data from multiple sources:
 //! DSPRE projects, decompilation sources (pokeplatinum/pokeheartgold), and raw binary files.
 //!
+//! Platinum is the primary target and has the most complete support. HGSS support
+//! has improved substantially, but remains partial in some workflows.
+//!
 //! ## Quick Start
 //!
 //! ```rust,no_run
