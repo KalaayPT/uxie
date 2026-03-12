@@ -9,6 +9,24 @@ homepage = "https://github.com/KalaayPT/uxie"
 documentation = "https://docs.rs/uxie"
 readme = "README.md"
 build = "build.rs"
+include = [
+    "build.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE",
+    "src/**",
+    "tests/**",
+    "examples/**",
+    "docs/**",
+    "nitroarc/Makefile",
+    "nitroarc/Makefile.devel",
+    "nitroarc/COPYING",
+    "nitroarc/COPYING.LESSER",
+    "nitroarc/ffi/**",
+    "nitroarc/lib/**",
+    "nitroarc/src/**",
+    "nitroarc/doc/**",
+]
 keywords = ["pokemon", "romhacking", "ds", "platinum", "heartgold"]
 categories = ["parser-implementations", "game-development"]
 
