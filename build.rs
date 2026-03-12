@@ -1,4 +1,5 @@
 use std::env;
+
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -144,23 +145,14 @@ fn copy_symlink(src: &Path, dst: &Path) -> io::Result<()> {
         let resolved_target = if target.is_absolute() {
             target
         } else {
-            src.parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(target)
-                .into_os_string()
-                .into()
+            src.parent().unwrap_or_else(|| Path::new(".")).join(target)
         };
 
         let metadata = fs::metadata(&resolved_target)?;
         if metadata.is_dir() {
-            std::os::windows::fs::symlink_dir(pathbuf_from_os_string(resolved_target), dst)
+            std::os::windows::fs::symlink_dir(&resolved_target, dst)
         } else {
-            std::os::windows::fs::symlink_file(pathbuf_from_os_string(resolved_target), dst)
+            std::os::windows::fs::symlink_file(&resolved_target, dst)
         }
     }
-}
-
-#[cfg(windows)]
-fn pathbuf_from_os_string(value: OsString) -> PathBuf {
-    PathBuf::from(value)
 }
