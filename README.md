@@ -62,7 +62,7 @@ Or add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-uxie = "0.5.0"
+uxie = "0.5.4"
 ```
 
 For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).

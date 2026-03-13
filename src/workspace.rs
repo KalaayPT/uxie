@@ -406,14 +406,35 @@ impl Workspace {
             symbols.load_headers_from_dir(&generated)?;
         }
 
-        let text_dirs = [
-            root.join("res/text"),
-            root.join("build/res/text/bank"),
-            root.join("files/msgdata"),
-        ];
+        let text_dirs = [root.join("res/text"), root.join("build/res/text/bank")];
         for text_dir in text_dirs {
             if text_dir.exists() {
                 symbols.load_headers_from_dir(&text_dir)?;
+            }
+        }
+
+        let hgss_symbol_dirs = [
+            root.join("files/msgdata/msg"),
+            root.join("files/fielddata/script/scr_seq"),
+        ];
+        for symbol_dir in hgss_symbol_dirs {
+            if !symbol_dir.exists() {
+                continue;
+            }
+
+            for entry in std::fs::read_dir(&symbol_dir)? {
+                let path = entry?.path();
+                if !path.is_file() {
+                    continue;
+                }
+
+                let is_header = path.extension().and_then(|s| s.to_str()) == Some("h");
+                let file_name = path.file_name().and_then(|s| s.to_str());
+                let is_hgss_symbol_header = file_name
+                    .is_some_and(|name| name.starts_with("msg_") || name.starts_with("event_"));
+                if is_header && is_hgss_symbol_header {
+                    symbols.load_header(&path)?;
+                }
             }
         }
 
@@ -1000,21 +1021,20 @@ mod tests {
     }
 
     #[test]
-    fn test_open_decomp_hgss_loads_msgdata_message_symbols() {
+    fn test_open_decomp_hgss_loads_msg_header_symbols() {
         let dir = tempdir().unwrap();
         let root = dir.path().join("pokeheartgold");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
-        fs::create_dir_all(root.join("files/msgdata")).unwrap();
+        fs::create_dir_all(root.join("files/msgdata/msg")).unwrap();
         fs::write(
-            root.join("files/msgdata/msg_0139_D49R0102.json"),
+            root.join("files/msgdata/msg/msg_0139_D49R0102.h"),
             concat!(
-                "{\n",
-                "  \"messages\": [\n",
-                "    { \"id\": \"msg_0139_D49R0102_00000\" },\n",
-                "    { \"id\": \"msg_0139_D49R0102_00004\" }\n",
-                "  ]\n",
-                "}\n"
+                "#ifndef MSG_0139_D49R0102_H\n",
+                "#define MSG_0139_D49R0102_H\n",
+                "#define msg_0139_D49R0102_00000 0\n",
+                "#define msg_0139_D49R0102_00004 4\n",
+                "#endif\n"
             ),
         )
         .unwrap();
@@ -1023,25 +1043,25 @@ mod tests {
 
         assert_eq!(ws.family, GameFamily::HGSS);
         assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00000"), Some(0));
-        assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00004"), Some(1));
+        assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00004"), Some(4));
     }
 
     #[test]
-    fn test_open_decomp_hgss_loads_msgdata_object_event_symbols() {
+    fn test_open_decomp_hgss_loads_event_header_symbols() {
         let dir = tempdir().unwrap();
         let root = dir.path().join("pokeheartgold");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
-        fs::create_dir_all(root.join("files/msgdata")).unwrap();
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
         fs::write(
-            root.join("files/msgdata/msg_0100_D02R0101.json"),
+            root.join("files/fielddata/script/scr_seq/event_D02R0101.h"),
             concat!(
-                "{\n",
-                "  \"object_events\": [\n",
-                "    { \"id\": \"obj_D02R0101_player\" },\n",
-                "    { \"id\": \"obj_D02R0101_gsrivel\" }\n",
-                "  ]\n",
-                "}\n"
+                "#ifndef SCR_SEQ_D02R0101_H_\n",
+                "#define SCR_SEQ_D02R0101_H_\n",
+                "#define _EV_scr_seq_D02R0101_000 0\n",
+                "#define obj_D02R0101_player 7\n",
+                "#define obj_D02R0101_gsrivel 0\n",
+                "#endif\n"
             ),
         )
         .unwrap();
@@ -1049,8 +1069,8 @@ mod tests {
         let ws = Workspace::open(&root).unwrap();
 
         assert_eq!(ws.family, GameFamily::HGSS);
-        assert_eq!(ws.resolve_constant("obj_D02R0101_player"), Some(0));
-        assert_eq!(ws.resolve_constant("obj_D02R0101_gsrivel"), Some(1));
+        assert_eq!(ws.resolve_constant("obj_D02R0101_player"), Some(7));
+        assert_eq!(ws.resolve_constant("obj_D02R0101_gsrivel"), Some(0));
     }
 
     #[test]
@@ -1064,10 +1084,10 @@ mod tests {
             "#define STICKS_ACTIVE 123\n",
         )
         .unwrap();
-        fs::create_dir_all(root.join("files/msgdata")).unwrap();
+        fs::create_dir_all(root.join("files/msgdata/msg")).unwrap();
         fs::write(
-            root.join("files/msgdata/msg_0014.json"),
-            "{ \"messages\": [ { \"id\": \"msg_0014_00000\" } ] }\n",
+            root.join("files/msgdata/msg/msg_0014.h"),
+            "#define msg_0014_00000 0\n",
         )
         .unwrap();
 
@@ -1076,6 +1096,62 @@ mod tests {
         assert_eq!(ws.family, GameFamily::HGSS);
         assert_eq!(ws.resolve_constant("STICKS_ACTIVE"), Some(123));
         assert_eq!(ws.resolve_constant("msg_0014_00000"), Some(0));
+    }
+
+    #[test]
+    fn test_open_decomp_hgss_symbol_scan_ignores_non_utf8_non_header_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("files/msgdata/msg")).unwrap();
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
+
+        fs::write(
+            root.join("files/msgdata/msg/msg_0139_D49R0102.h"),
+            concat!(
+                "#define msg_0139_D49R0102_00000 0\n",
+                "#define msg_0139_D49R0102_00004 4\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("files/fielddata/script/scr_seq/event_D02R0101.h"),
+            concat!(
+                "#define obj_D02R0101_player 7\n",
+                "#define obj_D02R0101_gsrivel 0\n"
+            ),
+        )
+        .unwrap();
+
+        fs::write(
+            root.join("files/msgdata/msg/msg_0139_D49R0102.bin"),
+            [0xFF_u8, 0xFE_u8, 0x00_u8, 0x01_u8],
+        )
+        .unwrap();
+        fs::write(
+            root.join("files/msgdata/msg/msg_0139_D49R0102.gmm"),
+            [0xFF_u8, 0xFE_u8, 0x00_u8, 0x01_u8],
+        )
+        .unwrap();
+        fs::write(
+            root.join("files/fielddata/script/scr_seq/scr_seq_0007_D02R0101.bin"),
+            [0xFF_u8, 0xFE_u8, 0x00_u8, 0x01_u8],
+        )
+        .unwrap();
+        fs::write(
+            root.join("files/fielddata/script/scr_seq/scr_seq_0007_D02R0101.s"),
+            "apply_movement obj_D02R0101_gsrivel, _00D0\n",
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00000"), Some(0));
+        assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00004"), Some(4));
+        assert_eq!(ws.resolve_constant("obj_D02R0101_player"), Some(7));
+        assert_eq!(ws.resolve_constant("obj_D02R0101_gsrivel"), Some(0));
     }
 
     #[test]
