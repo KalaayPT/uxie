@@ -406,12 +406,6 @@ impl Workspace {
             symbols.load_headers_from_dir(&generated)?;
         }
 
-        // Special handling for map events/scripts to apply tags
-        let field_events = root.join("res/field/events");
-        if field_events.exists() {
-            symbols.load_headers_from_dir(&field_events)?;
-        }
-
         let text_dir = root.join("res/text");
         if text_dir.exists() {
             symbols.load_headers_from_dir(&text_dir)?;
@@ -442,10 +436,11 @@ impl Workspace {
             }
         }
 
-        // NOTE: We intentionally do NOT load build/res/field/events headers here.
-        // Those contain per-map LOCALID_* definitions that conflict across maps.
-        // Each script should load its own events header via #include resolution
-        // in collect_constants_for_file() or collect_constants_for_source().
+        // NOTE: We intentionally do NOT load res/field/events or
+        // build/res/field/events headers here. Those contain per-map
+        // LOCALID_* definitions that conflict across maps. Each script should
+        // load its own events header via #include resolution in
+        // collect_constants_for_file() or collect_constants_for_source().
 
         Ok(())
     }
@@ -765,6 +760,9 @@ mod tests {
         .unwrap();
 
         let ws = Workspace::open_decomp(root).unwrap();
+
+        assert_eq!(ws.resolve_constant("LOCALID_HIKER"), None);
+        assert_eq!(ws.resolve_constant("LOCALID_TWIN"), None);
 
         let symbols = ws
             .collect_constants_for_file(root.join("res/field/scripts/test_script.s"))
