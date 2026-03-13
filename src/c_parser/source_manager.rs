@@ -31,7 +31,15 @@ impl SourceManager {
             return Ok(Arc::clone(&entry));
         }
 
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read source file {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
         let entry = Arc::new(FileEntry {
             defines: parse_defines(&content),
             enums: parse_enums(&content),

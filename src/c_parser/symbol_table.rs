@@ -113,7 +113,12 @@ impl SymbolTable {
             let entry = sm.get_or_parse(path)?;
             self.load_file_entry(&entry, &canonical, tag);
         } else {
-            let content = std::fs::read_to_string(path)?;
+            let content = std::fs::read_to_string(path).map_err(|err| {
+                std::io::Error::new(
+                    err.kind(),
+                    format!("Failed to read header {} as UTF-8: {err}", path.display()),
+                )
+            })?;
             self.load_header_str_with_tag(&content, &canonical, tag)?;
         }
 
@@ -528,7 +533,15 @@ impl SymbolTable {
         tag: SymbolTag,
     ) -> std::io::Result<()> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read list file {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
         let is_mask = Self::list_file_is_metang_mask(path)?;
         self.load_list_file_str_with_tag(&content, path, tag, is_mask)
     }
@@ -655,7 +668,15 @@ impl SymbolTable {
             return Ok(false);
         }
 
-        let meson = std::fs::read_to_string(&meson_path)?;
+        let meson = std::fs::read_to_string(&meson_path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read metang metadata {} as UTF-8: {err}",
+                    meson_path.display()
+                ),
+            )
+        })?;
         for caps in RE_METANG_MASK_TYPE.captures_iter(&meson) {
             if caps.name("name").map(|m| m.as_str()) == Some(file_stem) {
                 return Ok(caps.name("kind").map(|m| m.as_str()) == Some("mask"));
@@ -667,9 +688,21 @@ impl SymbolTable {
 
     pub fn load_text_bank_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path)?;
-        let json: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read text bank JSON {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse text bank JSON {}: {e}", path.display()),
+            )
+        })?;
         let mut count = 0;
 
         let messages_field = json.get("messages");
@@ -769,9 +802,21 @@ impl SymbolTable {
 
     pub fn load_events_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path)?;
-        let json: serde_json::Value = serde_json::from_str(&content)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read events JSON {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse events JSON {}: {e}", path.display()),
+            )
+        })?;
         let mut count = 0;
 
         let events = json
@@ -874,7 +919,15 @@ impl SymbolTable {
 
     pub fn load_python_enum(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path)?;
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read Python enum {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
         self.load_python_enum_str_with_tag(&content, path, SymbolTag::Global)
     }
 

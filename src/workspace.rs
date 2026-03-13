@@ -433,7 +433,19 @@ impl Workspace {
                 let is_hgss_symbol_header = file_name
                     .is_some_and(|name| name.starts_with("msg_") || name.starts_with("event_"));
                 if is_header && is_hgss_symbol_header {
-                    symbols.load_header(&path)?;
+                    match symbols.load_header(&path) {
+                        Ok(()) => {}
+                        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {
+                            let bytes = std::fs::read(&path)?;
+                            let content = String::from_utf8_lossy(&bytes);
+                            symbols.load_header_str_with_tag(
+                                &content,
+                                &path,
+                                crate::c_parser::SymbolTag::Global,
+                            )?;
+                        }
+                        Err(err) => return Err(err),
+                    }
                 }
             }
         }

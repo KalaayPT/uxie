@@ -48,7 +48,16 @@ impl ScriptTable {
     /// (0-indexed) as the file ID. Empty lines and lines starting with `#`
     /// are skipped.
     pub fn load_order_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
-        let content = std::fs::read_to_string(path)?;
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read script order file {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
         self.load_order_str(&content)
     }
 
