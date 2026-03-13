@@ -500,6 +500,10 @@ impl Workspace {
     }
 
     pub fn resolve_script_symbols(&self, script: &str) -> String {
+        self.resolve_script_symbols_with(script, &self.symbols)
+    }
+
+    pub fn resolve_script_symbols_with(&self, script: &str, symbols: &SymbolTable) -> String {
         let mut result = String::with_capacity(script.len());
         let mut start_idx = 0;
 
@@ -509,7 +513,7 @@ impl Workspace {
             if !is_token_char {
                 if i > start_idx {
                     let token = &script[start_idx..i];
-                    self.append_resolved_token(&mut result, token);
+                    self.append_resolved_token_with(&mut result, token, symbols);
                 }
                 result.push(c);
                 start_idx = i + c.len_utf8();
@@ -518,17 +522,19 @@ impl Workspace {
 
         if start_idx < script.len() {
             let token = &script[start_idx..];
-            self.append_resolved_token(&mut result, token);
+            self.append_resolved_token_with(&mut result, token, symbols);
         }
 
         result
     }
 
-    fn append_resolved_token(&self, result: &mut String, token: &str) {
-        if let Some(val) = self.resolve_constant(token) {
+    fn append_resolved_token_with(&self, result: &mut String, token: &str, symbols: &SymbolTable) {
+        if let Some(val) = symbols.resolve_constant(token) {
             result.push_str(&val.to_string());
         } else if let Ok(val) = token.parse::<i64>() {
-            if let Some(name) = self.resolve_name(val, "") {
+            if let Some(name) = symbols.resolve_name(val, "") {
+                result.push_str(&name);
+            } else if let Some(name) = self.resolve_name(val, "") {
                 result.push_str(&name);
             } else {
                 result.push_str(token);
@@ -687,6 +693,89 @@ mod tests {
 
         let result = ws.resolve_script_symbols("UnknownCmd UNKNOWN_FLAG");
         assert_eq!(result, "UnknownCmd UNKNOWN_FLAG");
+    }
+
+    #[test]
+    fn test_resolve_script_symbols_with_prefers_file_local_constants() {
+        let sm = SourceManager::new();
+
+        let mut global_symbols = SymbolTable::with_source_manager(sm.clone());
+        global_symbols.insert_define("LOCALID_HIKER".to_string(), 3);
+        global_symbols.insert_define("FLAG_START".to_string(), 100);
+
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Decomp,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(MockProvider),
+            symbols: Arc::new(global_symbols),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
+            source_manager: sm.clone(),
+            location_names: None,
+            internal_names: None,
+        };
+
+        let mut file_symbols = SymbolTable::with_parent(ws.symbols.clone());
+        file_symbols.insert_define("LOCALID_HIKER".to_string(), 0);
+
+        let result = ws.resolve_script_symbols_with(
+            "ApplyMovement LOCALID_HIKER\nSetFlag FLAG_START\n",
+            &file_symbols,
+        );
+        assert_eq!(result, "ApplyMovement 0\nSetFlag 100\n");
+    }
+
+    #[test]
+    fn test_collect_constants_for_file_loads_map_local_event_ids() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/events")).unwrap();
+
+        std::fs::write(
+            root.join("res/field/scripts/scripts.order"),
+            "test_script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/scripts/test_script.s"),
+            concat!(
+                "#include \"res/field/events/events_test_map.h\"\n",
+                "ApplyMovement LOCALID_HIKER, TestMovement\n",
+            ),
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/events/events_test_map.json"),
+            concat!(
+                "{\n",
+                "  \"object_events\": [\n",
+                "    { \"id\": \"LOCALID_HIKER\" },\n",
+                "    { \"id\": \"LOCALID_TWIN\" }\n",
+                "  ]\n",
+                "}\n"
+            ),
+        )
+        .unwrap();
+
+        let ws = Workspace::open_decomp(root).unwrap();
+
+        let symbols = ws
+            .collect_constants_for_file(root.join("res/field/scripts/test_script.s"))
+            .unwrap();
+
+        assert_eq!(symbols.resolve_constant("LOCALID_HIKER"), Some(0));
+        assert_eq!(symbols.resolve_constant("LOCALID_TWIN"), Some(1));
+
+        let resolved =
+            ws.resolve_script_symbols_with("ApplyMovement LOCALID_HIKER, TestMovement", &symbols);
+        assert_eq!(resolved, "ApplyMovement 0, TestMovement");
     }
 
     #[test]

@@ -199,7 +199,8 @@ pub fn cmd_resolve_script(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let content = std::fs::read_to_string(path)?;
     let ws = Workspace::open(decomp_path)?;
-    println!("{}", ws.resolve_script_symbols(&content));
+    let symbols = ws.collect_constants_for_file(path)?;
+    println!("{}", ws.resolve_script_symbols_with(&content, &symbols));
     Ok(())
 }
 
