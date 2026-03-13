@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod c_parser_tests {
     use crate::c_parser::{SourceManager, SymbolTable};
+    use proptest::prelude::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
@@ -242,6 +243,115 @@ mod c_parser_tests {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("CONST_A"));
         assert!(err.to_string().contains("1 ? 2 : 3"));
+    }
+
+    #[test]
+    fn test_load_headers_from_dir_uses_generated_meson_mask_metadata() {
+        let dir = tempdir().unwrap();
+        let generated_dir = dir.path().join("generated");
+        std::fs::create_dir_all(&generated_dir).unwrap();
+
+        std::fs::write(
+            generated_dir.join("meson.build"),
+            r#"
+metang_generators = {
+    'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
+    'moves': { 'type': 'enum', 'tag': 'Move' },
+}
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            generated_dir.join("player_transitions.txt"),
+            "PLAYER_TRANSITION_WALKING\nPLAYER_TRANSITION_CYCLING\nPLAYER_TRANSITION_SURFING\n",
+        )
+        .unwrap();
+
+        std::fs::write(
+            generated_dir.join("moves.txt"),
+            "MOVE_POUND\nMOVE_KARATE_CHOP\nMOVE_DOUBLE_SLAP\n",
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table.load_headers_from_dir(&generated_dir).unwrap();
+
+        assert_eq!(loaded, 3);
+        assert_eq!(table.resolve_constant("PLAYER_TRANSITION_WALKING"), Some(1));
+        assert_eq!(table.resolve_constant("PLAYER_TRANSITION_CYCLING"), Some(2));
+        assert_eq!(table.resolve_constant("PLAYER_TRANSITION_SURFING"), Some(4));
+
+        assert_eq!(table.resolve_constant("MOVE_POUND"), Some(0));
+        assert_eq!(table.resolve_constant("MOVE_KARATE_CHOP"), Some(1));
+        assert_eq!(table.resolve_constant("MOVE_DOUBLE_SLAP"), Some(2));
+    }
+
+    #[test]
+    fn test_load_headers_from_dir_defaults_txt_to_enum_without_meson_mask_entry() {
+        let dir = tempdir().unwrap();
+        let generated_dir = dir.path().join("generated");
+        std::fs::create_dir_all(&generated_dir).unwrap();
+
+        std::fs::write(
+            generated_dir.join("meson.build"),
+            r#"
+metang_generators = {
+    'moves': { 'type': 'enum', 'tag': 'Move' },
+}
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            generated_dir.join("player_transitions.txt"),
+            "PLAYER_TRANSITION_WALKING\nPLAYER_TRANSITION_CYCLING\nPLAYER_TRANSITION_SURFING\n",
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table.load_headers_from_dir(&generated_dir).unwrap();
+
+        assert_eq!(loaded, 2);
+        assert_eq!(table.resolve_constant("PLAYER_TRANSITION_WALKING"), Some(0));
+        assert_eq!(table.resolve_constant("PLAYER_TRANSITION_CYCLING"), Some(1));
+        assert_eq!(table.resolve_constant("PLAYER_TRANSITION_SURFING"), Some(2));
+    }
+
+    proptest! {
+        #[test]
+        fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+            let dir = tempdir().unwrap();
+            let generated_dir = dir.path().join("generated");
+            std::fs::create_dir_all(&generated_dir).unwrap();
+
+            std::fs::write(
+                generated_dir.join("meson.build"),
+                r#"
+metang_generators = {
+    'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
+}
+"#,
+            )
+            .unwrap();
+
+            let mut content = String::new();
+            for i in 0..entry_count {
+                content.push_str(&format!("PLAYER_TRANSITION_{i}\n"));
+            }
+            std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+
+            let mut table = SymbolTable::new();
+            table.load_headers_from_dir(&generated_dir).unwrap();
+
+            for i in 0..entry_count {
+                let expected = 1_i64 << i;
+                prop_assert_eq!(
+                    table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                    Some(expected)
+                );
+            }
+        }
     }
 
     #[test]

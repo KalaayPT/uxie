@@ -1,5 +1,6 @@
 use dashmap::DashMap;
 use rayon::prelude::*;
+use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,10 @@ pub struct SymbolTable {
 
 static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$").unwrap()
+});
+
+static RE_METANG_MASK_TYPE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
+    Regex::new(r"'(?P<name>[A-Za-z0-9_]+)'\s*:\s*\{\s*'type'\s*:\s*'(?P<kind>enum|mask)'").unwrap()
 });
 
 impl SymbolTable {
@@ -524,11 +529,12 @@ impl SymbolTable {
     ) -> std::io::Result<()> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path)?;
-        self.load_list_file_str_with_tag(&content, path, tag)
+        let is_mask = Self::list_file_is_metang_mask(path)?;
+        self.load_list_file_str_with_tag(&content, path, tag, is_mask)
     }
 
     pub fn load_list_file_str(&mut self, content: &str) -> std::io::Result<()> {
-        self.load_list_file_str_with_tag(content, Path::new("inline.txt"), SymbolTag::Global)
+        self.load_list_file_str_with_tag(content, Path::new("inline.txt"), SymbolTag::Global, false)
     }
 
     pub fn load_list_file_str_with_tag(
@@ -536,6 +542,7 @@ impl SymbolTable {
         content: &str,
         path: &Path,
         tag: SymbolTag,
+        is_mask: bool,
     ) -> std::io::Result<()> {
         let mut current_index = 0i64;
         for (line_idx, line) in content.lines().enumerate() {
@@ -591,12 +598,29 @@ impl SymbolTable {
                 if name.is_empty() {
                     continue;
                 }
-                self.symbols.insert(name.clone(), current_index);
+
+                let value = if is_mask {
+                    1_i64.checked_shl(current_index as u32).ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Mask constant '{}' at {}:{} exceeds i64 bit width",
+                                name,
+                                path.display(),
+                                line_number
+                            ),
+                        )
+                    })?
+                } else {
+                    current_index
+                };
+
+                self.symbols.insert(name.clone(), value);
                 self.value_to_names
-                    .entry(current_index)
+                    .entry(value)
                     .or_default()
                     .push(name.clone());
-                self.pending.insert(name.clone(), current_index.to_string());
+                self.pending.insert(name.clone(), value.to_string());
                 self.symbol_to_file.insert(name.clone(), path.to_path_buf());
                 self.symbol_to_tags
                     .entry(name)
@@ -606,6 +630,39 @@ impl SymbolTable {
             current_index += 1;
         }
         Ok(())
+    }
+
+    fn list_file_is_metang_mask(path: &Path) -> std::io::Result<bool> {
+        let file_stem = path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("List file has no valid UTF-8 stem: {}", path.display()),
+                )
+            })?;
+
+        let generated_dir = path.parent().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("List file has no parent directory: {}", path.display()),
+            )
+        })?;
+
+        let meson_path = generated_dir.join("meson.build");
+        if !meson_path.is_file() {
+            return Ok(false);
+        }
+
+        let meson = std::fs::read_to_string(&meson_path)?;
+        for caps in RE_METANG_MASK_TYPE.captures_iter(&meson) {
+            if caps.name("name").map(|m| m.as_str()) == Some(file_stem) {
+                return Ok(caps.name("kind").map(|m| m.as_str()) == Some("mask"));
+            }
+        }
+
+        Ok(false)
     }
 
     pub fn load_text_bank_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
@@ -897,9 +954,15 @@ impl SymbolTable {
             )));
         }
         let content = String::from_utf8_lossy(&output.stdout);
-        let dummy_path = Path::new("url_source.h");
+        let dummy_path_buf = PathBuf::from(
+            url.rsplit('/')
+                .next()
+                .filter(|segment| !segment.is_empty())
+                .unwrap_or("url_source.h"),
+        );
+        let dummy_path = dummy_path_buf.as_path();
         if url.ends_with(".txt") {
-            self.load_list_file_str_with_tag(&content, dummy_path, SymbolTag::Global)
+            self.load_list_file_str_with_tag(&content, dummy_path, SymbolTag::Global, false)
         } else if url.ends_with(".py") {
             self.load_python_enum_str_with_tag(&content, dummy_path, SymbolTag::Global)
         } else {
