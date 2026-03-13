@@ -406,15 +406,15 @@ impl Workspace {
             symbols.load_headers_from_dir(&generated)?;
         }
 
-        let text_dir = root.join("res/text");
-        if text_dir.exists() {
-            symbols.load_headers_from_dir(&text_dir)?;
-        }
-
-        // 6. Load extra generated headers from build/ if they exist
-        let build_text_bank = root.join("build/res/text/bank");
-        if build_text_bank.exists() {
-            symbols.load_headers_from_dir(&build_text_bank)?;
+        let text_dirs = [
+            root.join("res/text"),
+            root.join("build/res/text/bank"),
+            root.join("files/msgdata"),
+        ];
+        for text_dir in text_dirs {
+            if text_dir.exists() {
+                symbols.load_headers_from_dir(&text_dir)?;
+            }
         }
 
         // 7. Load script/message index constants needed by global script table parsing.
@@ -997,6 +997,85 @@ mod tests {
         assert_eq!(ws.scripts.get_name(3), Some("scr_seq_0003_D01R0101"));
         assert_eq!(ws.scripts.get_name(81), Some("scr_seq_0081_D32R0102"));
         assert_eq!(ws.scripts.get_name(4), None);
+    }
+
+    #[test]
+    fn test_open_decomp_hgss_loads_msgdata_message_symbols() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("files/msgdata")).unwrap();
+        fs::write(
+            root.join("files/msgdata/msg_0139_D49R0102.json"),
+            concat!(
+                "{\n",
+                "  \"messages\": [\n",
+                "    { \"id\": \"msg_0139_D49R0102_00000\" },\n",
+                "    { \"id\": \"msg_0139_D49R0102_00004\" }\n",
+                "  ]\n",
+                "}\n"
+            ),
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00000"), Some(0));
+        assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00004"), Some(1));
+    }
+
+    #[test]
+    fn test_open_decomp_hgss_loads_msgdata_object_event_symbols() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("files/msgdata")).unwrap();
+        fs::write(
+            root.join("files/msgdata/msg_0100_D02R0101.json"),
+            concat!(
+                "{\n",
+                "  \"object_events\": [\n",
+                "    { \"id\": \"obj_D02R0101_player\" },\n",
+                "    { \"id\": \"obj_D02R0101_gsrivel\" }\n",
+                "  ]\n",
+                "}\n"
+            ),
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.resolve_constant("obj_D02R0101_player"), Some(0));
+        assert_eq!(ws.resolve_constant("obj_D02R0101_gsrivel"), Some(1));
+    }
+
+    #[test]
+    fn test_open_decomp_hgss_still_loads_global_constants_from_include_constants() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::write(
+            root.join("include/constants/test_flags.h"),
+            "#define STICKS_ACTIVE 123\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("files/msgdata")).unwrap();
+        fs::write(
+            root.join("files/msgdata/msg_0014.json"),
+            "{ \"messages\": [ { \"id\": \"msg_0014_00000\" } ] }\n",
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.resolve_constant("STICKS_ACTIVE"), Some(123));
+        assert_eq!(ws.resolve_constant("msg_0014_00000"), Some(0));
     }
 
     #[test]
