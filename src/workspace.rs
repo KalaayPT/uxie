@@ -311,13 +311,7 @@ impl Workspace {
     pub fn open_decomp(root: impl AsRef<Path>) -> std::io::Result<Self> {
         let root = root.as_ref().to_path_buf();
 
-        let (game, family) = if root.to_string_lossy().contains("pokeheartgold")
-            || root.to_string_lossy().contains("pokesoulsilver")
-        {
-            (Game::HeartGold, GameFamily::HGSS)
-        } else {
-            (Game::Platinum, GameFamily::Platinum)
-        };
+        let (game, family) = Self::detect_decomp_game(&root);
 
         let sm = SourceManager::new();
         let mut symbols = SymbolTable::with_source_manager(sm.clone());
@@ -391,6 +385,29 @@ impl Workspace {
             location_names: None,
             internal_names: None,
         })
+    }
+
+    fn detect_decomp_game(root: &Path) -> (Game, GameFamily) {
+        let platinum_markers = [
+            root.join("res/field/scripts/scripts.order"),
+            root.join("include/data/map_headers.h"),
+            root.join("src/script_manager.c"),
+        ];
+        let hgss_markers = [
+            root.join("src/data/map_headers.h"),
+            root.join("src/fieldmap.c"),
+            root.join("files/fielddata/script/scr_seq"),
+            root.join("files/msgdata/msg"),
+        ];
+
+        let has_platinum_marker = platinum_markers.iter().any(|path| path.exists());
+        let has_hgss_marker = hgss_markers.iter().any(|path| path.exists());
+
+        if has_hgss_marker && !has_platinum_marker {
+            (Game::HeartGold, GameFamily::HGSS)
+        } else {
+            (Game::Platinum, GameFamily::Platinum)
+        }
     }
 
     fn load_project_symbols_broad(root: &Path, symbols: &mut SymbolTable) -> std::io::Result<()> {
@@ -742,7 +759,7 @@ mod tests {
             text_banks: TextBankTable::new(),
             game_strings: GameStrings::new(),
             global_script_table: GlobalScriptTable::new(),
-            source_manager: sm.clone(),
+            source_manager: sm,
             location_names: None,
             internal_names: None,
         };
@@ -1009,7 +1026,7 @@ mod tests {
     #[test]
     fn test_open_decomp_hgss_loads_id_named_script_files() {
         let dir = tempdir().unwrap();
-        let root = dir.path().join("pokeheartgold");
+        let root = dir.path().join("generic_hgss_project");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
         fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
@@ -1027,6 +1044,7 @@ mod tests {
         let ws = Workspace::open(&root).unwrap();
 
         assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.game, Game::HeartGold);
         assert_eq!(ws.scripts.get_name(3), Some("scr_seq_0003_D01R0101"));
         assert_eq!(ws.scripts.get_name(81), Some("scr_seq_0081_D32R0102"));
         assert_eq!(ws.scripts.get_name(4), None);
@@ -1035,7 +1053,7 @@ mod tests {
     #[test]
     fn test_open_decomp_hgss_loads_msg_header_symbols() {
         let dir = tempdir().unwrap();
-        let root = dir.path().join("pokeheartgold");
+        let root = dir.path().join("generic_hgss_project");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
         fs::create_dir_all(root.join("files/msgdata/msg")).unwrap();
@@ -1061,7 +1079,7 @@ mod tests {
     #[test]
     fn test_open_decomp_hgss_loads_event_header_symbols() {
         let dir = tempdir().unwrap();
-        let root = dir.path().join("pokeheartgold");
+        let root = dir.path().join("generic_hgss_project");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
         fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
@@ -1088,7 +1106,7 @@ mod tests {
     #[test]
     fn test_open_decomp_hgss_still_loads_global_constants_from_include_constants() {
         let dir = tempdir().unwrap();
-        let root = dir.path().join("pokeheartgold");
+        let root = dir.path().join("generic_hgss_project");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
         fs::write(
@@ -1113,7 +1131,7 @@ mod tests {
     #[test]
     fn test_open_decomp_hgss_symbol_scan_ignores_non_utf8_non_header_files() {
         let dir = tempdir().unwrap();
-        let root = dir.path().join("pokeheartgold");
+        let root = dir.path().join("generic_hgss_project");
 
         fs::create_dir_all(root.join("include/constants")).unwrap();
         fs::create_dir_all(root.join("files/msgdata/msg")).unwrap();
@@ -1164,6 +1182,42 @@ mod tests {
         assert_eq!(ws.resolve_constant("msg_0139_D49R0102_00004"), Some(4));
         assert_eq!(ws.resolve_constant("obj_D02R0101_player"), Some(7));
         assert_eq!(ws.resolve_constant("obj_D02R0101_gsrivel"), Some(0));
+    }
+
+    #[test]
+    fn test_open_decomp_hgss_detection_does_not_depend_on_root_name() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("totally_generic_project");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.game, Game::HeartGold);
+        assert_eq!(ws.family, GameFamily::HGSS);
+    }
+
+    #[test]
+    fn test_open_decomp_platinum_detection_does_not_flip_from_hgss_like_root_name() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+        fs::write(
+            root.join("res/field/scripts/scripts.order"),
+            "script_main\n",
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.game, Game::Platinum);
+        assert_eq!(ws.family, GameFamily::Platinum);
+        assert_eq!(ws.scripts.get_name(0), Some("script_main"));
     }
 
     #[test]

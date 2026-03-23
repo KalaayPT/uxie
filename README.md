@@ -28,15 +28,16 @@ decompilation projects (pokeplatinum/pokeheartgold). Each source has
 different formats and conventions.
 
 `uxie` provides a unified interface for reading ROM data regardless of source.
-Its `Workspace::open()` function auto-detects the format and returns a
-consistent API. The library also includes utilities for reading map headers,
-parsing C enums and defines, and querying relationships between game data.
+Its `Workspace::open()` function auto-detects the format from standard project
+structure and returns a consistent API. The library also includes utilities for
+reading map headers, parsing C enums and defines, and querying relationships
+between game data.
 
 The name comes from [Uxie](https://bulbapedia.bulbagarden.net/wiki/Uxie_(Pok%C3%A9mon)), the legendary Pokemon known as the "Being of Knowledge."
 
 ## Features
 
-- **Smart Discovery**: Automatically detects game version, internal project names, and table offsets
+- **Smart Discovery**: Automatically detects project type and decomp family from on-disk structure, plus game/version and table offsets for binary projects
 - **Unified ROM Access**: Auto-detects and reads data from DSPRE projects and decompilation sources
 - **High-Level Workspace**: Unified API for managing symbols, script mappings, text banks, and global script tables
 - **Global Script Table**: Automatic resolution of `CallCommonScript` IDs to their script files and text banks

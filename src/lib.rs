@@ -28,7 +28,7 @@
 //!
 //! ## Core Features
 //!
-//! - **Smart Project Detection**: Automatically detects DSPRE projects, decompilation sources, and raw binaries
+//! - **Smart Project Detection**: Automatically detects DSPRE projects, decompilation sources, and raw binaries; decomp family detection is based on project structure rather than folder names
 //! - **Unified Symbol Resolution**: Parse C headers, enums, and defines with strict constant-expression evaluation
 //! - **High Performance**: ~200ms to load 50,000+ symbols with parallel parsing and caching
 //! - **Map Header Access**: Read map data across all Gen 4 games (Diamond, Pearl, Platinum, HeartGold, SoulSilver)

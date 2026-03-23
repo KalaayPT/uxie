@@ -686,6 +686,100 @@ impl SymbolTable {
         Ok(false)
     }
 
+    fn insert_indexed_symbol(&mut self, id: &str, index: usize, path: &Path) {
+        let val = index as i64;
+        self.symbols.insert(id.to_string(), val);
+        self.value_to_names
+            .entry(val)
+            .or_default()
+            .push(id.to_string());
+        self.symbol_to_file
+            .insert(id.to_string(), path.to_path_buf());
+    }
+
+    fn load_text_bank_messages(
+        &mut self,
+        path: &Path,
+        messages_value: &serde_json::Value,
+    ) -> std::io::Result<usize> {
+        let messages = messages_value.as_array().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Text bank JSON {} has non-array 'messages' field",
+                    path.display()
+                ),
+            )
+        })?;
+        let expects_message_ids = messages.iter().any(|msg| msg.get("id").is_some());
+        let mut count = 0;
+
+        for (index, msg) in messages.iter().enumerate() {
+            let Some(id_value) = msg.get("id") else {
+                if expects_message_ids {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "Text bank JSON {} has non-string or missing 'messages[{}].id'",
+                            path.display(),
+                            index
+                        ),
+                    ));
+                }
+                continue;
+            };
+
+            let id = id_value.as_str().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} has non-string or missing 'messages[{}].id'",
+                        path.display(),
+                        index
+                    ),
+                )
+            })?;
+            self.insert_indexed_symbol(id, index, path);
+            count += 1;
+        }
+
+        Ok(count)
+    }
+
+    fn load_text_bank_events(
+        &mut self,
+        path: &Path,
+        events_value: &serde_json::Value,
+    ) -> std::io::Result<usize> {
+        let events = events_value.as_array().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Text bank JSON {} has non-array 'object_events' field",
+                    path.display()
+                ),
+            )
+        })?;
+        let mut count = 0;
+
+        for (index, event) in events.iter().enumerate() {
+            let id = event.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} has non-string or missing 'object_events[{}].id'",
+                        path.display(),
+                        index
+                    ),
+                )
+            })?;
+            self.insert_indexed_symbol(id, index, path);
+            count += 1;
+        }
+
+        Ok(count)
+    }
+
     pub fn load_text_bank_json(&mut self, path: impl AsRef<Path>) -> std::io::Result<usize> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path).map_err(|err| {
@@ -703,7 +797,6 @@ impl SymbolTable {
                 format!("Failed to parse text bank JSON {}: {e}", path.display()),
             )
         })?;
-        let mut count = 0;
 
         let messages_field = json.get("messages");
         let events_field = json.get("object_events");
@@ -717,84 +810,12 @@ impl SymbolTable {
             ));
         }
 
+        let mut count = 0;
         if let Some(messages_value) = messages_field {
-            let messages = messages_value.as_array().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Text bank JSON {} has non-array 'messages' field",
-                        path.display()
-                    ),
-                )
-            })?;
-            let expects_message_ids = messages.iter().any(|msg| msg.get("id").is_some());
-            for (index, msg) in messages.iter().enumerate() {
-                let Some(id) = msg.get("id") else {
-                    if expects_message_ids {
-                        return Err(std::io::Error::new(
-                            std::io::ErrorKind::InvalidData,
-                            format!(
-                                "Text bank JSON {} has non-string or missing 'messages[{}].id'",
-                                path.display(),
-                                index
-                            ),
-                        ));
-                    }
-                    continue;
-                };
-                let id = id.as_str().ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!(
-                            "Text bank JSON {} has non-string or missing 'messages[{}].id'",
-                            path.display(),
-                            index
-                        ),
-                    )
-                })?;
-                let val = index as i64;
-                self.symbols.insert(id.to_string(), val);
-                self.value_to_names
-                    .entry(val)
-                    .or_default()
-                    .push(id.to_string());
-                self.symbol_to_file
-                    .insert(id.to_string(), path.to_path_buf());
-                count += 1;
-            }
+            count += self.load_text_bank_messages(path, messages_value)?;
         }
-
         if let Some(events_value) = events_field {
-            let events = events_value.as_array().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Text bank JSON {} has non-array 'object_events' field",
-                        path.display()
-                    ),
-                )
-            })?;
-            for (index, event) in events.iter().enumerate() {
-                let id = event.get("id").and_then(|v| v.as_str()).ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        format!(
-                            "Text bank JSON {} has non-string or missing 'object_events[{}].id'",
-                            path.display(),
-                            index
-                        ),
-                    )
-                })?;
-                let val = index as i64;
-                self.symbols.insert(id.to_string(), val);
-                self.value_to_names
-                    .entry(val)
-                    .or_default()
-                    .push(id.to_string());
-                self.symbol_to_file
-                    .insert(id.to_string(), path.to_path_buf());
-                count += 1;
-            }
+            count += self.load_text_bank_events(path, events_value)?;
         }
 
         Ok(count)
