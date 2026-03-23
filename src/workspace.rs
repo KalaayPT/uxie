@@ -532,7 +532,7 @@ impl Workspace {
         }
 
         let mut table = SymbolTable::with_parent(self.symbols.clone());
-        table.load_recursive(path, &include_dirs)?;
+        self.load_project_constants_recursive(&mut table, path.as_ref(), &include_dirs)?;
         Ok(table)
     }
 
@@ -549,8 +549,101 @@ impl Workspace {
         }
 
         let mut table = SymbolTable::with_parent(self.symbols.clone());
-        table.load_recursive_str(source, current_file_dir, &include_dirs)?;
+        self.load_project_constants_recursive_str(
+            &mut table,
+            source,
+            current_file_dir.as_ref(),
+            &include_dirs,
+        )?;
         Ok(table)
+    }
+
+    fn load_project_constants_recursive(
+        &self,
+        table: &mut SymbolTable,
+        path: &Path,
+        include_dirs: &[PathBuf],
+    ) -> std::io::Result<()> {
+        if self.project_type == ProjectType::Decomp {
+            let mut unresolved_include_handler = |table: &mut SymbolTable,
+                                                  parent_dir: &Path,
+                                                  include_dirs: &[PathBuf],
+                                                  include_path: &str|
+             -> std::io::Result<bool> {
+                Self::try_load_decomp_events_include_json(
+                    table,
+                    parent_dir,
+                    include_dirs,
+                    include_path,
+                )
+            };
+            table.load_recursive_with_handler(
+                path,
+                include_dirs,
+                Some(&mut unresolved_include_handler),
+            )
+        } else {
+            table.load_recursive(path, include_dirs)
+        }
+    }
+
+    fn load_project_constants_recursive_str(
+        &self,
+        table: &mut SymbolTable,
+        source: &str,
+        current_file_dir: &Path,
+        include_dirs: &[PathBuf],
+    ) -> std::io::Result<()> {
+        if self.project_type == ProjectType::Decomp {
+            let mut unresolved_include_handler = |table: &mut SymbolTable,
+                                                  parent_dir: &Path,
+                                                  include_dirs: &[PathBuf],
+                                                  include_path: &str|
+             -> std::io::Result<bool> {
+                Self::try_load_decomp_events_include_json(
+                    table,
+                    parent_dir,
+                    include_dirs,
+                    include_path,
+                )
+            };
+            table.load_recursive_str_with_handler(
+                source,
+                current_file_dir,
+                include_dirs,
+                Some(&mut unresolved_include_handler),
+            )
+        } else {
+            table.load_recursive_str(source, current_file_dir, include_dirs)
+        }
+    }
+
+    fn try_load_decomp_events_include_json(
+        table: &mut SymbolTable,
+        parent_dir: &Path,
+        include_dirs: &[PathBuf],
+        include_path: &str,
+    ) -> std::io::Result<bool> {
+        if !include_path.contains("res/field/events/") || !include_path.ends_with(".h") {
+            return Ok(false);
+        }
+
+        let json_path_str = include_path.replace(".h", ".json");
+        let json_rel = parent_dir.join(&json_path_str);
+        if json_rel.exists() {
+            table.load_events_json(&json_rel)?;
+            return Ok(true);
+        }
+
+        for dir in include_dirs {
+            let json_path = dir.join(&json_path_str);
+            if json_path.exists() {
+                table.load_events_json(&json_path)?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
     }
 
     /// Resolve a symbolic constant from the workspace symbol table.
@@ -858,6 +951,103 @@ mod tests {
         let resolved =
             ws.resolve_script_symbols_with("ApplyMovement LOCALID_HIKER, TestMovement", &symbols);
         assert_eq!(resolved, "ApplyMovement 0, TestMovement");
+    }
+
+    #[test]
+    fn test_collect_constants_for_file_propagates_event_json_parse_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/events")).unwrap();
+
+        std::fs::write(
+            root.join("res/field/scripts/scripts.order"),
+            "test_script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/scripts/test_script.s"),
+            "#include \"res/field/events/events_test_map.h\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/events/events_test_map.json"),
+            "{ this is not valid json }",
+        )
+        .unwrap();
+
+        let ws = Workspace::open_decomp(root).unwrap();
+        let err = ws
+            .collect_constants_for_file(root.join("res/field/scripts/test_script.s"))
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_collect_constants_for_file_propagates_event_json_schema_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/events")).unwrap();
+
+        std::fs::write(
+            root.join("res/field/scripts/scripts.order"),
+            "test_script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/scripts/test_script.s"),
+            "#include \"res/field/events/events_test_map.h\"\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("res/field/events/events_test_map.json"), "{}").unwrap();
+
+        let ws = Workspace::open_decomp(root).unwrap();
+        let err = ws
+            .collect_constants_for_file(root.join("res/field/scripts/test_script.s"))
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("object_events"));
+    }
+
+    #[test]
+    fn test_collect_constants_for_file_propagates_event_json_entry_id_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        std::fs::create_dir_all(root.join("include")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+        std::fs::create_dir_all(root.join("res/field/events")).unwrap();
+
+        std::fs::write(
+            root.join("res/field/scripts/scripts.order"),
+            "test_script\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/scripts/test_script.s"),
+            "#include \"res/field/events/events_test_map.h\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("res/field/events/events_test_map.json"),
+            r#"{ "object_events": [ {} ] }"#,
+        )
+        .unwrap();
+
+        let ws = Workspace::open_decomp(root).unwrap();
+        let err = ws
+            .collect_constants_for_file(root.join("res/field/scripts/test_script.s"))
+            .unwrap_err();
+
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+        assert!(err.to_string().contains("object_events[0].id"));
     }
 
     #[test]

@@ -6,6 +6,20 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// Callback used by recursive include loading when a non-system `#include "..."`
+/// cannot be resolved as a normal on-disk file.
+///
+/// The callback receives:
+/// - the symbol table being populated
+/// - the directory of the current file/source being processed
+/// - the configured include directories
+/// - the unresolved include path exactly as written
+///
+/// Return `Ok(true)` if the include was handled by some caller-specific fallback,
+/// `Ok(false)` if it was not handled, or an error if handling failed.
+type UnresolvedIncludeHandler<'a> =
+    dyn FnMut(&mut SymbolTable, &Path, &[PathBuf], &str) -> std::io::Result<bool> + 'a;
+
 pub use crate::c_parser::defines::parse_defines;
 pub use crate::c_parser::defines::parse_value;
 pub use crate::c_parser::enums::{parse_enum, parse_enums};
@@ -131,13 +145,35 @@ impl SymbolTable {
         path: impl AsRef<Path>,
         include_dirs: &[PathBuf],
     ) -> std::io::Result<()> {
+        self.load_recursive_with_handler(path, include_dirs, None)
+    }
+
+    /// Recursively load a file and its local `#include` dependencies, with an
+    /// optional callback for unresolved non-system includes.
+    ///
+    /// The handler is only called after normal include-path resolution fails.
+    /// This keeps core recursive loading generic while allowing caller-specific
+    /// fallback behavior when needed.
+    pub fn load_recursive_with_handler(
+        &mut self,
+        path: impl AsRef<Path>,
+        include_dirs: &[PathBuf],
+        mut unresolved_include_handler: Option<&mut UnresolvedIncludeHandler<'_>>,
+    ) -> std::io::Result<()> {
         let path = path.as_ref();
         let sm = self
             .source_manager
             .get_or_insert_with(SourceManager::new)
             .clone();
         let mut visited = FxHashSet::default();
-        self.load_recursive_internal(path, include_dirs, &sm, &mut visited, SymbolTag::Global)
+        self.load_recursive_internal(
+            path,
+            include_dirs,
+            &sm,
+            &mut visited,
+            SymbolTag::Global,
+            &mut unresolved_include_handler,
+        )
     }
 
     pub fn load_recursive_str(
@@ -145,6 +181,21 @@ impl SymbolTable {
         content: &str,
         root_dir: impl AsRef<Path>,
         include_dirs: &[PathBuf],
+    ) -> std::io::Result<()> {
+        self.load_recursive_str_with_handler(content, root_dir, include_dirs, None)
+    }
+
+    /// Recursively load includes referenced from inline source content, with an
+    /// optional callback for unresolved non-system includes.
+    ///
+    /// The handler has the same semantics as `load_recursive_with_handler` and
+    /// is only invoked when ordinary include resolution fails.
+    pub fn load_recursive_str_with_handler(
+        &mut self,
+        content: &str,
+        root_dir: impl AsRef<Path>,
+        include_dirs: &[PathBuf],
+        mut unresolved_include_handler: Option<&mut UnresolvedIncludeHandler<'_>>,
     ) -> std::io::Result<()> {
         let root_dir = root_dir.as_ref();
         let sm = self
@@ -166,21 +217,8 @@ impl SymbolTable {
             if inc.is_system {
                 continue;
             }
-            let mut found_path = None;
-            let rel = root_dir.join(&inc.path);
-            if rel.exists() {
-                found_path = Some(rel);
-            } else {
-                for dir in include_dirs {
-                    let p = dir.join(&inc.path);
-                    if p.exists() {
-                        found_path = Some(p);
-                        break;
-                    }
-                }
-            }
 
-            if let Some(p) = found_path {
+            if let Some(p) = Self::resolve_include_path(root_dir, include_dirs, &inc.path) {
                 let mut visited = FxHashSet::default();
                 self.load_recursive_internal(
                     &p,
@@ -188,10 +226,33 @@ impl SymbolTable {
                     &sm,
                     &mut visited,
                     SymbolTag::Global,
+                    &mut unresolved_include_handler,
                 )?;
+            } else if let Some(handler) = unresolved_include_handler.as_mut() {
+                handler(self, root_dir, include_dirs, &inc.path)?;
             }
         }
         Ok(())
+    }
+
+    fn resolve_include_path(
+        parent_dir: &Path,
+        include_dirs: &[PathBuf],
+        include_path: &str,
+    ) -> Option<PathBuf> {
+        let rel = parent_dir.join(include_path);
+        if rel.exists() {
+            return Some(rel);
+        }
+
+        for dir in include_dirs {
+            let p = dir.join(include_path);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+
+        None
     }
 
     fn load_recursive_internal(
@@ -201,6 +262,7 @@ impl SymbolTable {
         sm: &SourceManager,
         visited: &mut FxHashSet<PathBuf>,
         tag: SymbolTag,
+        unresolved_include_handler: &mut Option<&mut UnresolvedIncludeHandler<'_>>,
     ) -> std::io::Result<()> {
         let canonical = sm.canonicalize_strict(path)?;
         if !visited.insert(canonical.clone()) {
@@ -218,36 +280,17 @@ impl SymbolTable {
                 continue;
             }
 
-            let mut found_path = None;
-            let rel = parent_dir.join(&inc.path);
-            if rel.exists() {
-                found_path = Some(rel);
-            } else {
-                for dir in include_dirs {
-                    let p = dir.join(&inc.path);
-                    if p.exists() {
-                        found_path = Some(p);
-                        break;
-                    }
-                }
-            }
-
-            if let Some(p) = found_path {
-                self.load_recursive_internal(&p, include_dirs, sm, visited, tag.clone())?;
-            } else if inc.path.contains("res/field/events/") && inc.path.ends_with(".h") {
-                let json_path_str = inc.path.replace(".h", ".json");
-                let json_rel = parent_dir.join(&json_path_str);
-                if json_rel.exists() {
-                    self.load_events_json(&json_rel)?;
-                } else {
-                    for dir in include_dirs {
-                        let json_p = dir.join(&json_path_str);
-                        if json_p.exists() {
-                            self.load_events_json(&json_p)?;
-                            break;
-                        }
-                    }
-                }
+            if let Some(p) = Self::resolve_include_path(parent_dir, include_dirs, &inc.path) {
+                self.load_recursive_internal(
+                    &p,
+                    include_dirs,
+                    sm,
+                    visited,
+                    tag.clone(),
+                    unresolved_include_handler,
+                )?;
+            } else if let Some(handler) = unresolved_include_handler.as_mut() {
+                handler(self, parent_dir, include_dirs, &inc.path)?;
             }
         }
 

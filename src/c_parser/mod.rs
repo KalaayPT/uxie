@@ -1,10 +1,9 @@
 //! C header file parsing with strict constant-expression evaluation
 //!
-//! This module provides a C preprocessor-like symbol resolution system for
-//! decompilation constants:
+//! This module provides a generic C preprocessor-like symbol resolution system:
 //! - Parse `#define` constants and evaluate complex expressions
 //! - Parse C enums with incremental value assignment
-//! - Parse `#include` directives and resolve dependencies
+//! - Parse `#include` directives and resolve on-disk dependencies
 //! - Pratt-parser precedence for arithmetic, bitwise, shift, comparison, logical, and unary operators
 //! - Unsupported constructs (for example ternary, assignment, or unsupported macros) fail explicitly
 

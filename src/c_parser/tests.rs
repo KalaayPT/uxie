@@ -319,41 +319,41 @@ metang_generators = {
     }
 
     proptest! {
-            #[test]
-            fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
-                let dir = tempdir().unwrap();
-                let generated_dir = dir.path().join("generated");
-                std::fs::create_dir_all(&generated_dir).unwrap();
+                #[test]
+                fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+                    let dir = tempdir().unwrap();
+                    let generated_dir = dir.path().join("generated");
+                    std::fs::create_dir_all(&generated_dir).unwrap();
 
-                std::fs::write(
-                    generated_dir.join("meson.build"),
-                    r"
+                    std::fs::write(
+                        generated_dir.join("meson.build"),
+                        r"
 metang_generators = {
     'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
 }
 ",
-                )
-                .unwrap();
+                    )
+                    .unwrap();
 
-                let mut content = String::new();
-                for i in 0..entry_count {
-                    use std::fmt::Write as _;
-                    writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
-                }
-                std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+                    let mut content = String::new();
+                    for i in 0..entry_count {
+                        use std::fmt::Write as _;
+                        writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
+                    }
+                    std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
 
-                let mut table = SymbolTable::new();
-                table.load_headers_from_dir(&generated_dir).unwrap();
+                    let mut table = SymbolTable::new();
+                    table.load_headers_from_dir(&generated_dir).unwrap();
 
-                for i in 0..entry_count {
-                    let expected = 1_i64 << i;
-                    prop_assert_eq!(
-                        table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
-                        Some(expected)
-                    );
+                    for i in 0..entry_count {
+                        let expected = 1_i64 << i;
+                        prop_assert_eq!(
+                            table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                            Some(expected)
+                        );
+                    }
                 }
             }
-        }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {
@@ -493,53 +493,16 @@ metang_generators = {
     }
 
     #[test]
-    fn test_load_recursive_propagates_events_json_parse_errors() {
+    fn test_load_recursive_missing_include_without_handler_leaves_symbols_unresolved() {
         let dir = tempdir().unwrap();
         let sm = SourceManager::new();
 
         let main_path = create_file(dir.path(), "main.h", "#include \"res/field/events/test.h\"");
-        let events_json_path = dir.path().join("res/field/events/test.json");
-        std::fs::create_dir_all(events_json_path.parent().unwrap()).unwrap();
-        std::fs::write(&events_json_path, "{ this is not valid json }").unwrap();
 
         let mut table = SymbolTable::with_source_manager(sm);
-        let err = table.load_recursive(&main_path, &[]).unwrap_err();
+        table.load_recursive(&main_path, &[]).unwrap();
 
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn test_load_recursive_propagates_events_json_schema_errors() {
-        let dir = tempdir().unwrap();
-        let sm = SourceManager::new();
-
-        let main_path = create_file(dir.path(), "main.h", "#include \"res/field/events/test.h\"");
-        let events_json_path = dir.path().join("res/field/events/test.json");
-        std::fs::create_dir_all(events_json_path.parent().unwrap()).unwrap();
-        std::fs::write(&events_json_path, "{}").unwrap();
-
-        let mut table = SymbolTable::with_source_manager(sm);
-        let err = table.load_recursive(&main_path, &[]).unwrap_err();
-
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("object_events"));
-    }
-
-    #[test]
-    fn test_load_recursive_propagates_events_json_entry_id_errors() {
-        let dir = tempdir().unwrap();
-        let sm = SourceManager::new();
-
-        let main_path = create_file(dir.path(), "main.h", "#include \"res/field/events/test.h\"");
-        let events_json_path = dir.path().join("res/field/events/test.json");
-        std::fs::create_dir_all(events_json_path.parent().unwrap()).unwrap();
-        std::fs::write(&events_json_path, r#"{ "object_events": [ {} ] }"#).unwrap();
-
-        let mut table = SymbolTable::with_source_manager(sm);
-        let err = table.load_recursive(&main_path, &[]).unwrap_err();
-
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
-        assert!(err.to_string().contains("object_events[0].id"));
+        assert_eq!(table.resolve_constant("LOCALID_HIKER"), None);
     }
 
     #[test]
