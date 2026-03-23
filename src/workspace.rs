@@ -40,15 +40,40 @@ impl Workspace {
     pub fn open(path: impl AsRef<Path>) -> std::io::Result<Self> {
         let path = path.as_ref().to_path_buf();
 
-        let mut ws =
-            if path.join("include/constants").exists() || path.join("res/field/scripts").exists() {
-                Self::open_decomp(path)?
-            } else {
-                Self::open_dspre(path)?
-            };
+        let mut ws = match Self::detect_project_type(&path) {
+            ProjectType::Decomp => Self::open_decomp(path)?,
+            ProjectType::Dspre => Self::open_dspre(path)?,
+        };
 
         ws.load_names()?;
         Ok(ws)
+    }
+
+    fn detect_project_type(path: &Path) -> ProjectType {
+        let decomp_markers = [
+            path.join("include/constants"),
+            path.join("res/field/scripts/scripts.order"),
+            path.join("include/data/map_headers.h"),
+            path.join("src/data/map_headers.h"),
+            path.join("src/script_manager.c"),
+            path.join("src/fieldmap.c"),
+            path.join("files/fielddata/script/scr_seq"),
+            path.join("files/msgdata/msg"),
+        ];
+        let dspre_markers = [
+            path.join("header.bin"),
+            path.join("config.yaml"),
+            path.join("arm9.bin"),
+            path.join("unpacked/arm9.bin"),
+            path.join("unpacked"),
+        ];
+
+        if decomp_markers.iter().any(|marker| marker.exists()) {
+            ProjectType::Decomp
+        } else {
+            let _has_dspre_marker = dspre_markers.iter().any(|marker| marker.exists());
+            ProjectType::Dspre
+        }
     }
 
     fn load_names(&mut self) -> std::io::Result<()> {
@@ -594,9 +619,18 @@ impl Workspace {
 mod tests {
     use super::*;
     use crate::map_header::MapHeader;
+    use crate::rom_header::ROM_HEADER_SIZE;
     use std::fs;
     use std::io::Write;
     use tempfile::tempdir;
+
+    fn write_test_header_bin(path: &Path, game_title: &str, game_code: &str) {
+        let mut data = vec![0_u8; ROM_HEADER_SIZE];
+        data[..game_title.len()].copy_from_slice(game_title.as_bytes());
+        data[12..16].copy_from_slice(game_code.as_bytes());
+        data[16..18].copy_from_slice(b"01");
+        fs::write(path, data).unwrap();
+    }
 
     fn parse_hgss_script_filename_for_test(file_name: &str) -> Option<(usize, String)> {
         let stem = file_name.strip_suffix(".s")?;
@@ -958,6 +992,57 @@ mod tests {
         assert_eq!(ws.game, Game::Platinum);
         assert_eq!(ws.family, GameFamily::Platinum);
         assert_eq!(ws.resolve_constant("TEST_VALUE"), Some(42));
+    }
+
+    #[test]
+    fn test_open_decomp_detection_without_include_constants_uses_platinum_markers() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("totally_generic_project");
+
+        fs::create_dir_all(root.join("res/field/scripts")).unwrap();
+        fs::write(
+            root.join("res/field/scripts/scripts.order"),
+            "script_main\nscript_event\n",
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.game, Game::Platinum);
+        assert_eq!(ws.family, GameFamily::Platinum);
+        assert_eq!(ws.scripts.get_name(0), Some("script_main"));
+        assert_eq!(ws.scripts.get_name(1), Some("script_event"));
+    }
+
+    #[test]
+    fn test_open_decomp_detection_without_include_constants_uses_hgss_markers() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("totally_generic_project");
+
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Decomp);
+        assert_eq!(ws.game, Game::HeartGold);
+        assert_eq!(ws.family, GameFamily::HGSS);
+    }
+
+    #[test]
+    fn test_open_dspre_detection_does_not_depend_on_root_name() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("pokeheartgold");
+
+        fs::create_dir_all(root.join("unpacked")).unwrap();
+        write_test_header_bin(&root.join("header.bin"), "POKEMON PL", "CPUE");
+        fs::write(root.join("arm9.bin"), vec![0_u8; 4]).unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Dspre);
+        assert_eq!(ws.game, Game::Platinum);
+        assert_eq!(ws.family, GameFamily::Platinum);
     }
 
     #[test]
