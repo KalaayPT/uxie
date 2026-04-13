@@ -51,6 +51,7 @@ fn main() {
         "cargo:rerun-if-changed={}",
         nitroarc_src_dir.join("COPYING.LESSER").display()
     );
+    println!("cargo:rerun-if-env-changed=CC");
 
     let nitroarc_build_root = out_dir.join("nitroarc-build");
     let nitroarc_work_dir = nitroarc_build_root.join("src");
@@ -72,9 +73,15 @@ fn main() {
         )
     });
 
-    let status = Command::new("make")
-        .arg("ffi")
-        .current_dir(&nitroarc_work_dir)
+    let mut make = Command::new("make");
+    make.arg("ffi").current_dir(&nitroarc_work_dir);
+
+    // Prefer `gcc` unless the user explicitly chose a compiler via `CC`.
+    if cfg!(windows) && env::var_os("CC").is_none() {
+        make.env("CC", "gcc");
+    }
+
+    let status = make
         .status()
         .expect("failed to run `make ffi` in vendored nitroarc");
 
