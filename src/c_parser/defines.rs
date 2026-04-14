@@ -12,6 +12,13 @@ pub struct CDefine {
     pub resolved: Option<i64>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CFunctionMacro {
+    pub name: String,
+    pub params: Vec<String>,
+    pub value: String,
+}
+
 pub fn parse_defines(source: &str) -> Vec<CDefine> {
     let mut defines = Vec::new();
     for line in source.lines() {
@@ -57,6 +64,78 @@ pub fn parse_defines(source: &str) -> Vec<CDefine> {
         }
     }
     defines
+}
+
+pub fn parse_function_macros(source: &str) -> Vec<CFunctionMacro> {
+    let mut macros = Vec::new();
+    for line in source.lines() {
+        let line = line.trim();
+        if !line.starts_with("#define") {
+            continue;
+        }
+
+        let rest = line[7..].trim_start();
+        if rest.is_empty() {
+            continue;
+        }
+
+        let mut name = String::new();
+        for ch in rest.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                name.push(ch);
+            } else {
+                break;
+            }
+        }
+        if name.is_empty() {
+            continue;
+        }
+
+        let remaining = &rest[name.len()..];
+        if !remaining.starts_with('(') {
+            continue;
+        }
+
+        let Some(close_idx) = remaining.find(')') else {
+            continue;
+        };
+
+        let params_str = &remaining[1..close_idx];
+        let value = strip_define_comment(remaining[close_idx + 1..].trim());
+        if value.is_empty() {
+            continue;
+        }
+
+        let params = if params_str.trim().is_empty() {
+            Vec::new()
+        } else {
+            params_str
+                .split(',')
+                .map(|param| param.trim().to_string())
+                .collect()
+        };
+
+        macros.push(CFunctionMacro {
+            name,
+            params,
+            value: value.to_string(),
+        });
+    }
+    macros
+}
+
+fn strip_define_comment(line: &str) -> &str {
+    let line = if let Some(pos) = line.find("//") {
+        &line[..pos]
+    } else {
+        line
+    };
+
+    if let Some(pos) = line.find("/*") {
+        line[..pos].trim()
+    } else {
+        line.trim()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -740,6 +819,20 @@ mod tests {
         assert_eq!(defines.len(), 3);
         assert_eq!(defines[0].name, "ENCOUNTERS_NONE");
         assert_eq!(defines[0].value, "0xFFFF");
+    }
+
+    #[test]
+    fn test_parse_function_macros() {
+        let source = r"
+#define MAPLOC(sec) ((sec) % 1000)
+#define RGB(r, g, b) (((b) << 10) | ((g) << 5) | (r))
+#define CONST_ONLY 123
+        ";
+        let macros = parse_function_macros(source);
+        assert_eq!(macros.len(), 2);
+        assert_eq!(macros[0].name, "MAPLOC");
+        assert_eq!(macros[0].params, vec!["sec"]);
+        assert_eq!(macros[0].value, "((sec) % 1000)");
     }
 
     #[test]

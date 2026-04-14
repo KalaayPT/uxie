@@ -1,4 +1,4 @@
-use crate::c_parser::defines::{CDefine, parse_defines};
+use crate::c_parser::defines::{CDefine, CFunctionMacro, parse_defines, parse_function_macros};
 use crate::c_parser::enums::{CEnum, parse_enums};
 use crate::c_parser::includes::{CInclude, parse_includes};
 use dashmap::DashMap;
@@ -9,6 +9,7 @@ use std::sync::Arc;
 pub struct FileEntry {
     pub defines: Vec<CDefine>,
     pub enums: Vec<CEnum>,
+    pub function_macros: Vec<CFunctionMacro>,
     pub includes: Vec<CInclude>,
 }
 
@@ -43,6 +44,7 @@ impl SourceManager {
         let entry = Arc::new(FileEntry {
             defines: parse_defines(&content),
             enums: parse_enums(&content),
+            function_macros: parse_function_macros(&content),
             includes: parse_includes(&content),
         });
 

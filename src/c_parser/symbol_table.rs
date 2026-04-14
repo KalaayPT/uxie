@@ -38,6 +38,7 @@ pub struct SymbolTable {
     pub(crate) parent: Option<Arc<SymbolTable>>,
     pub(crate) symbols: FxHashMap<String, i64>,
     pub(crate) pending: FxHashMap<String, String>,
+    pub(crate) function_macros: FxHashMap<String, crate::c_parser::defines::CFunctionMacro>,
     pub(crate) value_to_names: FxHashMap<i64, Vec<String>>,
     pub(crate) symbol_to_file: FxHashMap<String, PathBuf>,
     pub(crate) symbol_to_tags: FxHashMap<String, FxHashSet<SymbolTag>>,
@@ -208,6 +209,9 @@ impl SymbolTable {
         for def in parse_defines(content) {
             self.process_define(def.name, def.value, &dummy_path, SymbolTag::Global);
         }
+        for function_macro in crate::c_parser::defines::parse_function_macros(content) {
+            self.process_function_macro(function_macro, &dummy_path, SymbolTag::Global);
+        }
         for e in parse_enums(content) {
             self.process_enum(e, &dummy_path, SymbolTag::Global);
         }
@@ -306,6 +310,9 @@ impl SymbolTable {
         for def in &entry.defines {
             self.process_define(def.name.clone(), def.value.clone(), path, tag.clone());
         }
+        for function_macro in &entry.function_macros {
+            self.process_function_macro(function_macro.clone(), path, tag.clone());
+        }
         for e in &entry.enums {
             self.process_enum(e.clone(), path, tag.clone());
         }
@@ -365,6 +372,22 @@ impl SymbolTable {
         self.pending.insert(name, value);
     }
 
+    fn process_function_macro(
+        &mut self,
+        function_macro: crate::c_parser::defines::CFunctionMacro,
+        path: &Path,
+        tag: SymbolTag,
+    ) {
+        self.symbol_to_file
+            .insert(function_macro.name.clone(), path.to_path_buf());
+        self.symbol_to_tags
+            .entry(function_macro.name.clone())
+            .or_default()
+            .insert(tag);
+        self.function_macros
+            .insert(function_macro.name.clone(), function_macro);
+    }
+
     fn process_enum(&mut self, e: crate::c_parser::enums::CEnum, path: &Path, tag: SymbolTag) {
         let mut current = 0i64;
         for v in &e.variants {
@@ -411,7 +434,182 @@ impl SymbolTable {
         for def in parse_defines(content) {
             self.process_define(def.name, def.value, path, tag.clone());
         }
+        for function_macro in crate::c_parser::defines::parse_function_macros(content) {
+            self.process_function_macro(function_macro, path, tag.clone());
+        }
         Ok(())
+    }
+
+    fn get_function_macro(&self, name: &str) -> Option<&crate::c_parser::defines::CFunctionMacro> {
+        self.function_macros.get(name).or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.get_function_macro(name))
+        })
+    }
+
+    fn expand_function_macros(&self, expr: &str, depth: usize) -> Option<Option<String>> {
+        const MAX_DEPTH: usize = 32;
+        if depth > MAX_DEPTH {
+            return None;
+        }
+
+        let mut out = String::new();
+        let mut chars = expr.char_indices().peekable();
+        let mut changed = false;
+
+        while let Some((start, ch)) = chars.next() {
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let mut end = start + ch.len_utf8();
+                while let Some(&(idx, next_ch)) = chars.peek() {
+                    if next_ch.is_ascii_alphanumeric() || next_ch == '_' {
+                        end = idx + next_ch.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+
+                let ident = &expr[start..end];
+                let mut lookahead = chars.clone();
+                while let Some(&(_, next_ch)) = lookahead.peek() {
+                    if next_ch.is_whitespace() {
+                        lookahead.next();
+                    } else {
+                        break;
+                    }
+                }
+
+                if let Some(&(paren_idx, '(')) = lookahead.peek()
+                    && let Some(function_macro) = self.get_function_macro(ident)
+                {
+                    let close_idx = Self::find_matching_paren(expr, paren_idx)?;
+                    let args_str = &expr[paren_idx + 1..close_idx];
+                    let raw_args = Self::split_call_args(args_str);
+                    if raw_args.len() != function_macro.params.len() {
+                        return None;
+                    }
+
+                    let mut expanded_args = Vec::with_capacity(raw_args.len());
+                    for arg in raw_args {
+                        let expanded = self.expand_function_macros(arg, depth + 1)?;
+                        expanded_args.push(expanded.unwrap_or_else(|| arg.trim().to_string()));
+                    }
+
+                    let expanded_body =
+                        self.expand_function_macro_body(function_macro, &expanded_args, depth + 1)?;
+                    out.push_str(&expanded_body);
+                    changed = true;
+
+                    while let Some(&(idx, _)) = chars.peek() {
+                        if idx <= close_idx {
+                            chars.next();
+                        } else {
+                            break;
+                        }
+                    }
+                    continue;
+                }
+
+                out.push_str(ident);
+                continue;
+            }
+
+            out.push(ch);
+        }
+        Some(changed.then_some(out))
+    }
+
+    fn expand_function_macro_body(
+        &self,
+        function_macro: &crate::c_parser::defines::CFunctionMacro,
+        args: &[String],
+        depth: usize,
+    ) -> Option<String> {
+        let mut body = function_macro.value.clone();
+        for (param, arg) in function_macro.params.iter().zip(args.iter()) {
+            body = Self::replace_identifier_tokens(&body, param, arg);
+        }
+
+        let expanded = self.expand_function_macros(&body, depth)?;
+        Some(expanded.unwrap_or(body))
+    }
+
+    fn replace_identifier_tokens(input: &str, name: &str, replacement: &str) -> String {
+        let mut out = String::new();
+        let mut chars = input.char_indices().peekable();
+
+        while let Some((start, ch)) = chars.next() {
+            if ch.is_ascii_alphabetic() || ch == '_' {
+                let mut end = start + ch.len_utf8();
+                while let Some(&(idx, next_ch)) = chars.peek() {
+                    if next_ch.is_ascii_alphanumeric() || next_ch == '_' {
+                        end = idx + next_ch.len_utf8();
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+
+                let ident = &input[start..end];
+                if ident == name {
+                    out.push('(');
+                    out.push_str(replacement);
+                    out.push(')');
+                } else {
+                    out.push_str(ident);
+                }
+                continue;
+            }
+
+            out.push(ch);
+        }
+
+        out
+    }
+
+    fn split_call_args(args: &str) -> Vec<&str> {
+        let mut result = Vec::new();
+        let mut depth = 0usize;
+        let mut start = 0usize;
+
+        for (idx, ch) in args.char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => depth = depth.saturating_sub(1),
+                ',' if depth == 0 => {
+                    result.push(args[start..idx].trim());
+                    start = idx + 1;
+                }
+                _ => {}
+            }
+        }
+
+        let tail = args[start..].trim();
+        if !tail.is_empty() {
+            result.push(tail);
+        } else if !args.trim().is_empty() {
+            result.push("");
+        }
+
+        result
+    }
+
+    fn find_matching_paren(input: &str, open_idx: usize) -> Option<usize> {
+        let mut depth = 0usize;
+        for (idx, ch) in input[open_idx..].char_indices() {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth = depth.checked_sub(1)?;
+                    if depth == 0 {
+                        return Some(open_idx + idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        None
     }
 
     pub fn resolve_constant(&self, name: &str) -> Option<i64> {
@@ -429,9 +627,11 @@ impl SymbolTable {
         }
 
         let expr = self.pending.get(name)?;
+        let expanded = self.expand_function_macros(expr, 0)?;
+        let eval_target = expanded.as_deref().unwrap_or(expr);
         let val = if let Some(parent) = &self.parent {
             crate::c_parser::defines::eval_expr_with_parent(
-                expr,
+                eval_target,
                 &self.pending,
                 &self.symbols,
                 &self.eval_cache,
@@ -439,7 +639,7 @@ impl SymbolTable {
             )?
         } else {
             crate::c_parser::defines::eval_expr_with_context(
-                expr,
+                eval_target,
                 &self.pending,
                 &self.symbols,
                 &self.eval_cache,
@@ -454,6 +654,9 @@ impl SymbolTable {
         if let Some(val) = self.resolve_constant(expr) {
             return Some(val);
         }
+
+        let expanded = self.expand_function_macros(expr, 0)?;
+        let expr = expanded.as_deref().unwrap_or(expr);
 
         self.parent.as_ref().map_or_else(
             || {

@@ -169,6 +169,54 @@ mod c_parser_tests {
     }
 
     #[test]
+    fn test_function_macro_expression_resolution() {
+        let dir = tempdir().unwrap();
+        let sm = SourceManager::new();
+
+        let main_path = create_file(
+            dir.path(),
+            "main.h",
+            "#include \"map_sections.h\"\n#define METLOC_PRIMO 2001\n#define PRIMO_LOC MAPLOC(METLOC_PRIMO)",
+        );
+        create_file(
+            dir.path(),
+            "map_sections.h",
+            "#define MAPLOC(sec) ((sec) % 1000)",
+        );
+
+        let mut table = SymbolTable::with_source_manager(sm);
+        table.load_recursive(&main_path, &[]).unwrap();
+
+        assert_eq!(table.resolve_constant("PRIMO_LOC"), Some(1));
+        assert_eq!(table.evaluate_expression("MAPLOC(METLOC_PRIMO)"), Some(1));
+    }
+
+    #[test]
+    fn test_function_macro_expression_resolution_with_nested_args() {
+        let dir = tempdir().unwrap();
+        let sm = SourceManager::new();
+
+        let main_path = create_file(
+            dir.path(),
+            "main.h",
+            "#include \"map_sections.h\"\n#define METLOC_PRIMO 2001",
+        );
+        create_file(
+            dir.path(),
+            "map_sections.h",
+            "#define MAPLOC(sec) ((sec) % 1000)",
+        );
+
+        let mut table = SymbolTable::with_source_manager(sm);
+        table.load_recursive(&main_path, &[]).unwrap();
+
+        assert_eq!(
+            table.evaluate_expression("MAPLOC(METLOC_PRIMO + 1000)"),
+            Some(1)
+        );
+    }
+
+    #[test]
     fn test_load_header_missing_file_returns_error() {
         let dir = tempdir().unwrap();
         let missing = dir.path().join("missing.h");
