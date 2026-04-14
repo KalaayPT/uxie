@@ -55,6 +55,19 @@ static RE_PLATINUM_TABLE_ENTRY: LazyLock<Regex> = LazyLock::new(|| {
         .unwrap()
 });
 
+fn parse_hgss_narc_member_id(s: &str) -> Option<i64> {
+    let digits = s
+        .strip_prefix("NARC_scr_seq_scr_seq_")
+        .or_else(|| s.strip_prefix("NARC_msg_msg_"))?
+        .strip_suffix("_bin")?;
+
+    if !digits.chars().all(|c| c.is_ascii_digit()) {
+        return None;
+    }
+
+    digits.parse::<i64>().ok()
+}
+
 fn resolve_value(s: &str, symbols: &SymbolTable) -> Option<i64> {
     if let Ok(v) = s.parse::<i64>() {
         return Some(v);
@@ -64,7 +77,9 @@ fn resolve_value(s: &str, symbols: &SymbolTable) -> Option<i64> {
             return Some(v);
         }
     }
-    symbols.resolve_constant(s)
+    symbols
+        .resolve_constant(s)
+        .or_else(|| parse_hgss_narc_member_id(s))
 }
 
 /// Entry mapping a global script ID range to a script file.
@@ -155,7 +170,8 @@ impl GlobalScriptTable {
     /// Parse HGSS `sScriptBankMapping` table from fieldmap.c source.
     ///
     /// Requires a `SymbolTable` to resolve symbolic constants like
-    /// `_std_scratch_card` and `NARC_scr_seq_scr_seq_0263_bin`.
+    /// `_std_scratch_card`. Generated HGSS `NARC_*_XXXX_bin` member names are
+    /// also accepted directly, so unbuilt decomp checkouts can still parse.
     pub fn from_hgss_decomp(content: &str, symbols: &SymbolTable) -> Option<Self> {
         let start = content.find("sScriptBankMapping")?;
         let block_start = content[start..].find('{')?;
@@ -418,6 +434,33 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         assert_eq!(entry.min_script_id, 10300);
         assert_eq!(entry.script_file_id, 734);
         assert_eq!(entry.text_archive_id, 444);
+    }
+
+    #[test]
+    fn test_hgss_decomp_parsing_without_generated_narc_symbols() {
+        let mut symbols = SymbolTable::new();
+        symbols.insert_define("_std_scratch_card".to_string(), 10500);
+        symbols.insert_define("_std_misc".to_string(), 2000);
+
+        let content = r"
+const struct ScriptBankMapping sScriptBankMapping[30] = {
+    { _std_scratch_card, NARC_scr_seq_scr_seq_0263_bin, NARC_msg_msg_0433_bin },
+    { _std_misc, NARC_scr_seq_scr_seq_0003_bin, NARC_msg_msg_0040_bin },
+};
+";
+
+        let table = GlobalScriptTable::from_hgss_decomp(content, &symbols).unwrap();
+        assert_eq!(table.len(), 2);
+
+        let entry = table.lookup(10500).unwrap();
+        assert_eq!(entry.min_script_id, 10500);
+        assert_eq!(entry.script_file_id, 263);
+        assert_eq!(entry.text_archive_id, 433);
+
+        let entry = table.lookup(2000).unwrap();
+        assert_eq!(entry.min_script_id, 2000);
+        assert_eq!(entry.script_file_id, 3);
+        assert_eq!(entry.text_archive_id, 40);
     }
 
     #[test]

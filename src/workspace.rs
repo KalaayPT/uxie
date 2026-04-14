@@ -1379,6 +1379,54 @@ mod tests {
     }
 
     #[test]
+    fn test_open_decomp_hgss_fieldmap_parses_without_generated_narc_headers() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("generic_hgss_project");
+
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
+
+        fs::write(
+            root.join("include/constants/std_script.h"),
+            concat!(
+                "#define _std_misc 2000\n",
+                "#define _std_scratch_card 10500\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("src/fieldmap.c"),
+            concat!(
+                "const struct ScriptBankMapping sScriptBankMapping[30] = {\n",
+                "    { _std_scratch_card, NARC_scr_seq_scr_seq_0263_bin, NARC_msg_msg_0433_bin },\n",
+                "    { _std_misc, NARC_scr_seq_scr_seq_0003_bin, NARC_msg_msg_0040_bin },\n",
+                "};\n"
+            ),
+        )
+        .unwrap();
+        fs::write(
+            root.join("files/fielddata/script/scr_seq/scr_seq_0003.s"),
+            "",
+        )
+        .unwrap();
+
+        let ws = Workspace::open_decomp(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+
+        let entry = ws.global_script_table.lookup(10500).unwrap();
+        assert_eq!(entry.min_script_id, 10500);
+        assert_eq!(entry.script_file_id, 263);
+        assert_eq!(entry.text_archive_id, 433);
+
+        let entry = ws.global_script_table.lookup(2000).unwrap();
+        assert_eq!(entry.min_script_id, 2000);
+        assert_eq!(entry.script_file_id, 3);
+        assert_eq!(entry.text_archive_id, 40);
+    }
+
+    #[test]
     fn test_open_decomp_hgss_still_loads_global_constants_from_include_constants() {
         let dir = tempdir().unwrap();
         let root = dir.path().join("generic_hgss_project");
