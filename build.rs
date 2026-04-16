@@ -93,6 +93,7 @@ fn main() {
 
     let nitroarc_bin_dir = nitroarc_work_dir.join("bin");
     let nitroarc_ffi_dir = nitroarc_work_dir.join("ffi");
+    let nitroarc_shared_lib = nitroarc_bin_dir.join(shared_library_name());
 
     println!(
         "cargo:rustc-link-search=native={}",
@@ -104,18 +105,13 @@ fn main() {
     );
 
     #[cfg(target_os = "linux")]
-    println!(
-        "cargo:rustc-link-arg=-Wl,-rpath,{}",
-        nitroarc_bin_dir.display()
-    );
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", runtime_library_search_path());
 
     #[cfg(target_os = "macos")]
-    println!(
-        "cargo:rustc-link-arg=-Wl,-rpath,{}",
-        nitroarc_bin_dir.display()
-    );
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", runtime_library_search_path());
 
     println!("cargo:rustc-link-lib=dylib=nitroarc_ffi");
+    stage_runtime_artifacts(&out_dir, &nitroarc_shared_lib);
 }
 
 fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
@@ -162,4 +158,78 @@ fn copy_symlink(src: &Path, dst: &Path) -> io::Result<()> {
             std::os::windows::fs::symlink_file(&resolved_target, dst)
         }
     }
+}
+
+fn shared_library_name() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        "nitroarc_ffi.dll"
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        "libnitroarc_ffi.dylib"
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    {
+        "libnitroarc_ffi.so"
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn runtime_library_search_path() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "$ORIGIN"
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        "@loader_path"
+    }
+}
+
+fn stage_runtime_artifacts(out_dir: &Path, shared_lib: &Path) {
+    let profile_dir = cargo_profile_dir(out_dir);
+    let filename = shared_lib.file_name().unwrap_or_else(|| {
+        panic!(
+            "shared library path does not have a filename component: {}",
+            shared_lib.display()
+        )
+    });
+
+    copy_runtime_artifact(shared_lib, &profile_dir.join(filename)).unwrap_or_else(|err| {
+        panic!(
+            "failed to stage {} next to built binaries in {}: {err}",
+            shared_lib.display(),
+            profile_dir.display()
+        )
+    });
+
+    let deps_dir = profile_dir.join("deps");
+    copy_runtime_artifact(shared_lib, &deps_dir.join(filename)).unwrap_or_else(|err| {
+        panic!(
+            "failed to stage {} in {}: {err}",
+            shared_lib.display(),
+            deps_dir.display()
+        )
+    });
+}
+
+fn cargo_profile_dir(out_dir: &Path) -> &Path {
+    out_dir.ancestors().nth(3).unwrap_or_else(|| {
+        panic!(
+            "failed to derive Cargo profile directory from OUT_DIR {}",
+            out_dir.display()
+        )
+    })
+}
+
+fn copy_runtime_artifact(src: &Path, dst: &Path) -> io::Result<()> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(src, dst)?;
+    Ok(())
 }

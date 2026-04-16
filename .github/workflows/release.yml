@@ -1,0 +1,94 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check Out Repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+
+      - name: Install MinGW Toolchain
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-x86_64-gcc
+          path-type: inherit
+
+      - name: Install Dotnet Runtime
+        if: ${{ vars.WINGET_PACKAGE_IDENTIFIER != '' && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 6.0.x
+
+      - name: Build Release Binary
+        shell: pwsh
+        run: cargo build --locked --release --target x86_64-pc-windows-gnu
+
+      - name: Package Windows Release
+        id: package
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $assetName = "uxie-$version-x86_64-pc-windows-gnu.zip"
+          $stageDir = Join-Path $env:RUNNER_TEMP "uxie-$version-x86_64-pc-windows-gnu"
+          $licenseDir = Join-Path $stageDir "licenses"
+          $assetPath = Join-Path $env:RUNNER_TEMP $assetName
+
+          New-Item -ItemType Directory -Path $licenseDir -Force | Out-Null
+          Copy-Item target\x86_64-pc-windows-gnu\release\uxie.exe $stageDir
+          Copy-Item target\x86_64-pc-windows-gnu\release\nitroarc_ffi.dll $stageDir
+          Copy-Item README.md, LICENSE $stageDir
+          Copy-Item nitroarc\COPYING, nitroarc\COPYING.LESSER $licenseDir
+
+          if (Test-Path $assetPath) {
+            Remove-Item $assetPath -Force
+          }
+
+          Compress-Archive -Path (Join-Path $stageDir '*') -DestinationPath $assetPath
+
+          "asset_name=$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset_path=$assetPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "asset_url=https://github.com/$env:GITHUB_REPOSITORY/releases/download/$env:GITHUB_REF_NAME/$assetName" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.package.outputs.asset_path }}
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+
+      - name: Update WinGet Manifest
+        if: ${{ vars.WINGET_PACKAGE_IDENTIFIER != '' && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        shell: pwsh
+        env:
+          ASSET_URL: ${{ steps.package.outputs.asset_url }}
+          PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
+          WINGETCREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+        run: |
+          $version = $env:GITHUB_REF_NAME.TrimStart('v')
+          $wingetDir = Join-Path $env:RUNNER_TEMP "wingetcreate"
+          $wingetExe = Join-Path $wingetDir "wingetcreate.exe"
+
+          New-Item -ItemType Directory -Path $wingetDir -Force | Out-Null
+          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile $wingetExe
+
+          & $wingetExe update $env:PACKAGE_IDENTIFIER -u $env:ASSET_URL -v $version -t $env:WINGETCREATE_GITHUB_TOKEN --submit

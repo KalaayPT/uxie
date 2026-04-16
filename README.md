@@ -49,8 +49,13 @@ The name comes from [Uxie](https://bulbapedia.bulbagarden.net/wiki/Uxie_(Pok%C3%
 
 ### CLI
 
-```shell
-cargo install uxie
+- Windows: 
+```pwsh
+winget install Kalaay.uxie
+```
+- Nix (Linux): 
+```bash 
+nix profile install github:KalaayPT/uxie#uxie
 ```
 
 ### Library
@@ -65,6 +70,8 @@ Or add to `Cargo.toml`:
 [dependencies]
 uxie = "0.5.8"
 ```
+
+If your own crate links `uxie` into an executable that you distribute, ship the corresponding `nitroarc_ffi` shared library next to that executable.
 
 For full API documentation, visit [docs.rs/uxie](https://docs.rs/uxie).
 
@@ -181,7 +188,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for development workflow, testing setup
 
 This project is licensed under the MIT License. See [LICENSE](./LICENSE) for details.
 
-Note: the repository currently includes `nitroarc` as a git submodule, and it is licensed separately under the GNU LGPL-3.0-or-later. If you redistribute builds that include it, make sure you also comply with that dependency's license terms. The intended model is to ship `nitroarc_ffi` as a separate shared library alongside `uxie`.
+Note: the repository currently includes `nitroarc` as a git submodule, and it is licensed separately under the GNU LGPL-3.0-or-later. If you redistribute builds that include it, make sure you also comply with that dependency's license terms. The supported distribution model is to ship `nitroarc_ffi` as a separate shared library alongside any executable that depends on it.
 
 --- 
 
