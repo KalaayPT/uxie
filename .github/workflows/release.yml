@@ -11,6 +11,9 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      WINGET_PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
+      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
 
     steps:
       - name: Check Out Repository
@@ -34,7 +37,7 @@ jobs:
           path-type: inherit
 
       - name: Install Dotnet Runtime
-        if: ${{ vars.WINGET_PACKAGE_IDENTIFIER != '' && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        if: ${{ env.WINGET_PACKAGE_IDENTIFIER != '' && env.WINGET_CREATE_GITHUB_TOKEN != '' }}
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 6.0.x
@@ -77,12 +80,12 @@ jobs:
           generate_release_notes: true
 
       - name: Update WinGet Manifest
-        if: ${{ vars.WINGET_PACKAGE_IDENTIFIER != '' && secrets.WINGET_CREATE_GITHUB_TOKEN != '' }}
+        if: ${{ env.WINGET_PACKAGE_IDENTIFIER != '' && env.WINGET_CREATE_GITHUB_TOKEN != '' }}
         shell: pwsh
         env:
           ASSET_URL: ${{ steps.package.outputs.asset_url }}
-          PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
-          WINGETCREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
+          PACKAGE_IDENTIFIER: ${{ env.WINGET_PACKAGE_IDENTIFIER }}
+          WINGETCREATE_GITHUB_TOKEN: ${{ env.WINGET_CREATE_GITHUB_TOKEN }}
         run: |
           $version = $env:GITHUB_REF_NAME.TrimStart('v')
           $wingetDir = Join-Path $env:RUNNER_TEMP "wingetcreate"
