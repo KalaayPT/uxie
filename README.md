@@ -49,10 +49,7 @@ The name comes from [Uxie](https://bulbapedia.bulbagarden.net/wiki/Uxie_(Pok%C3%
 
 ### CLI
 
-- Windows: 
-```pwsh
-winget install Kalaay.uxie
-```
+- Windows: download the latest release zip from GitHub Releases. It ships `uxie.exe` together with `nitroarc_ffi.dll` and the upstream license files.
 - Nix (Linux): 
 ```bash 
 nix profile install github:KalaayPT/uxie#uxie

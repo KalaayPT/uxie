@@ -11,9 +11,6 @@ permissions:
 jobs:
   release:
     runs-on: windows-latest
-    env:
-      WINGET_PACKAGE_IDENTIFIER: ${{ vars.WINGET_PACKAGE_IDENTIFIER }}
-      WINGET_CREATE_GITHUB_TOKEN: ${{ secrets.WINGET_CREATE_GITHUB_TOKEN }}
 
     steps:
       - name: Check Out Repository
@@ -35,12 +32,6 @@ jobs:
             base-devel
             mingw-w64-x86_64-gcc
           path-type: inherit
-
-      - name: Install Dotnet Runtime
-        if: ${{ env.WINGET_PACKAGE_IDENTIFIER != '' && env.WINGET_CREATE_GITHUB_TOKEN != '' }}
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 6.0.x
 
       - name: Build Release Binary
         shell: pwsh
@@ -78,20 +69,3 @@ jobs:
           files: ${{ steps.package.outputs.asset_path }}
           fail_on_unmatched_files: true
           generate_release_notes: true
-
-      - name: Update WinGet Manifest
-        if: ${{ env.WINGET_PACKAGE_IDENTIFIER != '' && env.WINGET_CREATE_GITHUB_TOKEN != '' }}
-        shell: pwsh
-        env:
-          ASSET_URL: ${{ steps.package.outputs.asset_url }}
-          PACKAGE_IDENTIFIER: ${{ env.WINGET_PACKAGE_IDENTIFIER }}
-          WINGETCREATE_GITHUB_TOKEN: ${{ env.WINGET_CREATE_GITHUB_TOKEN }}
-        run: |
-          $version = $env:GITHUB_REF_NAME.TrimStart('v')
-          $wingetDir = Join-Path $env:RUNNER_TEMP "wingetcreate"
-          $wingetExe = Join-Path $wingetDir "wingetcreate.exe"
-
-          New-Item -ItemType Directory -Path $wingetDir -Force | Out-Null
-          Invoke-WebRequest https://aka.ms/wingetcreate/latest -OutFile $wingetExe
-
-          & $wingetExe update $env:PACKAGE_IDENTIFIER -u $env:ASSET_URL -v $version -t $env:WINGETCREATE_GITHUB_TOKEN --submit
