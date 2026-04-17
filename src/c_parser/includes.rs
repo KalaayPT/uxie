@@ -21,6 +21,9 @@ pub fn parse_includes(source: &str) -> Vec<CInclude> {
 
     for line in source.lines() {
         let line = line.trim();
+        if !line.starts_with("#include") {
+            continue;
+        }
 
         if let Some(caps) = SYSTEM_INCLUDE_PATTERN.captures(line) {
             includes.push(CInclude {
@@ -90,6 +93,7 @@ pub fn resolve_includes<S: BuildHasher>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn test_parse_includes() {
@@ -104,5 +108,54 @@ mod tests {
         assert!(includes[0].is_system);
         assert!(!includes[1].is_system);
         assert_eq!(includes[1].path, "map_header.h");
+    }
+
+    #[test]
+    fn test_parse_includes_skips_commented_out_directives() {
+        let source = r#"
+// #include "commented_out.h"
+/* #include "block_comment.h" */
+    #include "real.h"
+        "#;
+
+        let includes = parse_includes(source);
+        assert_eq!(includes.len(), 1);
+        assert_eq!(includes[0].path, "real.h");
+        assert!(!includes[0].is_system);
+    }
+
+    #[test]
+    fn test_resolve_includes_recurses_local_dependencies() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let main = root.join("main.h");
+        let nested = root.join("nested.h");
+        let leaf = root.join("leaf.h");
+
+        std::fs::write(&leaf, "#define LEAF_VALUE 1\n").unwrap();
+        std::fs::write(&nested, "#include \"leaf.h\"\n#define NESTED_VALUE 2\n").unwrap();
+        std::fs::write(&main, "#include \"nested.h\"\n").unwrap();
+
+        let mut visited = HashSet::new();
+        let resolved = resolve_includes(&main, &[], &mut visited).unwrap();
+
+        assert_eq!(resolved, vec![nested, leaf]);
+    }
+
+    #[test]
+    fn test_resolve_includes_skips_already_visited_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let main = root.join("main.h");
+        let nested = root.join("nested.h");
+
+        std::fs::write(&nested, "#define NESTED_VALUE 2\n").unwrap();
+        std::fs::write(&main, "#include \"nested.h\"\n").unwrap();
+
+        let mut visited = HashSet::new();
+        visited.insert(main.canonicalize().unwrap());
+
+        let resolved = resolve_includes(&main, &[], &mut visited).unwrap();
+        assert!(resolved.is_empty());
     }
 }

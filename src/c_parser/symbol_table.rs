@@ -149,6 +149,32 @@ impl SymbolTable {
         self.load_recursive_with_handler(path, include_dirs, None)
     }
 
+    /// Recursively load a file and its local `#include` dependencies.
+    /// Returns `NotFound` if a non-system include cannot be resolved from the
+    /// parent directory or `include_dirs`.
+    pub fn load_recursive_strict(
+        &mut self,
+        path: impl AsRef<Path>,
+        include_dirs: &[PathBuf],
+    ) -> std::io::Result<()> {
+        let mut unresolved_include_handler = |_table: &mut SymbolTable,
+                                              parent_dir: &Path,
+                                              _include_dirs: &[PathBuf],
+                                              include_path: &str|
+         -> std::io::Result<bool> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "Unresolved include '{}' (searched from {})",
+                    include_path,
+                    parent_dir.display()
+                ),
+            ))
+        };
+
+        self.load_recursive_with_handler(path, include_dirs, Some(&mut unresolved_include_handler))
+    }
+
     /// Recursively load a file and its local `#include` dependencies, with an
     /// optional callback for unresolved non-system includes.
     ///
