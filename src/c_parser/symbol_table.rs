@@ -1208,6 +1208,75 @@ impl SymbolTable {
         Ok(count)
     }
 
+    /// Resolve an unresolved `#include "generated/foo.h"` by loading the
+    /// sibling `.txt` list file if present.
+    ///
+    /// pokeplatinum keeps authoritative
+    /// constant lists as `generated/<name>.txt` and only emits the matching
+    /// `<name>.h` during build. Sources still `#include` the `.h`, so when
+    /// the build hasn't run we can't resolve them. This fallback redirects
+    /// any such include to its `.txt` equivalent, loading the same symbols
+    /// the built header would have produced.
+    ///
+    /// Returns `Ok(true)` if a `.txt` equivalent was found and loaded.
+    pub fn try_load_generated_header_fallback(
+        &mut self,
+        parent_dir: &Path,
+        include_dirs: &[PathBuf],
+        include_path: &str,
+    ) -> std::io::Result<bool> {
+        if !include_path.ends_with(".h") {
+            return Ok(false);
+        }
+
+        let txt_path_str = format!("{}.txt", &include_path[..include_path.len() - 2]);
+        let direct = parent_dir.join(&txt_path_str);
+        if direct.is_file() {
+            self.load_list_file(&direct)?;
+            return Ok(true);
+        }
+
+        for dir in include_dirs {
+            let candidate = dir.join(&txt_path_str);
+            if candidate.is_file() {
+                self.load_list_file(&candidate)?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    pub fn try_load_text_bank_include_json(
+        &mut self,
+        parent_dir: &Path,
+        include_dirs: &[PathBuf],
+        include_path: &str,
+    ) -> std::io::Result<bool> {
+        if !include_path.ends_with(".h") || !include_path.contains("/bank/") {
+            return Ok(false);
+        }
+
+        let without_ext = &include_path[..include_path.len() - 2];
+        let json_path_str = without_ext.replacen("/bank/", "/", 1) + ".json";
+
+        let direct = parent_dir.join(&json_path_str);
+        if direct.is_file() {
+            self.load_text_bank_json(&direct)?;
+            return Ok(true);
+        }
+
+        for dir in include_dirs {
+            let candidate = dir.join(&json_path_str);
+            if candidate.is_file() {
+                self.load_text_bank_json(&candidate)?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
     fn collect_header_files(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
         if !dir.is_dir() {
             return Ok(());
