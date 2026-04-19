@@ -3,6 +3,7 @@
 //! The [`Workspace`] struct provides a unified interface for working with both
 //! DSPRE projects and decompilation sources (pokeplatinum/pokeheartgold).
 
+use crate::c_parser::ConstantCache;
 use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
@@ -11,6 +12,7 @@ use crate::script_file::{
     GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
 };
 use crate::text_bank::{GameStrings, TextBankTable};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -412,6 +414,140 @@ impl Workspace {
         })
     }
 
+    pub fn load_cached_symbols(
+        cache_dir: &Path,
+        project_root: &Path,
+        include_roots: &[PathBuf],
+        game_family: GameFamily,
+    ) -> std::io::Result<(Arc<SymbolTable>, bool)> {
+        std::fs::create_dir_all(cache_dir)?;
+        let cache_path = cache_dir.join(format!(
+            "uxie-constants-{}.bin",
+            match game_family {
+                GameFamily::DP => "dp",
+                GameFamily::Platinum => "platinum",
+                GameFamily::HGSS => "hgss",
+            }
+        ));
+        let input_files = Self::collect_cached_symbol_inputs(project_root, include_roots)?;
+
+        if cache_path.is_file() {
+            match ConstantCache::load(&cache_path) {
+                Ok(cache) if cache.is_current(project_root, game_family, &input_files)? => {
+                    return Ok((Arc::new(SymbolTable::from_snapshot(&cache.snapshot)), false));
+                }
+                Ok(_) => {}
+                Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {}
+                Err(err) => {
+                    return Err(std::io::Error::new(
+                        err.kind(),
+                        format!(
+                            "Failed to read constant cache {}: {err}",
+                            cache_path.display()
+                        ),
+                    ));
+                }
+            }
+        }
+
+        let mut symbols = SymbolTable::with_source_manager(SourceManager::new());
+        for path in &input_files {
+            Self::load_cached_symbol_file(&mut symbols, path)?;
+        }
+        symbols.resolve_all();
+
+        ConstantCache::from_symbols(project_root, game_family, &input_files, &symbols)?
+            .save(&cache_path)?;
+
+        Ok((Arc::new(symbols), true))
+    }
+
+    fn collect_cached_symbol_inputs(
+        project_root: &Path,
+        include_roots: &[PathBuf],
+    ) -> std::io::Result<Vec<PathBuf>> {
+        let mut inputs = BTreeSet::new();
+        for root in [
+            project_root.join("include/constants"),
+            project_root.join("generated"),
+            project_root.join("res/field/scripts"),
+            project_root.join("res/text"),
+            project_root.join("build/res/text/bank"),
+            project_root.join("files"),
+        ] {
+            inputs.extend(Self::collect_cached_symbol_root_files(&root)?);
+        }
+        for root in include_roots {
+            inputs.extend(Self::collect_cached_symbol_root_files(root)?);
+        }
+        for path in [
+            project_root.join("include/script_manager.h"),
+            project_root.join("build/res/field/scripts/scr_seq.naix.h"),
+            project_root.join("build/debug/res/field/scripts/scr_seq.naix.h"),
+            project_root.join("build/release/res/field/scripts/scr_seq.naix.h"),
+            project_root.join("res/field/scripts/scr_seq.naix.h"),
+            project_root.join("files/fielddata/script/scr_seq.naix"),
+            project_root.join("fielddata/script/scr_seq.naix"),
+            project_root.join("files/msgdata/msg.naix"),
+            project_root.join("msgdata/msg.naix"),
+        ] {
+            if path.is_file() {
+                inputs.insert(path);
+            }
+        }
+        Ok(inputs.into_iter().collect())
+    }
+
+    fn collect_cached_symbol_root_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
+        if root.is_file() {
+            return Ok(if Self::is_cached_symbol_source_file(root) {
+                vec![root.to_path_buf()]
+            } else {
+                Vec::new()
+            });
+        }
+        if !root.is_dir() {
+            return Ok(Vec::new());
+        }
+
+        let mut files = Vec::new();
+        for entry in std::fs::read_dir(root)? {
+            let path = entry?.path();
+            if path.is_dir() {
+                if path.file_name().and_then(|name| name.to_str()) != Some(".git") {
+                    files.extend(Self::collect_cached_symbol_root_files(&path)?);
+                }
+                continue;
+            }
+
+            if Self::is_cached_symbol_source_file(&path) {
+                files.push(path);
+            }
+        }
+
+        Ok(files)
+    }
+
+    fn is_cached_symbol_source_file(path: &Path) -> bool {
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase())
+            .is_some_and(|ext| matches!(ext.as_str(), "h" | "hpp" | "txt" | "py" | "json"))
+    }
+
+    fn load_cached_symbol_file(symbols: &mut SymbolTable, path: &Path) -> std::io::Result<()> {
+        let extension = path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(|ext| ext.to_ascii_lowercase());
+        match extension.as_deref() {
+            Some("txt") => symbols.load_list_file(path),
+            Some("py") => symbols.load_python_enum(path),
+            Some("json") => symbols.load_text_bank_json(path).map(|_| ()),
+            _ => symbols.load_header(path),
+        }
+    }
+
     fn detect_decomp_game(root: &Path) -> (Game, GameFamily) {
         let platinum_markers = [
             root.join("res/field/scripts/scripts.order"),
@@ -711,6 +847,7 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::c_parser::ConstantCache;
     use crate::map_header::MapHeader;
     use crate::rom_header::ROM_HEADER_SIZE;
     use std::fs;
@@ -784,6 +921,151 @@ mod tests {
         assert_eq!(ProjectType::Dspre, ProjectType::Dspre);
         assert_eq!(ProjectType::Decomp, ProjectType::Decomp);
         assert_ne!(ProjectType::Dspre, ProjectType::Decomp);
+    }
+
+    #[test]
+    fn test_load_cached_symbols_round_trips_and_reuses_valid_cache() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::write(
+            root.join("include/constants/test.h"),
+            "#define TEST_CONST 42\n",
+        )
+        .unwrap();
+        let cache_dir = root.join(".rotom/cache");
+
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+        assert!(rebuilt);
+        assert_eq!(symbols.resolve_constant("TEST_CONST"), Some(42));
+
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+        assert!(!rebuilt);
+        assert_eq!(symbols.resolve_constant("TEST_CONST"), Some(42));
+    }
+
+    #[test]
+    fn test_load_cached_symbols_rebuilds_on_corrupt_or_stale_cache() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        let header = root.join("include/constants/test.h");
+        fs::write(&header, "#define TEST_CONST 42\n").unwrap();
+        let cache_dir = root.join(".rotom/cache");
+        let cache_path = cache_dir.join("uxie-constants-platinum.bin");
+
+        Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+
+        fs::write(&cache_path, b"broken-cache").unwrap();
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+        assert!(rebuilt);
+        assert_eq!(symbols.resolve_constant("TEST_CONST"), Some(42));
+
+        let mut cache = ConstantCache::load(&cache_path).unwrap();
+        cache
+            .file_hashes
+            .insert("include/constants/test.h".to_string(), 0);
+        cache.save(&cache_path).unwrap();
+
+        let (_, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+        assert!(rebuilt);
+    }
+
+    #[test]
+    fn test_load_cached_symbols_uses_configured_include_roots() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let custom_root = root.join("custom/constants");
+        fs::create_dir_all(&custom_root).unwrap();
+        fs::write(custom_root.join("test.h"), "#define TEST_CONST 42\n").unwrap();
+        let cache_dir = root.join(".rotom/cache");
+
+        let (symbols, rebuilt) = Workspace::load_cached_symbols(
+            &cache_dir,
+            root,
+            std::slice::from_ref(&custom_root),
+            GameFamily::Platinum,
+        )
+        .unwrap();
+
+        assert!(rebuilt);
+        assert_eq!(symbols.resolve_constant("TEST_CONST"), Some(42));
+    }
+
+    #[test]
+    fn test_load_cached_symbols_rebuilds_when_new_input_file_appears() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let include_dir = root.join("include/constants");
+        fs::create_dir_all(&include_dir).unwrap();
+        fs::write(include_dir.join("test.h"), "#define TEST_CONST 42\n").unwrap();
+        let cache_dir = root.join(".rotom/cache");
+
+        let (_, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+        assert!(rebuilt);
+
+        fs::write(include_dir.join("new.h"), "#define NEW_CONST 99\n").unwrap();
+
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
+        assert!(rebuilt);
+        assert_eq!(symbols.resolve_constant("NEW_CONST"), Some(99));
+    }
+
+    #[test]
+    fn test_load_cached_symbol_file_supports_txt_py_and_json_sources() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let txt_path = root.join("custom.txt");
+        let py_path = root.join("custom.py");
+        let json_path = root.join("custom.json");
+
+        fs::write(&txt_path, "TXT_CONST = 7\n").unwrap();
+        fs::write(&py_path, "PY_CONST = 9\n").unwrap();
+        fs::write(&json_path, r#"{ "messages": [ { "id": "MSG_HELLO" } ] }"#).unwrap();
+
+        let mut symbols = SymbolTable::with_source_manager(SourceManager::new());
+        Workspace::load_cached_symbol_file(&mut symbols, &txt_path).unwrap();
+        Workspace::load_cached_symbol_file(&mut symbols, &py_path).unwrap();
+        Workspace::load_cached_symbol_file(&mut symbols, &json_path).unwrap();
+        symbols.resolve_all();
+
+        assert_eq!(symbols.resolve_constant("TXT_CONST"), Some(7));
+        assert_eq!(symbols.resolve_constant("PY_CONST"), Some(9));
+        assert_eq!(symbols.resolve_constant("MSG_HELLO"), Some(0));
+    }
+
+    #[test]
+    fn test_load_cached_symbols_propagates_non_decode_cache_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::write(
+            root.join("include/constants/test.h"),
+            "#define TEST_CONST 42\n",
+        )
+        .unwrap();
+        let cache_dir = root.join(".rotom/cache");
+        fs::create_dir_all(&cache_dir).unwrap();
+        let cache_path = cache_dir.join("uxie-constants-platinum.bin");
+        fs::write(&cache_path, b"cached").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&cache_path).unwrap().permissions();
+            permissions.set_mode(0o222);
+            fs::set_permissions(&cache_path, permissions).unwrap();
+        }
+
+        let error = Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum)
+            .unwrap_err();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied);
     }
 
     #[test]

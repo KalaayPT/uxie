@@ -367,41 +367,41 @@ metang_generators = {
     }
 
     proptest! {
-                            #[test]
-                            fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
-                                let dir = tempdir().unwrap();
-                                let generated_dir = dir.path().join("generated");
-                                std::fs::create_dir_all(&generated_dir).unwrap();
+                                                                    #[test]
+                                                                    fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+                                                                        let dir = tempdir().unwrap();
+                                                                        let generated_dir = dir.path().join("generated");
+                                                                        std::fs::create_dir_all(&generated_dir).unwrap();
 
-                                std::fs::write(
-                                    generated_dir.join("meson.build"),
-                                    r"
+                                                                        std::fs::write(
+                                                                            generated_dir.join("meson.build"),
+                                                                            r"
 metang_generators = {
     'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
 }
 ",
-                                )
-                                .unwrap();
+                                                                        )
+                                                                        .unwrap();
 
-                                let mut content = String::new();
-                                for i in 0..entry_count {
-                                    use std::fmt::Write as _;
-                                    writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
-                                }
-                                std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+                                                                        let mut content = String::new();
+                                                                        for i in 0..entry_count {
+                                                                            use std::fmt::Write as _;
+                                                                            writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
+                                                                        }
+                                                                        std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
 
-                                let mut table = SymbolTable::new();
-                                table.load_headers_from_dir(&generated_dir).unwrap();
+                                                                        let mut table = SymbolTable::new();
+                                                                        table.load_headers_from_dir(&generated_dir).unwrap();
 
-                                for i in 0..entry_count {
-                                    let expected = 1_i64 << i;
-                                    prop_assert_eq!(
-                                        table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
-                                        Some(expected)
-                                    );
-                                }
-                            }
-                        }
+                                                                        for i in 0..entry_count {
+                                                                            let expected = 1_i64 << i;
+                                                                            prop_assert_eq!(
+                                                                                table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                                                                                Some(expected)
+                                                                            );
+                                                                        }
+                                                                    }
+                                                                }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {

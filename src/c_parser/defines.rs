@@ -1,10 +1,11 @@
+use bitcode::{Decode, Encode};
 use dashmap::DashMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::hash::BuildHasher;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 pub struct CDefine {
     pub name: String,
     pub value: String,
@@ -12,7 +13,7 @@ pub struct CDefine {
     pub resolved: Option<i64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Encode, Decode)]
 pub struct CFunctionMacro {
     pub name: String,
     pub params: Vec<String>,
@@ -125,17 +126,9 @@ pub fn parse_function_macros(source: &str) -> Vec<CFunctionMacro> {
 }
 
 fn strip_define_comment(line: &str) -> &str {
-    let line = if let Some(pos) = line.find("//") {
-        &line[..pos]
-    } else {
-        line
-    };
-
-    if let Some(pos) = line.find("/*") {
-        line[..pos].trim()
-    } else {
-        line.trim()
-    }
+    let line = line.find("//").map_or(line, |pos| &line[..pos]);
+    line.find("/*")
+        .map_or_else(|| line.trim(), |pos| line[..pos].trim())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

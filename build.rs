@@ -105,10 +105,16 @@ fn main() {
     );
 
     #[cfg(target_os = "linux")]
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", runtime_library_search_path());
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}",
+        runtime_library_search_path()
+    );
 
     #[cfg(target_os = "macos")]
-    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", runtime_library_search_path());
+    println!(
+        "cargo:rustc-link-arg=-Wl,-rpath,{}",
+        runtime_library_search_path()
+    );
 
     println!("cargo:rustc-link-lib=dylib=nitroarc_ffi");
     stage_runtime_artifacts(&out_dir, &nitroarc_shared_lib);

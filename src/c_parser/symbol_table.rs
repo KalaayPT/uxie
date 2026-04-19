@@ -1,7 +1,10 @@
+use crate::c_parser::constant_cache::SymbolSnapshot;
+use bitcode::{Decode, Encode};
 use dashmap::DashMap;
 use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,7 +28,7 @@ pub use crate::c_parser::defines::parse_value;
 pub use crate::c_parser::enums::{parse_enum, parse_enums};
 pub use crate::c_parser::source_manager::SourceManager;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum SymbolTag {
     Global,
     Map(u16),
@@ -103,6 +106,14 @@ impl SymbolTable {
         table.eval_cache = eval_cache;
         table.shortest_name_cache = shortest_name_cache;
         table
+    }
+
+    fn record_loaded_file(&mut self, path: &Path) {
+        let tracked = self.source_manager.as_ref().map_or_else(
+            || path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
+            |sm| sm.canonicalize(path),
+        );
+        self.loaded_files.insert(tracked);
     }
 
     pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -474,6 +485,7 @@ impl SymbolTable {
         })
     }
 
+    #[allow(clippy::option_option)]
     fn expand_function_macros(&self, expr: &str, depth: usize) -> Option<Option<String>> {
         const MAX_DEPTH: usize = 32;
         if depth > MAX_DEPTH {
@@ -815,6 +827,7 @@ impl SymbolTable {
             )
         })?;
         let is_mask = Self::list_file_is_metang_mask(path)?;
+        self.record_loaded_file(path);
         self.load_list_file_str_with_tag(&content, path, tag, is_mask)
     }
 
@@ -1063,6 +1076,7 @@ impl SymbolTable {
                 ),
             )
         })?;
+        self.record_loaded_file(path);
         let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -1104,6 +1118,7 @@ impl SymbolTable {
                 ),
             )
         })?;
+        self.record_loaded_file(path);
         let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -1221,6 +1236,7 @@ impl SymbolTable {
                 ),
             )
         })?;
+        self.record_loaded_file(path);
         self.load_python_enum_str_with_tag(&content, path, SymbolTag::Global)
     }
 
@@ -1391,5 +1407,92 @@ impl SymbolTable {
             .filter(|(_, p)| **p == canonical)
             .map(|(name, _)| name.clone())
             .collect()
+    }
+
+    pub fn to_snapshot(&self) -> SymbolSnapshot {
+        let symbols = self
+            .symbols
+            .iter()
+            .map(|(name, value)| (name.clone(), *value))
+            .collect();
+        let value_to_names = self
+            .value_to_names
+            .iter()
+            .map(|(value, names)| (*value, names.clone()))
+            .collect();
+        let pending = self
+            .pending
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        let function_macros = self
+            .function_macros
+            .iter()
+            .map(|(name, function_macro)| (name.clone(), function_macro.clone()))
+            .collect();
+        let symbol_to_tags = self
+            .symbol_to_tags
+            .iter()
+            .map(|(name, tags)| {
+                (
+                    name.clone(),
+                    tags.iter()
+                        .cloned()
+                        .collect::<std::collections::HashSet<_>>(),
+                )
+            })
+            .collect();
+
+        SymbolSnapshot {
+            symbols,
+            value_to_names,
+            pending,
+            function_macros,
+            symbol_to_tags,
+        }
+    }
+
+    pub fn from_snapshot(snapshot: &SymbolSnapshot) -> Self {
+        Self {
+            parent: None,
+            symbols: snapshot
+                .symbols
+                .iter()
+                .map(|(name, value)| (name.clone(), *value))
+                .collect(),
+            pending: snapshot
+                .pending
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+            function_macros: snapshot
+                .function_macros
+                .iter()
+                .map(|(name, function_macro)| (name.clone(), function_macro.clone()))
+                .collect(),
+            value_to_names: snapshot
+                .value_to_names
+                .iter()
+                .map(|(value, names)| (*value, names.clone()))
+                .collect(),
+            symbol_to_file: FxHashMap::default(),
+            symbol_to_tags: snapshot
+                .symbol_to_tags
+                .iter()
+                .map(|(name, tags)| (name.clone(), tags.iter().cloned().collect::<FxHashSet<_>>()))
+                .collect(),
+            loaded_files: FxHashSet::default(),
+            eval_cache: Arc::default(),
+            shortest_name_cache: Arc::default(),
+            source_manager: None,
+        }
+    }
+
+    /// Returns the canonical on-disk files that contributed symbols to this table.
+    /// Child tables only report files they loaded themselves, not parent snapshots.
+    pub fn loaded_file_paths(&self) -> Vec<PathBuf> {
+        let mut paths = self.loaded_files.iter().cloned().collect::<Vec<_>>();
+        paths.sort();
+        paths
     }
 }
