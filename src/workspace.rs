@@ -9,7 +9,7 @@ use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::{
-    GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
+    is_common_script_id, GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable,
 };
 use crate::text_bank::{GameStrings, TextBankTable};
 use std::collections::BTreeSet;

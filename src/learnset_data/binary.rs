@@ -1,4 +1,4 @@
-use super::types::{LEARNSET_TERMINATOR, LearnsetData, LearnsetEntry};
+use super::types::{LearnsetData, LearnsetEntry, LEARNSET_TERMINATOR};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Write};
 

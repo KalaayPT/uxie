@@ -158,8 +158,8 @@ mod tests {
     #[test]
     #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
     fn integration_dspre_map_header_jubilife() {
-        use crate::GameFamily;
         use crate::provider::{Arm9Provider, DataProvider};
+        use crate::GameFamily;
         let Some(dspre_path) = crate::test_env::existing_path_from_env(
             "UXIE_TEST_PLATINUM_DSPRE_PATH",
             "map header integration test",
@@ -205,8 +205,8 @@ mod tests {
     #[test]
     #[ignore = "requires local DSPRE+decomp fixtures via UXIE_TEST_HGSS_DSPRE_PATH and UXIE_TEST_HGSS_DECOMP_PATH"]
     fn integration_dspre_map_header_hgss_union() {
-        use crate::GameFamily;
         use crate::provider::{Arm9Provider, DataProvider};
+        use crate::GameFamily;
 
         let Some(arm9_path) = crate::test_env::existing_file_under_project_env(
             "UXIE_TEST_HGSS_DSPRE_PATH",

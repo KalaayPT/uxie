@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod c_parser_tests {
-    use crate::c_parser::{SourceManager, SymbolTable};
+    use crate::c_parser::{canonicalize_constant_name, ConstantFamily, SourceManager, SymbolTable};
     use proptest::prelude::*;
+    use regex::Regex;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
@@ -367,41 +368,41 @@ metang_generators = {
     }
 
     proptest! {
-                                                                    #[test]
-                                                                    fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
-                                                                        let dir = tempdir().unwrap();
-                                                                        let generated_dir = dir.path().join("generated");
-                                                                        std::fs::create_dir_all(&generated_dir).unwrap();
+                                                                                                                        #[test]
+                                                                                                                        fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+                                                                                                                            let dir = tempdir().unwrap();
+                                                                                                                            let generated_dir = dir.path().join("generated");
+                                                                                                                            std::fs::create_dir_all(&generated_dir).unwrap();
 
-                                                                        std::fs::write(
-                                                                            generated_dir.join("meson.build"),
-                                                                            r"
+                                                                                                                            std::fs::write(
+                                                                                                                                generated_dir.join("meson.build"),
+                                                                                                                                r"
 metang_generators = {
     'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
 }
 ",
-                                                                        )
-                                                                        .unwrap();
+                                                                                                                            )
+                                                                                                                            .unwrap();
 
-                                                                        let mut content = String::new();
-                                                                        for i in 0..entry_count {
-                                                                            use std::fmt::Write as _;
-                                                                            writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
-                                                                        }
-                                                                        std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+                                                                                                                            let mut content = String::new();
+                                                                                                                            for i in 0..entry_count {
+                                                                                                                                use std::fmt::Write as _;
+                                                                                                                                writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
+                                                                                                                            }
+                                                                                                                            std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
 
-                                                                        let mut table = SymbolTable::new();
-                                                                        table.load_headers_from_dir(&generated_dir).unwrap();
+                                                                                                                            let mut table = SymbolTable::new();
+                                                                                                                            table.load_headers_from_dir(&generated_dir).unwrap();
 
-                                                                        for i in 0..entry_count {
-                                                                            let expected = 1_i64 << i;
-                                                                            prop_assert_eq!(
-                                                                                table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
-                                                                                Some(expected)
-                                                                            );
-                                                                        }
-                                                                    }
-                                                                }
+                                                                                                                            for i in 0..entry_count {
+                                                                                                                                let expected = 1_i64 << i;
+                                                                                                                                prop_assert_eq!(
+                                                                                                                                    table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                                                                                                                                    Some(expected)
+                                                                                                                                );
+                                                                                                                            }
+                                                                                                                        }
+                                                                                                                    }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {
@@ -417,6 +418,76 @@ metang_generators = {
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("SPECIES_BAD"));
         assert!(err.to_string().contains("UNKNOWN_SYMBOL"));
+    }
+
+    #[test]
+    fn test_constant_family_metadata_and_family_specific_resolution() {
+        let mut table = SymbolTable::new();
+        table
+            .load_header_str(
+                "\
+#define SPECIES_BULBASAUR 1
+#define ITEM_MASTER_BALL 1
+#define TRAINER_RIVAL_BARRY_001 2
+#define TRAINER_CLASS_LEADER_ROARK 2
+#define LOCATION_JUBILIFE_CITY 3
+#define MAPSEC_JUBILIFE_CITY 4
+#define MOVE_TACKLE 5
+#define SEQ_SE_CONFIRM 6
+",
+            )
+            .unwrap();
+
+        assert_eq!(
+            table.constant_family("SPECIES_BULBASAUR"),
+            Some(ConstantFamily::Species)
+        );
+        assert_eq!(
+            table.constant_family("ITEM_MASTER_BALL"),
+            Some(ConstantFamily::Item)
+        );
+        assert_eq!(
+            table.constant_family("TRAINER_RIVAL_BARRY_001"),
+            Some(ConstantFamily::Trainer)
+        );
+        assert_eq!(
+            table.constant_family("TRAINER_CLASS_LEADER_ROARK"),
+            Some(ConstantFamily::TrainerClass)
+        );
+        assert_eq!(
+            table.constant_family("LOCATION_JUBILIFE_CITY"),
+            Some(ConstantFamily::Location)
+        );
+        assert_eq!(
+            table.constant_family("MAPSEC_JUBILIFE_CITY"),
+            Some(ConstantFamily::Location)
+        );
+        assert_eq!(
+            table.constant_family("MOVE_TACKLE"),
+            Some(ConstantFamily::Move)
+        );
+        assert_eq!(
+            table.constant_family("SEQ_SE_CONFIRM"),
+            Some(ConstantFamily::Sound)
+        );
+        assert_eq!(table.constant_family("TRUE"), None);
+
+        assert_eq!(
+            table.resolve_name_in_family(1, ConstantFamily::Species),
+            Some("SPECIES_BULBASAUR".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(1, ConstantFamily::Item),
+            Some("ITEM_MASTER_BALL".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(2, ConstantFamily::Trainer),
+            Some("TRAINER_RIVAL_BARRY_001".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(2, ConstantFamily::TrainerClass),
+            Some("TRAINER_CLASS_LEADER_ROARK".to_string())
+        );
     }
 
     #[test]
@@ -525,6 +596,248 @@ metang_generators = {
 
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("messages[1].id"));
+    }
+
+    #[test]
+    fn test_canonicalize_constant_name_examples() {
+        assert_eq!(canonicalize_constant_name("Poké Ball"), "POKE_BALL");
+        assert_eq!(canonicalize_constant_name("Farfetch'd"), "FARFETCHD");
+        assert_eq!(canonicalize_constant_name("Nidoran♀"), "NIDORAN_F");
+        assert_eq!(canonicalize_constant_name("Mr. Mime"), "MR_MIME");
+        assert_eq!(canonicalize_constant_name("Ho-Oh"), "HO_OH");
+        assert_eq!(canonicalize_constant_name("Amy & Mimi"), "AMY_AND_MIMI");
+    }
+
+    #[test]
+    fn test_load_text_bank_json_constants_emits_canonical_prefixed_symbols() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("species.json");
+        std::fs::write(
+            &json_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0000", "en_US": "-----" },
+                { "id": "msg_0001", "en_US": "Farfetch'd" },
+                { "id": "msg_0002", "en_US": "Nidoran♀" },
+                { "id": "msg_0003", "en_US": "Mr. Mime" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_text_bank_json_constants(&json_path, "SPECIES_", None)
+            .unwrap();
+
+        assert_eq!(loaded, 4);
+        assert_eq!(table.resolve_constant("SPECIES_NONE"), Some(0));
+        assert_eq!(table.resolve_constant("SPECIES_FARFETCHD"), Some(1));
+        assert_eq!(table.resolve_constant("SPECIES_NIDORAN_F"), Some(2));
+        assert_eq!(table.resolve_constant("SPECIES_MR_MIME"), Some(3));
+    }
+
+    #[test]
+    fn test_load_text_bank_json_constants_uses_item_bank_specific_rules() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("items.json");
+        std::fs::write(
+            &json_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0000", "en_US": "None" },
+                { "id": "msg_0001", "en_US": "EnergyPowder" },
+                { "id": "msg_0002", "en_US": "Up-Grade" },
+                { "id": "msg_0003", "en_US": "X Defend" },
+                { "id": "msg_0004", "en_US": "???" },
+                { "id": "msg_0005", "en_US": "DeepSeaTooth" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_text_bank_json_constants(&json_path, "ITEM_", None)
+            .unwrap();
+
+        assert_eq!(loaded, 6);
+        assert_eq!(table.resolve_constant("ITEM_NONE"), Some(0));
+        assert_eq!(table.resolve_constant("ITEM_ENERGYPOWDER"), Some(1));
+        assert_eq!(table.resolve_constant("ITEM_UPGRADE"), Some(2));
+        assert_eq!(table.resolve_constant("ITEM_X_DEFENSE"), Some(3));
+        assert_eq!(table.resolve_constant("ITEM_UNUSED_4"), Some(4));
+        assert_eq!(table.resolve_constant("ITEM_DEEPSEATOOTH"), Some(5));
+    }
+
+    #[test]
+    fn test_load_text_bank_json_constants_uses_move_bank_specific_rules() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("moves.json");
+        std::fs::write(
+            &json_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0000", "en_US": "-" },
+                { "id": "msg_0001", "en_US": "DoubleSlap" },
+                { "id": "msg_0002", "en_US": "ViceGrip" },
+                { "id": "msg_0003", "en_US": "Will-O-Wisp" },
+                { "id": "msg_0004", "en_US": "U-turn" },
+                { "id": "msg_0005", "en_US": "X-Scissor" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_text_bank_json_constants(&json_path, "MOVE_", None)
+            .unwrap();
+
+        assert_eq!(loaded, 6);
+        assert_eq!(table.resolve_constant("MOVE_NONE"), Some(0));
+        assert_eq!(table.resolve_constant("MOVE_DOUBLE_SLAP"), Some(1));
+        assert_eq!(table.resolve_constant("MOVE_VICE_GRIP"), Some(2));
+        assert_eq!(table.resolve_constant("MOVE_WILL_O_WISP"), Some(3));
+        assert_eq!(table.resolve_constant("MOVE_U_TURN"), Some(4));
+        assert_eq!(table.resolve_constant("MOVE_X_SCISSOR"), Some(5));
+    }
+
+    #[test]
+    fn test_load_text_bank_json_constants_supports_index_suffixes_for_trainers() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("trainers.json");
+        std::fs::write(
+            &json_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0000", "en_US": "{TRAINER_NAME: -}" },
+                { "id": "msg_0001", "en_US": "{TRAINER_NAME:Silver}" },
+                { "id": "msg_0002", "en_US": "{TRAINER_NAME:Amy & Mimi}" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_text_bank_json_constants(&json_path, "TRAINER_", Some(3))
+            .unwrap();
+
+        assert_eq!(loaded, 3);
+        assert_eq!(table.resolve_constant("TRAINER_NONE"), Some(0));
+        assert_eq!(table.resolve_constant("TRAINER_SILVER_001"), Some(1));
+        assert_eq!(table.resolve_constant("TRAINER_AMY_AND_MIMI_002"), Some(2));
+    }
+
+    #[test]
+    fn test_load_dspre_sound_archive_constants_uses_platinum_sound_id_ranges() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("pt_sounds.json");
+        let mut names = vec!["UNUSED".to_string(); 1013];
+        names[0] = "PV001".to_string();
+        names[1] = "PV".to_string();
+        names[2] = "PV-END".to_string();
+        names[229] = "LAST-BGM".to_string();
+        names[230] = "PL-W012".to_string();
+        names[264] = "DUMMY01".to_string();
+        names[287] = "DUMMY02".to_string();
+        names[380] = "DP-SELECT".to_string();
+        let messages: Vec<_> = names
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| {
+                serde_json::json!({
+                    "id": format!("msg_0545_{index:05}"),
+                    "en_US": text,
+                })
+            })
+            .collect();
+        std::fs::write(
+            &json_path,
+            serde_json::to_string_pretty(&serde_json::json!({ "messages": messages })).unwrap(),
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_dspre_sound_archive_constants(&json_path)
+            .unwrap();
+
+        assert_eq!(loaded, 1013);
+        assert_eq!(table.resolve_constant("SEQ_PV001"), Some(1));
+        assert_eq!(table.resolve_constant("SEQ_LAST_BGM"), Some(1226));
+        assert_eq!(table.resolve_constant("SEQ_SE_PL_W012"), Some(1350));
+        assert_eq!(table.resolve_constant("SEQ_DUMMY01"), Some(1384));
+        assert_eq!(table.resolve_constant("SEQ_DUMMY02"), Some(1407));
+        assert_eq!(table.resolve_constant("SEQ_SE_DP_SELECT"), Some(1500));
+        assert_eq!(table.resolve_constant("SEQ_SE_CONFIRM"), Some(1500));
+        assert_eq!(
+            table.constant_family("SEQ_SE_DP_SELECT"),
+            Some(ConstantFamily::Sound)
+        );
+        assert_eq!(
+            table.constant_family("SEQ_SE_CONFIRM"),
+            Some(ConstantFamily::Sound)
+        );
+    }
+
+    #[test]
+    fn test_load_dspre_sound_archive_constants_uses_hgss_sound_id_ranges() {
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("hg_sounds.json");
+        let mut names = vec!["UNUSED".to_string(); 1372];
+        names[0] = "PV001".to_string();
+        names[1] = "PV".to_string();
+        names[2] = "PV-END".to_string();
+        names[364] = "LAST-BGM".to_string();
+        names[365] = "PL-W012".to_string();
+        names[401] = "DUMMY01".to_string();
+        names[493] = "DP-SELECT".to_string();
+        let messages: Vec<_> = names
+            .into_iter()
+            .enumerate()
+            .map(|(index, text)| {
+                serde_json::json!({
+                    "id": format!("msg_0437_{index:05}"),
+                    "en_US": text,
+                })
+            })
+            .collect();
+        std::fs::write(
+            &json_path,
+            serde_json::to_string_pretty(&serde_json::json!({ "messages": messages })).unwrap(),
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_dspre_sound_archive_constants(&json_path)
+            .unwrap();
+
+        assert_eq!(loaded, 1372);
+        assert_eq!(table.resolve_constant("SEQ_PV001"), Some(1));
+        assert_eq!(table.resolve_constant("SEQ_LAST_BGM"), Some(1361));
+        assert_eq!(table.resolve_constant("SEQ_SE_PL_W012"), Some(1372));
+        assert_eq!(table.resolve_constant("SEQ_DUMMY01"), Some(1408));
+        assert_eq!(table.resolve_constant("SEQ_SE_DP_SELECT"), Some(1500));
+        assert_eq!(table.resolve_constant("SEQ_SE_CONFIRM"), Some(1500));
+        assert_eq!(
+            table.constant_family("SEQ_SE_DP_SELECT"),
+            Some(ConstantFamily::Sound)
+        );
+        assert_eq!(
+            table.constant_family("SEQ_SE_CONFIRM"),
+            Some(ConstantFamily::Sound)
+        );
     }
 
     #[test]
@@ -700,5 +1013,224 @@ metang_generators = {
             ],
             "c_parser integration test (HGSS decomp)",
         );
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_canonicalize_platinum_item_and_move_banks_match_generated_constants() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "c_parser canonicalization integration test (Platinum decomp)",
+        ) else {
+            return;
+        };
+
+        // Items and moves follow stable per-bank naming rules in Platinum, so
+        // the text archive canonicalization can be checked exhaustively against
+        // the generated decomp banks. Trainer classes intentionally collapse
+        // multiple generated constants into one display string and do not appear
+        // in script sources, so they are excluded here.
+        for (json_rel, generated_rel, prefix) in [
+            ("res/text/item_names.json", "generated/items.txt", "ITEM_"),
+            ("res/text/move_names.json", "generated/moves.txt", "MOVE_"),
+        ] {
+            let json_path = root.join(json_rel);
+            assert!(
+                json_path.is_file(),
+                "missing json fixture for canonicalization test: {}",
+                json_path.display()
+            );
+            let generated_path = root.join(generated_rel);
+            assert!(
+                generated_path.is_file(),
+                "missing generated bank fixture for canonicalization test: {}",
+                generated_path.display()
+            );
+            let expected_symbols: Vec<_> = std::fs::read_to_string(&generated_path)
+                .unwrap()
+                .lines()
+                .map(str::trim)
+                .filter(|line| !line.is_empty() && !line.starts_with("MAX_"))
+                .map(ToOwned::to_owned)
+                .collect();
+
+            let mut table = SymbolTable::new();
+            let loaded = table
+                .load_text_bank_json_constants(&json_path, prefix, None)
+                .unwrap();
+            assert_eq!(
+                loaded,
+                expected_symbols.len(),
+                "{json_rel} should load the same number of rows as {generated_rel}"
+            );
+
+            for (index, symbol) in expected_symbols.iter().enumerate() {
+                assert_eq!(
+                    table.resolve_constant(symbol),
+                    Some(index as i64),
+                    "{} row {} did not canonicalize to {}",
+                    json_rel,
+                    index,
+                    symbol
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum decomp fixture via UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_canonicalize_platinum_species_bank_matches_generated_constants() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "c_parser species canonicalization integration test (Platinum decomp)",
+        ) else {
+            return;
+        };
+
+        let json_path = root.join("build/res/text/species_name.json");
+        assert!(
+            json_path.is_file(),
+            "missing species archive fixture for canonicalization test: {}",
+            json_path.display()
+        );
+        let generated_path = root.join("generated/species.txt");
+        assert!(
+            generated_path.is_file(),
+            "missing generated species bank fixture for canonicalization test: {}",
+            generated_path.display()
+        );
+        let expected_symbols: Vec<_> = std::fs::read_to_string(&generated_path)
+            .unwrap()
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with("MAX_"))
+            .map(ToOwned::to_owned)
+            .collect();
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_text_bank_json_constants(&json_path, "SPECIES_", None)
+            .unwrap();
+        assert_eq!(
+            loaded,
+            expected_symbols.len(),
+            "species_name.json should load the same number of rows as generated/species.txt"
+        );
+
+        for (index, symbol) in expected_symbols.iter().enumerate() {
+            assert_eq!(
+                table.resolve_constant(symbol),
+                Some(index as i64),
+                "build/res/text/species_name.json row {} did not canonicalize to {}",
+                index,
+                symbol
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS decomp fixture via UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_canonicalize_hgss_species_bank_matches_species_constants() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "c_parser species canonicalization integration test (HGSS decomp)",
+        ) else {
+            return;
+        };
+
+        let gmm_path = root.join("files/msgdata/msg/msg_0237.gmm");
+        assert!(
+            gmm_path.is_file(),
+            "missing species archive fixture for canonicalization test: {}",
+            gmm_path.display()
+        );
+        let species_constants_path = root.join("include/constants/species.h");
+        assert!(
+            species_constants_path.is_file(),
+            "missing species constants fixture for canonicalization test: {}",
+            species_constants_path.display()
+        );
+
+        let gmm = std::fs::read_to_string(&gmm_path).unwrap();
+        let row_regex = Regex::new(
+            r#"(?s)<row id="[^"]+" index="(?P<index>\d+)">.*?<language name="English">(?P<text>.*?)</language>"#,
+        )
+        .unwrap();
+        let mut rows = vec![String::new(); 496];
+        for captures in row_regex.captures_iter(&gmm) {
+            let index: usize = captures["index"].parse().unwrap();
+            let text = captures["text"]
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&amp;", "&");
+            if index < rows.len() {
+                rows[index] = text;
+            }
+        }
+        assert!(
+            rows.iter().all(|row| !row.is_empty()),
+            "failed to extract all HGSS species rows from {}",
+            gmm_path.display()
+        );
+
+        let dir = tempdir().unwrap();
+        let json_path = dir.path().join("hgss_species.json");
+        let messages: Vec<_> = rows
+            .iter()
+            .enumerate()
+            .map(|(index, text)| {
+                serde_json::json!({
+                    "id": format!("msg_0237_{index:05}"),
+                    "en_US": text,
+                })
+            })
+            .collect();
+        std::fs::write(
+            &json_path,
+            serde_json::to_string_pretty(&serde_json::json!({ "messages": messages })).unwrap(),
+        )
+        .unwrap();
+
+        let define_regex =
+            Regex::new(r#"^\s*#define\s+(?P<name>SPECIES_[A-Z0-9_]+)\s+(?P<value>\d+)\s*$"#)
+                .unwrap();
+        let mut expected_symbols = vec![String::new(); rows.len()];
+        for line in std::fs::read_to_string(&species_constants_path)
+            .unwrap()
+            .lines()
+        {
+            let Some(captures) = define_regex.captures(line) else {
+                continue;
+            };
+            let value: usize = captures["value"].parse().unwrap();
+            if value < expected_symbols.len() {
+                expected_symbols[value] = captures["name"].to_string();
+            }
+        }
+        assert!(
+            expected_symbols.iter().all(|symbol| !symbol.is_empty()),
+            "failed to extract all HGSS species constants from {}",
+            species_constants_path.display()
+        );
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_text_bank_json_constants(&json_path, "SPECIES_", None)
+            .unwrap();
+        assert_eq!(
+            loaded,
+            expected_symbols.len(),
+            "HGSS species archive should load the same number of rows as include/constants/species.h for the base species bank"
+        );
+
+        for (index, symbol) in expected_symbols.iter().enumerate() {
+            assert_eq!(
+                table.resolve_constant(symbol),
+                Some(index as i64),
+                "files/msgdata/msg/msg_0237.gmm row {} did not canonicalize to {}",
+                index,
+                symbol
+            );
+        }
     }
 }

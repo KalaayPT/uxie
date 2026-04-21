@@ -3,8 +3,8 @@ use serde::Deserialize;
 use std::io;
 use std::path::Path;
 
-use crate::GameFamily;
 use crate::game::GameLanguage;
+use crate::GameFamily;
 
 #[derive(Debug, Clone, Copy)]
 pub struct TextBankIds {

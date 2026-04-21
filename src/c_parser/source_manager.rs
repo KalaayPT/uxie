@@ -1,6 +1,6 @@
-use crate::c_parser::defines::{CDefine, CFunctionMacro, parse_defines, parse_function_macros};
-use crate::c_parser::enums::{CEnum, parse_enums};
-use crate::c_parser::includes::{CInclude, parse_includes};
+use crate::c_parser::defines::{parse_defines, parse_function_macros, CDefine, CFunctionMacro};
+use crate::c_parser::enums::{parse_enums, CEnum};
+use crate::c_parser::includes::{parse_includes, CInclude};
 use dashmap::DashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -1,5 +1,5 @@
 use crate::c_parser::defines::CFunctionMacro;
-use crate::c_parser::symbol_table::{SymbolTable, SymbolTag};
+use crate::c_parser::symbol_table::{ConstantFamily, SymbolTable, SymbolTag};
 use crate::game::GameFamily;
 use bitcode::{Decode, Encode};
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub const CONSTANT_CACHE_VERSION: u32 = 2;
+pub const CONSTANT_CACHE_VERSION: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, PartialEq, Eq)]
 pub struct ConstantCache {
@@ -26,6 +26,7 @@ pub struct SymbolSnapshot {
     pub pending: HashMap<String, String>,
     pub function_macros: HashMap<String, CFunctionMacro>,
     pub symbol_to_tags: HashMap<String, HashSet<SymbolTag>>,
+    pub symbol_to_family: HashMap<String, ConstantFamily>,
 }
 
 impl ConstantCache {
@@ -126,9 +127,9 @@ fn game_family_key(game_family: GameFamily) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{CONSTANT_CACHE_VERSION, ConstantCache};
+    use super::{ConstantCache, CONSTANT_CACHE_VERSION};
     use crate::c_parser::defines::CFunctionMacro;
-    use crate::c_parser::{SourceManager, SymbolSnapshot, SymbolTable, SymbolTag};
+    use crate::c_parser::{ConstantFamily, SourceManager, SymbolSnapshot, SymbolTable, SymbolTag};
     use crate::game::GameFamily;
     use std::collections::{HashMap, HashSet};
     use std::fs;
@@ -140,7 +141,7 @@ mod tests {
         let header = dir.path().join("test.h");
         fs::write(
             &header,
-            "#define VALUE 1\n#define OTHER VALUE\n#define SCALE(x) ((x) * 2)\n",
+            "#define SPECIES_BULBASAUR 1\n#define OTHER SPECIES_BULBASAUR\n#define SCALE(x) ((x) * 2)\n",
         )
         .unwrap();
 
@@ -154,12 +155,14 @@ mod tests {
         let snapshot = symbols.to_snapshot();
         let restored = SymbolTable::from_snapshot(&snapshot);
 
-        assert_eq!(restored.resolve_constant("VALUE"), Some(1));
+        assert_eq!(restored.resolve_constant("SPECIES_BULBASAUR"), Some(1));
         assert_eq!(restored.resolve_constant("OTHER"), Some(1));
-        assert!(
-            restored
-                .get_symbols_by_tag(&SymbolTag::Map(12))
-                .contains(&"MAP_CONST".to_string())
+        assert!(restored
+            .get_symbols_by_tag(&SymbolTag::Map(12))
+            .contains(&"MAP_CONST".to_string()));
+        assert_eq!(
+            restored.constant_family("SPECIES_BULBASAUR"),
+            Some(ConstantFamily::Species)
         );
         assert_eq!(
             restored.to_snapshot().function_macros.get("SCALE").cloned(),
@@ -181,7 +184,9 @@ mod tests {
         fs::write(&header, "#define TEST_CONST 42\n").unwrap();
 
         let mut symbols = SymbolTable::with_source_manager(SourceManager::new());
-        symbols.load_header(&header).unwrap();
+        symbols
+            .load_header_str_with_tag("#define SPECIES_BULBASAUR 1\n", &header, SymbolTag::Global)
+            .unwrap();
         let cache = ConstantCache::from_symbols(
             project_root,
             GameFamily::Platinum,
@@ -195,18 +200,20 @@ mod tests {
 
         assert_eq!(loaded.version, CONSTANT_CACHE_VERSION);
         assert!(loaded.file_hashes.contains_key("include/constants/test.h"));
-        assert!(
-            loaded
-                .is_current(
-                    project_root,
-                    GameFamily::Platinum,
-                    std::slice::from_ref(&header)
-                )
-                .unwrap()
+        assert!(loaded
+            .is_current(
+                project_root,
+                GameFamily::Platinum,
+                std::slice::from_ref(&header)
+            )
+            .unwrap());
+        assert_eq!(
+            SymbolTable::from_snapshot(&loaded.snapshot).resolve_constant("SPECIES_BULBASAUR"),
+            Some(1)
         );
         assert_eq!(
-            SymbolTable::from_snapshot(&loaded.snapshot).resolve_constant("TEST_CONST"),
-            Some(42)
+            SymbolTable::from_snapshot(&loaded.snapshot).constant_family("SPECIES_BULBASAUR"),
+            Some(ConstantFamily::Species)
         );
     }
 
@@ -232,16 +239,14 @@ mod tests {
         cache.save(&cache_path).unwrap();
 
         fs::write(&header, "#define TEST_CONST 43\n").unwrap();
-        assert!(
-            !ConstantCache::load(&cache_path)
-                .unwrap()
-                .is_current(
-                    project_root,
-                    GameFamily::Platinum,
-                    std::slice::from_ref(&header)
-                )
-                .unwrap()
-        );
+        assert!(!ConstantCache::load(&cache_path)
+            .unwrap()
+            .is_current(
+                project_root,
+                GameFamily::Platinum,
+                std::slice::from_ref(&header)
+            )
+            .unwrap());
 
         fs::write(&cache_path, b"not-bitcode").unwrap();
         assert!(ConstantCache::load(&cache_path).is_err());
@@ -268,37 +273,31 @@ mod tests {
 
         let mut wrong_version = cache.clone();
         wrong_version.version += 1;
-        assert!(
-            !wrong_version
-                .is_current(
-                    project_root,
-                    GameFamily::Platinum,
-                    std::slice::from_ref(&header)
-                )
-                .unwrap()
-        );
+        assert!(!wrong_version
+            .is_current(
+                project_root,
+                GameFamily::Platinum,
+                std::slice::from_ref(&header)
+            )
+            .unwrap());
 
         let mut wrong_uxie_version = cache.clone();
         wrong_uxie_version.uxie_version.push_str("-mutated");
-        assert!(
-            !wrong_uxie_version
-                .is_current(
-                    project_root,
-                    GameFamily::Platinum,
-                    std::slice::from_ref(&header)
-                )
-                .unwrap()
-        );
+        assert!(!wrong_uxie_version
+            .is_current(
+                project_root,
+                GameFamily::Platinum,
+                std::slice::from_ref(&header)
+            )
+            .unwrap());
 
-        assert!(
-            !cache
-                .is_current(
-                    project_root,
-                    GameFamily::HGSS,
-                    std::slice::from_ref(&header)
-                )
-                .unwrap()
-        );
+        assert!(!cache
+            .is_current(
+                project_root,
+                GameFamily::HGSS,
+                std::slice::from_ref(&header)
+            )
+            .unwrap());
     }
 
     #[test]
@@ -312,6 +311,7 @@ mod tests {
                 "VALUE".to_string(),
                 HashSet::from([SymbolTag::Global]),
             )]),
+            symbol_to_family: HashMap::from([("VALUE".to_string(), ConstantFamily::Item)]),
         };
 
         assert_eq!(
@@ -321,6 +321,10 @@ mod tests {
                 .get("VALUE")
                 .copied(),
             Some(5)
+        );
+        assert_eq!(
+            SymbolTable::from_snapshot(&snapshot).constant_family("VALUE"),
+            Some(ConstantFamily::Item)
         );
     }
 }

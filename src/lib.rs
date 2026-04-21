@@ -158,9 +158,9 @@ pub mod text_bank;
 pub mod trainer_data;
 pub mod workspace;
 
-pub use c_parser::SymbolTable;
+pub use c_parser::{canonicalize_constant_name, ConstantFamily, SymbolTable};
 pub use ds_rom::{DsRomArm9Config, DsRomToolProject, DspreProject};
-pub use egg_move_data::{EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR, EggMoveData, EggMoveEntry};
+pub use egg_move_data::{EggMoveData, EggMoveEntry, EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR};
 pub use encounter_file::{BinaryEncounterFile, JsonEncounterFile};
 pub use error::{Result, UxieError};
 pub use event_file::{
@@ -168,20 +168,20 @@ pub use event_file::{
     ObjectEventBinary, ObjectEventJson, WarpEventBinary, WarpEventJson,
 };
 pub use evolution_data::{
-    EVOLUTION_FILE_SIZE, EVOLUTIONS_PER_SPECIES, EvolutionData, EvolutionEntry, EvolutionMethod,
+    EvolutionData, EvolutionEntry, EvolutionMethod, EVOLUTIONS_PER_SPECIES, EVOLUTION_FILE_SIZE,
 };
 pub use game::{Game, GameFamily, GameLanguage};
-pub use item_data::{BattlePocket, FieldPocket, ITEM_DATA_SIZE, ItemData, ItemPartyUseParam};
-pub use learnset_data::{LEARNSET_TERMINATOR, LearnsetData, LearnsetEntry};
+pub use item_data::{BattlePocket, FieldPocket, ItemData, ItemPartyUseParam, ITEM_DATA_SIZE};
+pub use learnset_data::{LearnsetData, LearnsetEntry, LEARNSET_TERMINATOR};
 pub use map_header::{MapHeader, MapHeaderJson};
-pub use move_data::{MOVE_DATA_SIZE, MoveData, MoveFlags, MoveSplit};
+pub use move_data::{MoveData, MoveFlags, MoveSplit, MOVE_DATA_SIZE};
 pub use narc::Narc;
-pub use personal_data::{PERSONAL_DATA_SIZE, PersonalData};
+pub use personal_data::{PersonalData, PERSONAL_DATA_SIZE};
 pub use provider::{Arm9Provider, DataProvider};
 pub use rom_header::RomHeader;
 pub use script_file::ScriptTable;
 pub use text_bank::{GameStrings, TextBankTable};
 pub use trainer_data::{
-    AiFlags, PartyPokemon, TRAINER_PROPERTIES_SIZE, TrainerData, TrainerFlags, TrainerProperties,
+    AiFlags, PartyPokemon, TrainerData, TrainerFlags, TrainerProperties, TRAINER_PROPERTIES_SIZE,
 };
 pub use workspace::{ProjectType, Workspace};

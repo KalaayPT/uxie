@@ -1,4 +1,4 @@
 mod binary;
 mod types;
 
-pub use types::{EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR, EggMoveData, EggMoveEntry};
+pub use types::{EggMoveData, EggMoveEntry, EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR};

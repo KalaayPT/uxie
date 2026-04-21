@@ -52,7 +52,7 @@ The name comes from [Uxie](https://bulbapedia.bulbagarden.net/wiki/Uxie_(Pok%C3%
 - Windows: download the latest release zip from GitHub Releases. It ships `uxie.exe` together with `nitroarc_ffi.dll` and the upstream license files.
 - Nix (Linux): 
 ```bash 
-nix profile install github:KalaayPT/uxie#uxie
+nix profile add github:KalaayPT/uxie#uxie
 ```
 
 ### Library
@@ -65,7 +65,7 @@ Or add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-uxie = "0.6.2"
+uxie = "0.6.3"
 ```
 
 If your own crate links `uxie` into an executable that you distribute, ship the corresponding `nitroarc_ffi` shared library next to that executable.

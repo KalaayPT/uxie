@@ -1,4 +1,4 @@
-use super::types::{EVOLUTION_FILE_SIZE, EvolutionData};
+use super::types::{EvolutionData, EVOLUTION_FILE_SIZE};
 #[cfg(test)]
 use super::types::{EvolutionEntry, EvolutionMethod};
 use binrw::{BinRead, BinWrite};

@@ -6,7 +6,7 @@
 
 use crate::game::{Game, GameFamily};
 use crate::rom_header::RomHeader;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::io;
 use std::path::{Path, PathBuf};
 

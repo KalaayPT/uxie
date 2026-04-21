@@ -1,6 +1,7 @@
 use crate::c_parser::constant_cache::SymbolSnapshot;
 use bitcode::{Decode, Encode};
 use dashmap::DashMap;
+use deunicode::deunicode;
 use rayon::prelude::*;
 use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -36,6 +37,45 @@ pub enum SymbolTag {
     TextBank(u16),
 }
 
+/// Semantic constant families tracked by the symbol table.
+///
+/// This metadata is currently inferred from symbol prefixes at insert time
+/// (for example `ITEM_`, `MOVE_`, `SPECIES_`, `SEQ_`). Loader paths do not yet
+/// attach families explicitly, so prefix inference remains the source of truth
+/// until loader-level classification is implemented.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
+pub enum ConstantFamily {
+    Item,
+    Species,
+    Move,
+    Location,
+    Trainer,
+    TrainerClass,
+    Sound,
+}
+
+impl ConstantFamily {
+    pub fn from_symbol_name(name: &str) -> Option<Self> {
+        if name.starts_with("TRAINER_CLASS_") {
+            Some(Self::TrainerClass)
+        } else if name.starts_with("TRAINER_") {
+            Some(Self::Trainer)
+        } else if name.starts_with("SPECIES_") {
+            Some(Self::Species)
+        } else if name.starts_with("ITEM_") {
+            Some(Self::Item)
+        } else if name.starts_with("MOVE_") {
+            Some(Self::Move)
+        } else if name.starts_with("LOCATION_") || name.starts_with("MAPSEC_") {
+            Some(Self::Location)
+        } else if name.starts_with("SEQ_") {
+            Some(Self::Sound)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct SymbolTable {
     pub(crate) parent: Option<Arc<SymbolTable>>,
@@ -45,6 +85,7 @@ pub struct SymbolTable {
     pub(crate) value_to_names: FxHashMap<i64, Vec<String>>,
     pub(crate) symbol_to_file: FxHashMap<String, PathBuf>,
     pub(crate) symbol_to_tags: FxHashMap<String, FxHashSet<SymbolTag>>,
+    pub(crate) symbol_to_family: FxHashMap<String, ConstantFamily>,
     pub(crate) loaded_files: FxHashSet<PathBuf>,
     pub(crate) eval_cache: Arc<DashMap<String, i64>>,
     pub(crate) shortest_name_cache: Arc<DashMap<i64, String>>,
@@ -58,6 +99,131 @@ static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::
 static RE_METANG_MASK_TYPE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
     Regex::new(r"'(?P<name>[A-Za-z0-9_]+)'\s*:\s*\{\s*'type'\s*:\s*'(?P<kind>enum|mask)'").unwrap()
 });
+
+/// Canonicalize a display name into the constant spelling used by script banks.
+///
+/// This is intentionally insert-side only: callers use it when populating a
+/// symbol table from human-readable text archives, not when resolving lookup
+/// names later.
+pub fn canonicalize_constant_name(name: &str) -> String {
+    let normalized = name
+        .replace(['\'', '’', '‘'], "")
+        .replace('♀', "_F")
+        .replace('♂', "_M")
+        .replace('&', " AND ");
+    let ascii = deunicode(&normalized);
+
+    let mut canonical = String::with_capacity(ascii.len());
+    let mut pending_separator = false;
+
+    for ch in ascii.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if pending_separator && !canonical.is_empty() {
+                canonical.push('_');
+            }
+            canonical.push(ch.to_ascii_uppercase());
+            pending_separator = false;
+        } else {
+            pending_separator = true;
+        }
+    }
+
+    canonical
+}
+
+fn split_compound_words(name: &str) -> String {
+    let mut split = String::with_capacity(name.len() + 4);
+    let mut prev: Option<char> = None;
+
+    for ch in name.chars() {
+        if prev.is_some_and(|prev| prev.is_ascii_lowercase() && ch.is_ascii_uppercase()) {
+            split.push(' ');
+        }
+        split.push(ch);
+        prev = Some(ch);
+    }
+
+    split
+}
+
+fn canonicalize_text_bank_constant(
+    display_name: &str,
+    prefix: &str,
+    index: usize,
+) -> Option<String> {
+    if prefix == "ITEM_" && display_name == "???" {
+        return Some(format!("ITEM_UNUSED_{index}"));
+    }
+
+    let normalized = match prefix {
+        "ITEM_" => display_name.replace('-', ""),
+        "MOVE_" => split_compound_words(display_name),
+        _ => display_name.to_string(),
+    };
+    let canonical = canonicalize_constant_name(&normalized);
+    if canonical.is_empty() {
+        return None;
+    }
+
+    let canonical = match (prefix, canonical.as_str()) {
+        ("ITEM_", "X_DEFEND") => "X_DEFENSE".to_string(),
+        _ => canonical,
+    };
+
+    Some(format!("{prefix}{canonical}"))
+}
+
+fn dspre_sound_constant_value_and_prefix(
+    index: usize,
+    row_count: usize,
+) -> Option<(i64, &'static str)> {
+    match row_count {
+        1013 => {
+            if index <= 2 {
+                Some((index as i64 + 1, "SEQ_"))
+            } else if index <= 229 {
+                Some((index as i64 + 997, "SEQ_"))
+            } else {
+                Some((index as i64 + 1120, "SEQ_SE_"))
+            }
+        }
+        1372 => {
+            if index <= 2 {
+                Some((index as i64 + 1, "SEQ_"))
+            } else if index <= 364 {
+                Some((index as i64 + 997, "SEQ_"))
+            } else {
+                Some((index as i64 + 1007, "SEQ_SE_"))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn dspre_sound_constant_symbol(
+    index: usize,
+    row_count: usize,
+    display_name: &str,
+) -> Option<String> {
+    let (_, prefix) = dspre_sound_constant_value_and_prefix(index, row_count)?;
+    let canonical = canonicalize_constant_name(display_name);
+    if canonical.is_empty() {
+        return None;
+    }
+
+    Some(match (row_count, index) {
+        (1013, 264) | (1372, 401) => "SEQ_DUMMY01".to_string(),
+        (1013, 287) => "SEQ_DUMMY02".to_string(),
+        _ => format!("{prefix}{canonical}"),
+    })
+}
+
+fn dspre_sound_constant_aliases(index: usize, row_count: usize) -> &'static [&'static str] {
+    match (row_count, index) {
+        (1013, 380) | (1372, 493) => &["SEQ_SE_CONFIRM"],
+        _ => &[],
+    }
+}
 
 impl SymbolTable {
     pub fn new() -> Self {
@@ -356,11 +522,8 @@ impl SymbolTable {
     }
 
     fn process_define(&mut self, name: String, value: String, path: &Path, tag: SymbolTag) {
-        self.symbol_to_file.insert(name.clone(), path.to_path_buf());
-        self.symbol_to_tags
-            .entry(name.clone())
-            .or_default()
-            .insert(tag);
+        self.record_symbol_origin(&name, path, Some(&tag));
+        self.assign_constant_family(&name);
 
         let val_trimmed = value.trim();
         if val_trimmed.starts_with("0x") || val_trimmed.starts_with("0X") {
@@ -415,12 +578,7 @@ impl SymbolTable {
         path: &Path,
         tag: SymbolTag,
     ) {
-        self.symbol_to_file
-            .insert(function_macro.name.clone(), path.to_path_buf());
-        self.symbol_to_tags
-            .entry(function_macro.name.clone())
-            .or_default()
-            .insert(tag);
+        self.record_symbol_origin(&function_macro.name, path, Some(&tag));
         self.function_macros
             .insert(function_macro.name.clone(), function_macro);
     }
@@ -445,12 +603,8 @@ impl SymbolTable {
                 .entry(current)
                 .or_default()
                 .push(v.name.clone());
-            self.symbol_to_file
-                .insert(v.name.clone(), path.to_path_buf());
-            self.symbol_to_tags
-                .entry(v.name.clone())
-                .or_default()
-                .insert(tag.clone());
+            self.record_symbol_origin(&v.name, path, Some(&tag));
+            self.assign_constant_family(&v.name);
             current += 1;
         }
     }
@@ -518,35 +672,38 @@ impl SymbolTable {
                     }
                 }
 
-                if let Some(&(paren_idx, '(')) = lookahead.peek()
-                    && let Some(function_macro) = self.get_function_macro(ident)
-                {
-                    let close_idx = Self::find_matching_paren(expr, paren_idx)?;
-                    let args_str = &expr[paren_idx + 1..close_idx];
-                    let raw_args = Self::split_call_args(args_str);
-                    if raw_args.len() != function_macro.params.len() {
-                        return None;
-                    }
-
-                    let mut expanded_args = Vec::with_capacity(raw_args.len());
-                    for arg in raw_args {
-                        let expanded = self.expand_function_macros(arg, depth + 1)?;
-                        expanded_args.push(expanded.unwrap_or_else(|| arg.trim().to_string()));
-                    }
-
-                    let expanded_body =
-                        self.expand_function_macro_body(function_macro, &expanded_args, depth + 1)?;
-                    out.push_str(&expanded_body);
-                    changed = true;
-
-                    while let Some(&(idx, _)) = chars.peek() {
-                        if idx <= close_idx {
-                            chars.next();
-                        } else {
-                            break;
+                if let Some(&(paren_idx, '(')) = lookahead.peek() {
+                    if let Some(function_macro) = self.get_function_macro(ident) {
+                        let close_idx = Self::find_matching_paren(expr, paren_idx)?;
+                        let args_str = &expr[paren_idx + 1..close_idx];
+                        let raw_args = Self::split_call_args(args_str);
+                        if raw_args.len() != function_macro.params.len() {
+                            return None;
                         }
+
+                        let mut expanded_args = Vec::with_capacity(raw_args.len());
+                        for arg in raw_args {
+                            let expanded = self.expand_function_macros(arg, depth + 1)?;
+                            expanded_args.push(expanded.unwrap_or_else(|| arg.trim().to_string()));
+                        }
+
+                        let expanded_body = self.expand_function_macro_body(
+                            function_macro,
+                            &expanded_args,
+                            depth + 1,
+                        )?;
+                        out.push_str(&expanded_body);
+                        changed = true;
+
+                        while let Some(&(idx, _)) = chars.peek() {
+                            if idx <= close_idx {
+                                chars.next();
+                            } else {
+                                break;
+                            }
+                        }
+                        continue;
                     }
-                    continue;
                 }
 
                 out.push_str(ident);
@@ -746,6 +903,30 @@ impl SymbolTable {
         self.resolve_name_with_tag(value, prefix, &SymbolTag::Global)
     }
 
+    pub fn constant_family(&self, name: &str) -> Option<ConstantFamily> {
+        self.symbol_to_family.get(name).copied().or_else(|| {
+            self.parent
+                .as_ref()
+                .and_then(|parent| parent.constant_family(name))
+        })
+    }
+
+    pub fn resolve_name_in_family(&self, value: i64, family: ConstantFamily) -> Option<String> {
+        if let Some(names) = self.value_to_names.get(&value) {
+            if let Some(name) = names
+                .iter()
+                .filter(|name| self.constant_family(name.as_str()) == Some(family))
+                .min_by_key(|name| name.len())
+            {
+                return Some(name.clone());
+            }
+        }
+
+        self.parent
+            .as_ref()
+            .and_then(|parent| parent.resolve_name_in_family(value, family))
+    }
+
     pub fn resolve_name_with_tag(
         &self,
         value: i64,
@@ -882,11 +1063,8 @@ impl SymbolTable {
                     .or_default()
                     .push(name.clone());
                 self.pending.insert(name.clone(), current_index.to_string());
-                self.symbol_to_file.insert(name.clone(), path.to_path_buf());
-                self.symbol_to_tags
-                    .entry(name)
-                    .or_default()
-                    .insert(tag.clone());
+                self.record_symbol_origin(&name, path, Some(&tag));
+                self.assign_constant_family(&name);
             } else {
                 // Strip inline comments (e.g., "CONSTANT  # comment")
                 let name = line
@@ -919,11 +1097,8 @@ impl SymbolTable {
                     .or_default()
                     .push(name.clone());
                 self.pending.insert(name.clone(), value.to_string());
-                self.symbol_to_file.insert(name.clone(), path.to_path_buf());
-                self.symbol_to_tags
-                    .entry(name)
-                    .or_default()
-                    .insert(tag.clone());
+                self.record_symbol_origin(&name, path, Some(&tag));
+                self.assign_constant_family(&name);
             }
             current_index += 1;
         }
@@ -971,15 +1146,170 @@ impl SymbolTable {
         Ok(false)
     }
 
-    fn insert_indexed_symbol(&mut self, id: &str, index: usize, path: &Path) {
-        let val = index as i64;
-        self.symbols.insert(id.to_string(), val);
+    fn insert_symbol_at_value(&mut self, id: &str, value: i64, path: &Path) {
+        self.symbols.insert(id.to_string(), value);
         self.value_to_names
-            .entry(val)
+            .entry(value)
             .or_default()
             .push(id.to_string());
-        self.symbol_to_file
-            .insert(id.to_string(), path.to_path_buf());
+        self.record_symbol_origin(id, path, None);
+        self.assign_constant_family(id);
+    }
+
+    fn insert_indexed_symbol(&mut self, id: &str, index: usize, path: &Path) {
+        let val = index as i64;
+        self.insert_symbol_at_value(id, val, path);
+    }
+
+    fn text_bank_display_name(
+        path: &Path,
+        index: usize,
+        message: &serde_json::Map<String, serde_json::Value>,
+    ) -> std::io::Result<Option<String>> {
+        let display_name = if let Some(value) = message.get("en_US") {
+            Some(value)
+        } else if let Some(value) = message.get("ja_JP") {
+            Some(value)
+        } else {
+            message.iter().find_map(|(key, value)| {
+                if key == "id" {
+                    None
+                } else if value.is_string() || value.is_array() {
+                    Some(value)
+                } else {
+                    None
+                }
+            })
+        };
+
+        let Some(display_name) = display_name else {
+            return Ok(None);
+        };
+
+        let display_name = match display_name {
+            serde_json::Value::String(text) => text.clone(),
+            serde_json::Value::Array(parts) => {
+                let mut text = String::new();
+                for (part_index, part) in parts.iter().enumerate() {
+                    let segment = part.as_str().ok_or_else(|| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!(
+                                "Text bank JSON {} has non-string 'messages[{}]' content part {}",
+                                path.display(),
+                                index,
+                                part_index
+                            ),
+                        )
+                    })?;
+                    text.push_str(segment);
+                }
+                text
+            }
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} has unsupported message text value at messages[{}]",
+                        path.display(),
+                        index
+                    ),
+                ));
+            }
+        };
+
+        let display_name = display_name.trim();
+        let display_name = if display_name.starts_with('{') && display_name.ends_with('}') {
+            display_name[1..display_name.len() - 1]
+                .split_once(':')
+                .map_or(display_name, |(_, inner)| inner.trim())
+        } else {
+            display_name
+        };
+
+        Ok(Some(display_name.to_string()))
+    }
+
+    pub fn load_dspre_sound_archive_constants(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<usize> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read DSPRE sound archive JSON {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        self.record_loaded_file(path);
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to parse DSPRE sound archive JSON {}: {e}",
+                    path.display()
+                ),
+            )
+        })?;
+        let messages = json
+            .get("messages")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "DSPRE sound archive JSON {} is missing a 'messages' array",
+                        path.display()
+                    ),
+                )
+            })?;
+
+        let row_count = messages.len();
+        if dspre_sound_constant_value_and_prefix(0, row_count).is_none() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Unsupported DSPRE sound archive row count {} in {}",
+                    row_count,
+                    path.display()
+                ),
+            ));
+        }
+
+        let mut count = 0;
+        for (index, msg) in messages.iter().enumerate() {
+            let message = msg.as_object().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "DSPRE sound archive JSON {} has non-object 'messages[{}]' entry",
+                        path.display(),
+                        index
+                    ),
+                )
+            })?;
+
+            let Some(display_name) = Self::text_bank_display_name(path, index, message)? else {
+                continue;
+            };
+            let Some((value, _)) = dspre_sound_constant_value_and_prefix(index, row_count) else {
+                continue;
+            };
+            let Some(symbol) = dspre_sound_constant_symbol(index, row_count, &display_name) else {
+                continue;
+            };
+
+            self.insert_symbol_at_value(&symbol, value, path);
+            for alias in dspre_sound_constant_aliases(index, row_count) {
+                self.insert_symbol_at_value(alias, value, path);
+            }
+            count += 1;
+        }
+
+        Ok(count)
     }
 
     fn load_text_bank_messages(
@@ -1102,6 +1432,85 @@ impl SymbolTable {
         }
         if let Some(events_value) = events_field {
             count += self.load_text_bank_events(path, events_value)?;
+        }
+
+        Ok(count)
+    }
+
+    /// Load a Chatot/DSPRE text bank JSON as prefixed script constants derived
+    /// from the human-readable display names instead of the message `id` fields.
+    ///
+    /// `index_suffix_width` is used for archives whose constants carry their
+    /// archive index in the symbol name, such as `TRAINER_SILVER_001`.
+    pub fn load_text_bank_json_constants(
+        &mut self,
+        path: impl AsRef<Path>,
+        prefix: &str,
+        index_suffix_width: Option<usize>,
+    ) -> std::io::Result<usize> {
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read text bank JSON {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        self.record_loaded_file(path);
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse text bank JSON {}: {e}", path.display()),
+            )
+        })?;
+
+        let messages = json
+            .get("messages")
+            .and_then(serde_json::Value::as_array)
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} is missing a 'messages' array",
+                        path.display()
+                    ),
+                )
+            })?;
+
+        let mut count = 0;
+        for (index, msg) in messages.iter().enumerate() {
+            let message = msg.as_object().ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "Text bank JSON {} has non-object 'messages[{}]' entry",
+                        path.display(),
+                        index
+                    ),
+                )
+            })?;
+
+            let Some(display_name) = Self::text_bank_display_name(path, index, message)? else {
+                continue;
+            };
+            let Some(symbol) = canonicalize_text_bank_constant(&display_name, prefix, index) else {
+                if index == 0 {
+                    let symbol = format!("{prefix}NONE");
+                    self.insert_indexed_symbol(&symbol, index, path);
+                    count += 1;
+                }
+                continue;
+            };
+
+            let symbol = if let Some(width) = index_suffix_width {
+                format!("{symbol}_{index:0width$}")
+            } else {
+                symbol
+            };
+            self.insert_indexed_symbol(&symbol, index, path);
+            count += 1;
         }
 
         Ok(count)
@@ -1358,11 +1767,8 @@ impl SymbolTable {
                     .or_default()
                     .push(name.clone());
                 self.pending.insert(name.clone(), val.to_string());
-                self.symbol_to_file.insert(name.clone(), path.to_path_buf());
-                self.symbol_to_tags
-                    .entry(name)
-                    .or_default()
-                    .insert(tag.clone());
+                self.record_symbol_origin(&name, path, Some(&tag));
+                self.assign_constant_family(&name);
             }
         }
         Ok(())
@@ -1403,7 +1809,11 @@ impl SymbolTable {
 
     pub fn insert_define(&mut self, name: String, value: i64) {
         self.symbols.insert(name.clone(), value);
-        self.value_to_names.entry(value).or_default().push(name);
+        self.value_to_names
+            .entry(value)
+            .or_default()
+            .push(name.clone());
+        self.assign_constant_family(&name);
     }
 
     pub fn insert_enum(&mut self, _name: String, variants: Vec<(String, Option<i64>)>) {
@@ -1414,6 +1824,7 @@ impl SymbolTable {
                     .entry(*val)
                     .or_default()
                     .push(v_name.clone());
+                self.assign_constant_family(v_name);
             }
         }
     }
@@ -1447,6 +1858,7 @@ impl SymbolTable {
         }
         self.symbol_to_file.extend(other.symbol_to_file);
         self.symbol_to_tags.extend(other.symbol_to_tags);
+        self.symbol_to_family.extend(other.symbol_to_family);
         self.loaded_files.extend(other.loaded_files);
         if !Arc::ptr_eq(&self.eval_cache, &other.eval_cache) {
             for entry in other.eval_cache.iter() {
@@ -1511,6 +1923,11 @@ impl SymbolTable {
                 )
             })
             .collect();
+        let symbol_to_family = self
+            .symbol_to_family
+            .iter()
+            .map(|(name, family)| (name.clone(), *family))
+            .collect();
 
         SymbolSnapshot {
             symbols,
@@ -1518,6 +1935,7 @@ impl SymbolTable {
             pending,
             function_macros,
             symbol_to_tags,
+            symbol_to_family,
         }
     }
 
@@ -1550,6 +1968,11 @@ impl SymbolTable {
                 .iter()
                 .map(|(name, tags)| (name.clone(), tags.iter().cloned().collect::<FxHashSet<_>>()))
                 .collect(),
+            symbol_to_family: snapshot
+                .symbol_to_family
+                .iter()
+                .map(|(name, family)| (name.clone(), *family))
+                .collect(),
             loaded_files: FxHashSet::default(),
             eval_cache: Arc::default(),
             shortest_name_cache: Arc::default(),
@@ -1563,5 +1986,22 @@ impl SymbolTable {
         let mut paths = self.loaded_files.iter().cloned().collect::<Vec<_>>();
         paths.sort();
         paths
+    }
+
+    fn record_symbol_origin(&mut self, name: &str, path: &Path, tag: Option<&SymbolTag>) {
+        self.symbol_to_file
+            .insert(name.to_string(), path.to_path_buf());
+        if let Some(tag) = tag {
+            self.symbol_to_tags
+                .entry(name.to_string())
+                .or_default()
+                .insert(tag.clone());
+        }
+    }
+
+    fn assign_constant_family(&mut self, name: &str) {
+        if let Some(family) = ConstantFamily::from_symbol_name(name) {
+            self.symbol_to_family.insert(name.to_string(), family);
+        }
     }
 }

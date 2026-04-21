@@ -1,4 +1,4 @@
-use super::types::{EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR, EggMoveData, EggMoveEntry};
+use super::types::{EggMoveData, EggMoveEntry, EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::{self, Read, Write};
 

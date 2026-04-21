@@ -17,7 +17,7 @@ pub mod symbol_table;
 mod tests;
 
 pub use constant_cache::{ConstantCache, SymbolSnapshot};
-pub use defines::{CDefine, parse_and_resolve_defines, parse_defines, parse_value};
-pub use enums::{CEnum, CEnumVariant, parse_enum};
+pub use defines::{parse_and_resolve_defines, parse_defines, parse_value, CDefine};
+pub use enums::{parse_enum, CEnum, CEnumVariant};
 pub use source_manager::SourceManager;
-pub use symbol_table::{SymbolTable, SymbolTag};
+pub use symbol_table::{canonicalize_constant_name, ConstantFamily, SymbolTable, SymbolTag};

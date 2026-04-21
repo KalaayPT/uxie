@@ -2,7 +2,7 @@
   description = "Uxie CLI and library packaging";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
   };
 
   inputs.self.submodules = true;
@@ -34,12 +34,21 @@
               gnumake
             ];
 
+            cargoTestFlags = [ "--lib" "--bins" "--tests" ];
+
             installPhase = ''
               runHook preInstall
 
+              bin_path="$(find target -type f -path '*/release/uxie' -print -quit)"
+              if [ -z "$bin_path" ]; then
+                echo "could not locate built uxie binary under target/" >&2
+                exit 1
+              fi
+              build_dir="$(dirname "$bin_path")"
+
               mkdir -p $out/bin $out/share/licenses/uxie
-              cp target/release/uxie $out/bin/
-              cp target/release/libnitroarc_ffi.so $out/bin/
+              cp "$build_dir/uxie" $out/bin/
+              cp "$build_dir/libnitroarc_ffi.so" $out/bin/
               cp LICENSE $out/share/licenses/uxie/LICENSE
               cp nitroarc/COPYING $out/share/licenses/uxie/COPYING
               cp nitroarc/COPYING.LESSER $out/share/licenses/uxie/COPYING.LESSER
