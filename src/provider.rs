@@ -8,7 +8,7 @@
 use crate::error::{Result, UxieError};
 use crate::game::GameFamily;
 use crate::map_header::{
-    read_map_header_from_bytes, read_map_headers_from_arm9, MapHeader, MAP_HEADER_SIZE,
+    MAP_HEADER_SIZE, MapHeader, read_map_header_from_bytes, read_map_headers_from_arm9,
 };
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -241,11 +241,7 @@ impl DecompProvider {
             GameFamily::DP | GameFamily::Platinum => self.root.join("src/data/map_headers.h"),
         };
 
-        if fallback.exists() {
-            fallback
-        } else {
-            primary
-        }
+        if fallback.exists() { fallback } else { primary }
     }
 
     fn parse_all_headers(&self) -> Result<Vec<MapHeader>> {

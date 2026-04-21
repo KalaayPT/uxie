@@ -434,11 +434,7 @@ where
             parent_resolver,
         };
         let val = parse_expr(&tokens, &mut pos, 0, &mut ctx);
-        if pos == tokens.len() {
-            val
-        } else {
-            None
-        }
+        if pos == tokens.len() { val } else { None }
     };
 
     visiting.remove(expr);

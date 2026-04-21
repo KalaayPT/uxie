@@ -1,4 +1,4 @@
 mod binary;
 mod types;
 
-pub use types::{LearnsetData, LearnsetEntry, LEARNSET_TERMINATOR};
+pub use types::{LEARNSET_TERMINATOR, LearnsetData, LearnsetEntry};

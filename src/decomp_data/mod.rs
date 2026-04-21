@@ -11,8 +11,8 @@ pub mod pokemon;
 pub mod trainers;
 pub(crate) mod util;
 
-pub use items::{load_item_data_from_csv, DecompItemData};
-pub use moves::{load_move_data_from_json, DecompMoveData};
+pub use items::{DecompItemData, load_item_data_from_csv};
+pub use moves::{DecompMoveData, load_move_data_from_json};
 pub use paths::DecompPaths;
-pub use pokemon::{load_all_pokemon_data, load_pokemon_data_from_json, DecompPokemonData};
-pub use trainers::{load_trainer_data_from_json, DecompTrainerData};
+pub use pokemon::{DecompPokemonData, load_all_pokemon_data, load_pokemon_data_from_json};
+pub use trainers::{DecompTrainerData, load_trainer_data_from_json};
