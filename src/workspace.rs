@@ -9,7 +9,7 @@ use crate::game::{Game, GameFamily};
 use crate::provider::{Arm9Provider, DataProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::{
-    is_common_script_id, GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable,
+    GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
 };
 use crate::text_bank::{GameStrings, TextBankTable};
 use std::collections::BTreeSet;
@@ -65,6 +65,7 @@ impl Workspace {
         let dspre_markers = [
             path.join("header.bin"),
             path.join("config.yaml"),
+            path.join("arm9/arm9.bin"),
             path.join("arm9.bin"),
             path.join("unpacked/arm9.bin"),
             path.join("unpacked"),
@@ -291,16 +292,22 @@ impl Workspace {
         })?;
         let family = game.family();
 
-        let arm9_path = if path.join("arm9.bin").exists() {
-            path.join("arm9.bin")
-        } else {
-            path.join("unpacked/arm9.bin")
-        };
+        let arm9_path = [
+            path.join("arm9/arm9.bin"),
+            path.join("arm9.bin"),
+            path.join("unpacked/arm9.bin"),
+        ]
+        .into_iter()
+        .find(|candidate| candidate.exists())
+        .unwrap_or_else(|| path.join("arm9/arm9.bin"));
 
         if !arm9_path.exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("arm9.bin not found in DSPRE project at {}", path.display()),
+                format!(
+                    "arm9.bin not found in DSPRE project at {} (tried arm9/arm9.bin, arm9.bin, unpacked/arm9.bin)",
+                    path.display()
+                ),
             ));
         }
 
@@ -1509,6 +1516,22 @@ mod tests {
         fs::create_dir_all(root.join("unpacked")).unwrap();
         write_test_header_bin(&root.join("header.bin"), "POKEMON PL", "CPUE");
         fs::write(root.join("arm9.bin"), vec![0_u8; 4]).unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Dspre);
+        assert_eq!(ws.game, Game::Platinum);
+        assert_eq!(ws.family, GameFamily::Platinum);
+    }
+
+    #[test]
+    fn test_open_dspre_accepts_arm9_subdirectory_layout() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("generic_dspre_project");
+
+        fs::create_dir_all(root.join("arm9")).unwrap();
+        write_test_header_bin(&root.join("header.bin"), "POKEMON PL", "CPUE");
+        fs::write(root.join("arm9/arm9.bin"), vec![0_u8; 4]).unwrap();
 
         let ws = Workspace::open(&root).unwrap();
 

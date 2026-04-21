@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "nitroarc": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1773078804,
+        "narHash": "sha256-leEVFE1S5rIQ/5eA2UTHCLVWbjRWLtKN6l+q/VsH1OY=",
+        "ref": "ffi",
+        "rev": "3a9b024907996f8b07a2ef42fb83580e94486a62",
+        "revCount": 59,
+        "type": "git",
+        "url": "https://codeberg.org/Kalaay/nitroarc.git"
+      },
+      "original": {
+        "ref": "ffi",
+        "type": "git",
+        "url": "https://codeberg.org/Kalaay/nitroarc.git"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1767313136,
@@ -18,6 +35,7 @@
     },
     "root": {
       "inputs": {
+        "nitroarc": "nitroarc",
         "nixpkgs": "nixpkgs"
       }
     }

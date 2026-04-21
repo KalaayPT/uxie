@@ -1,7 +1,6 @@
 use super::paths::{
     egg_move_narc_path, egg_move_overlay_path, encounter_narc_path, evolution_narc_path,
     family_name, item_narc_path, learnset_narc_path, move_narc_path, personal_narc_path,
-    trainer_data_narc_path, trainer_party_narc_path,
 };
 use super::render::{print_encounter_file, print_event_file, print_map_header};
 use std::path::{Path, PathBuf};
@@ -9,7 +8,7 @@ use std::sync::Arc;
 use uxie::{
     BinaryEncounterFile, DspreProject, EggMoveData, EvolutionData, EvolutionMethod, GameFamily,
     GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeaderJson, MoveData, Narc,
-    PersonalData, RomHeader, SymbolTable, TrainerData, Workspace,
+    PersonalData, RomHeader, SymbolTable, Workspace, load_dspre_trainer,
 };
 
 pub fn cmd_header(path: &Path, json: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -375,17 +374,7 @@ pub fn cmd_trainer(
     json: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
-
-    let trdata_narc = load_narc(&trainer_data_narc_path(project_path, ws.family))?;
-    let trpoke_narc = load_narc(&trainer_party_narc_path(project_path, ws.family))?;
-
-    let props_data = trdata_narc.member(id as usize)?;
-    let party_data = trpoke_narc.member(id as usize)?;
-
-    let mut props_cursor = std::io::Cursor::new(props_data);
-    let mut party_cursor = std::io::Cursor::new(party_data);
-
-    let trainer = TrainerData::from_binary_parts(&mut props_cursor, &mut party_cursor, ws.family)?;
+    let trainer = load_dspre_trainer(project_path, ws.family, id)?;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&trainer)?);

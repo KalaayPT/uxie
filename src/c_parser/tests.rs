@@ -1,8 +1,12 @@
 #[cfg(test)]
 mod c_parser_tests {
-    use crate::c_parser::{canonicalize_constant_name, ConstantFamily, SourceManager, SymbolTable};
+    use crate::c_parser::{ConstantFamily, SourceManager, SymbolTable, canonicalize_constant_name};
+    use crate::{
+        GameFamily, TrainerData, TrainerFlags, TrainerProperties, load_all_dspre_trainers,
+    };
     use proptest::prelude::*;
     use regex::Regex;
+    use std::collections::HashMap;
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
@@ -58,6 +62,83 @@ mod c_parser_tests {
                 value
             );
         }
+    }
+
+    fn sample_trainer(
+        family: GameFamily,
+        trainer_class: u8,
+        species: u16,
+        level: u16,
+    ) -> TrainerData {
+        TrainerData {
+            properties: TrainerProperties {
+                flags: TrainerFlags::empty(),
+                trainer_class,
+                unknown: 0,
+                party_count: 1,
+                items: [0; 4],
+                ai_flags: crate::AiFlags::BASIC,
+                double_battle: 0,
+            },
+            party: vec![crate::PartyPokemon {
+                difficulty: 7,
+                gender_ability_override: 0,
+                level,
+                species,
+                form: 0,
+                held_item: None,
+                moves: None,
+                ball_seal: if family == GameFamily::DP {
+                    None
+                } else {
+                    Some(0)
+                },
+            }],
+        }
+    }
+
+    /// Load one symbol name per line (used for Platinum `generated/trainers.txt`).
+    fn load_trainer_constants_txt(path: &Path) -> Vec<String> {
+        std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Parse `#define NAME value` lines (used for HGSS `include/constants/trainers.h`).
+    fn load_trainer_constants_h(path: &Path) -> Vec<String> {
+        let define_regex =
+            Regex::new(r"^\s*#define\s+(?P<name>TRAINER_[A-Z0-9_]+)\s+(?P<value>\d+)\s*$").unwrap();
+        let mut constants = Vec::new();
+        for line in std::fs::read_to_string(path).unwrap().lines() {
+            let Some(captures) = define_regex.captures(line) else {
+                continue;
+            };
+            let value: usize = captures["value"].parse().unwrap();
+            if constants.len() <= value {
+                constants.resize(value + 1, String::new());
+            }
+            constants[value] = captures["name"].to_string();
+        }
+        constants
+    }
+
+    fn count_matching_symbols_by_index(table: &SymbolTable, expected: &[String]) -> usize {
+        let actual_by_value: HashMap<i64, String> = table
+            .get_all_defines()
+            .into_iter()
+            .map(|(name, value)| (value, name))
+            .collect();
+        expected
+            .iter()
+            .enumerate()
+            .filter(|(index, expected_name)| {
+                actual_by_value
+                    .get(&(*index as i64))
+                    .is_some_and(|actual| actual == *expected_name)
+            })
+            .count()
     }
 
     fn curl_available() -> bool {
@@ -368,41 +449,41 @@ metang_generators = {
     }
 
     proptest! {
-                                                                                                                        #[test]
-                                                                                                                        fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
-                                                                                                                            let dir = tempdir().unwrap();
-                                                                                                                            let generated_dir = dir.path().join("generated");
-                                                                                                                            std::fs::create_dir_all(&generated_dir).unwrap();
+                #[test]
+                fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+                    let dir = tempdir().unwrap();
+                    let generated_dir = dir.path().join("generated");
+                    std::fs::create_dir_all(&generated_dir).unwrap();
 
-                                                                                                                            std::fs::write(
-                                                                                                                                generated_dir.join("meson.build"),
-                                                                                                                                r"
+                    std::fs::write(
+                        generated_dir.join("meson.build"),
+                        r"
 metang_generators = {
     'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
 }
 ",
-                                                                                                                            )
-                                                                                                                            .unwrap();
+                    )
+                    .unwrap();
 
-                                                                                                                            let mut content = String::new();
-                                                                                                                            for i in 0..entry_count {
-                                                                                                                                use std::fmt::Write as _;
-                                                                                                                                writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
-                                                                                                                            }
-                                                                                                                            std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+                    let mut content = String::new();
+                    for i in 0..entry_count {
+                        use std::fmt::Write as _;
+                        writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
+                    }
+                    std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
 
-                                                                                                                            let mut table = SymbolTable::new();
-                                                                                                                            table.load_headers_from_dir(&generated_dir).unwrap();
+                    let mut table = SymbolTable::new();
+                    table.load_headers_from_dir(&generated_dir).unwrap();
 
-                                                                                                                            for i in 0..entry_count {
-                                                                                                                                let expected = 1_i64 << i;
-                                                                                                                                prop_assert_eq!(
-                                                                                                                                    table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
-                                                                                                                                    Some(expected)
-                                                                                                                                );
-                                                                                                                            }
-                                                                                                                        }
-                                                                                                                    }
+                    for i in 0..entry_count {
+                        let expected = 1_i64 << i;
+                        prop_assert_eq!(
+                            table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                            Some(expected)
+                        );
+                    }
+                }
+            }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {
@@ -736,6 +817,120 @@ metang_generators = {
         assert_eq!(table.resolve_constant("TRAINER_NONE"), Some(0));
         assert_eq!(table.resolve_constant("TRAINER_SILVER_001"), Some(1));
         assert_eq!(table.resolve_constant("TRAINER_AMY_AND_MIMI_002"), Some(2));
+    }
+
+    #[test]
+    fn test_load_dspre_trainer_archive_constants_handles_platinum_dummy_detection() {
+        let dir = tempdir().unwrap();
+        let trainer_names_path = dir.path().join("0618.json");
+        let trainer_classes_path = dir.path().join("0619.json");
+        std::fs::write(
+            &trainer_names_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0618_00000", "en_US": "{TRAINER_NAME: -}" },
+                { "id": "msg_0618_00001", "en_US": "{TRAINER_NAME:Tristan}" },
+                { "id": "msg_0618_00002", "en_US": "{TRAINER_NAME:Mickey}" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(
+            &trainer_classes_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0619_00000", "en_US": "[PK][MN] Trainer" },
+                { "id": "msg_0619_00001", "en_US": "Youngster" },
+                { "id": "msg_0619_00002", "en_US": "Camper" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let trainers = vec![
+            sample_trainer(GameFamily::Platinum, 0, 0, 0),
+            sample_trainer(GameFamily::Platinum, 1, 396, 5),
+            sample_trainer(GameFamily::Platinum, 2, 19, 5),
+        ];
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_dspre_trainer_archive_constants(
+                &trainer_names_path,
+                &trainer_classes_path,
+                &trainers,
+                GameFamily::Platinum,
+            )
+            .unwrap();
+
+        assert_eq!(loaded, 3);
+        assert_eq!(table.resolve_constant("TRAINER_NONE"), Some(0));
+        assert_eq!(table.resolve_constant("TRAINER_YOUNGSTER_TRISTAN"), Some(1));
+        assert_eq!(table.resolve_constant("TRAINER_DUMMY_002"), Some(2));
+    }
+
+    #[test]
+    fn test_load_dspre_trainer_archive_constants_handles_hgss_suffixes() {
+        let dir = tempdir().unwrap();
+        let trainer_names_path = dir.path().join("0729.json");
+        let trainer_classes_path = dir.path().join("0730.json");
+        std::fs::write(
+            &trainer_names_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0729_00000", "en_US": "{TRAINER_NAME: -}" },
+                { "id": "msg_0729_00001", "en_US": "{TRAINER_NAME:Silver}" },
+                { "id": "msg_0729_00002", "en_US": "{TRAINER_NAME:Silver}" },
+                { "id": "msg_0729_00003", "en_US": "{TRAINER_NAME:Falkner}" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+        std::fs::write(
+            &trainer_classes_path,
+            r#"
+            {
+              "messages": [
+                { "id": "msg_0730_00000", "en_US": "[PK][MN] Trainer" },
+                { "id": "msg_0730_00001", "en_US": "Rival" },
+                { "id": "msg_0730_00002", "en_US": "Leader" }
+              ]
+            }
+            "#,
+        )
+        .unwrap();
+
+        let trainers = vec![
+            sample_trainer(GameFamily::HGSS, 0, 0, 0),
+            sample_trainer(GameFamily::HGSS, 1, 155, 5),
+            sample_trainer(GameFamily::HGSS, 1, 158, 5),
+            sample_trainer(GameFamily::HGSS, 2, 16, 9),
+        ];
+
+        let mut table = SymbolTable::new();
+        let loaded = table
+            .load_dspre_trainer_archive_constants(
+                &trainer_names_path,
+                &trainer_classes_path,
+                &trainers,
+                GameFamily::HGSS,
+            )
+            .unwrap();
+
+        assert_eq!(loaded, 4);
+        assert_eq!(table.resolve_constant("TRAINER_NONE"), Some(0));
+        assert_eq!(table.resolve_constant("TRAINER_RIVAL_SILVER"), Some(1));
+        assert_eq!(table.resolve_constant("TRAINER_RIVAL_SILVER_2"), Some(2));
+        assert_eq!(
+            table.resolve_constant("TRAINER_LEADER_FALKNER_FALKNER"),
+            Some(3)
+        );
     }
 
     #[test]
@@ -1232,5 +1427,115 @@ metang_generators = {
                 symbol
             );
         }
+    }
+
+    #[test]
+    #[ignore = "requires real DSPRE and decomp projects via UXIE_TEST_PLATINUM_DSPRE_PATH and UXIE_TEST_PLATINUM_DECOMP_PATH"]
+    fn integration_best_effort_platinum_trainer_canonicalization_reaches_expected_floor() {
+        let Some(dspre_root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "c_parser trainer canonicalization integration test (Platinum DSPRE)",
+        ) else {
+            return;
+        };
+        let Some(decomp_root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DECOMP_PATH",
+            "c_parser trainer canonicalization integration test (Platinum decomp)",
+        ) else {
+            return;
+        };
+
+        let trainer_names_path = dspre_root.join("expanded/textArchives/0618.json");
+        let trainer_classes_path = dspre_root.join("expanded/textArchives/0619.json");
+        let expected_path = decomp_root.join("generated/trainers.txt");
+        assert!(
+            trainer_names_path.is_file(),
+            "missing trainer names archive fixture: {}",
+            trainer_names_path.display()
+        );
+        assert!(
+            trainer_classes_path.is_file(),
+            "missing trainer classes archive fixture: {}",
+            trainer_classes_path.display()
+        );
+        assert!(
+            expected_path.is_file(),
+            "missing trainer constants fixture: {}",
+            expected_path.display()
+        );
+
+        let trainers = load_all_dspre_trainers(&dspre_root, GameFamily::Platinum).unwrap();
+        let mut table = SymbolTable::new();
+        table
+            .load_dspre_trainer_archive_constants(
+                &trainer_names_path,
+                &trainer_classes_path,
+                &trainers,
+                GameFamily::Platinum,
+            )
+            .unwrap();
+
+        let expected = load_trainer_constants_txt(&expected_path);
+        let matches = count_matching_symbols_by_index(&table, &expected);
+        assert!(
+            matches >= 490,
+            "best-effort Platinum trainer canonicalization regressed: matched {matches}/{} exact constants",
+            expected.len()
+        );
+    }
+
+    #[test]
+    #[ignore = "requires real DSPRE and decomp projects via UXIE_TEST_HGSS_DSPRE_PATH and UXIE_TEST_HGSS_DECOMP_PATH"]
+    fn integration_best_effort_hgss_trainer_canonicalization_reaches_expected_floor() {
+        let Some(dspre_root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            "c_parser trainer canonicalization integration test (HGSS DSPRE)",
+        ) else {
+            return;
+        };
+        let Some(decomp_root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DECOMP_PATH",
+            "c_parser trainer canonicalization integration test (HGSS decomp)",
+        ) else {
+            return;
+        };
+
+        let trainer_names_path = dspre_root.join("expanded/textArchives/0729.json");
+        let trainer_classes_path = dspre_root.join("expanded/textArchives/0730.json");
+        let expected_path = decomp_root.join("include/constants/trainers.h");
+        assert!(
+            trainer_names_path.is_file(),
+            "missing trainer names archive fixture: {}",
+            trainer_names_path.display()
+        );
+        assert!(
+            trainer_classes_path.is_file(),
+            "missing trainer classes archive fixture: {}",
+            trainer_classes_path.display()
+        );
+        assert!(
+            expected_path.is_file(),
+            "missing trainer constants fixture: {}",
+            expected_path.display()
+        );
+
+        let trainers = load_all_dspre_trainers(&dspre_root, GameFamily::HGSS).unwrap();
+        let mut table = SymbolTable::new();
+        table
+            .load_dspre_trainer_archive_constants(
+                &trainer_names_path,
+                &trainer_classes_path,
+                &trainers,
+                GameFamily::HGSS,
+            )
+            .unwrap();
+
+        let expected = load_trainer_constants_h(&expected_path);
+        let matches = count_matching_symbols_by_index(&table, &expected);
+        assert!(
+            matches >= 540,
+            "best-effort HGSS trainer canonicalization regressed: matched {matches}/{} exact constants",
+            expected.len()
+        );
     }
 }

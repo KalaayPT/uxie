@@ -3,11 +3,13 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nitroarc = {
+      url = "git+https://codeberg.org/Kalaay/nitroarc.git?ref=ffi";
+      flake = false;
+    };
   };
 
-  inputs.self.submodules = true;
-
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, nitroarc }:
     let
       cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
       systems = [
@@ -28,6 +30,12 @@
             cargoLock = {
               lockFile = ./Cargo.lock;
             };
+
+            postPatch = ''
+              rm -rf nitroarc
+              cp -r ${nitroarc} nitroarc
+              chmod -R u+w nitroarc
+            '';
 
             nativeBuildInputs = with pkgs; [
               gcc

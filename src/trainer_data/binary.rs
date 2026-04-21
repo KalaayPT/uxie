@@ -1,9 +1,116 @@
 use super::types::{AiFlags, PartyPokemon, TrainerData, TrainerFlags, TrainerProperties};
 use crate::game::GameFamily;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use std::io::{self, Read, Write};
+use std::io::{self, Cursor, Read, Write};
+use std::path::Path;
 
 pub const TRAINER_PROPERTIES_SIZE: usize = 20;
+
+/// Load one trainer from a DSPRE project, preferring unpacked trainer files and
+/// falling back to trainer NARCs when unpacked data is unavailable.
+pub fn load_dspre_trainer(
+    project_root: impl AsRef<Path>,
+    family: GameFamily,
+    id: u16,
+) -> io::Result<TrainerData> {
+    let root = project_root.as_ref();
+    let props_path = root
+        .join("unpacked/trainerProperties")
+        .join(format!("{id:04}"));
+    let party_path = root.join("unpacked/trainerParty").join(format!("{id:04}"));
+
+    let (props, party) = if props_path.is_file() {
+        (std::fs::read(&props_path)?, std::fs::read(&party_path)?)
+    } else {
+        let (trdata_rel, trpoke_rel) = match family {
+            GameFamily::DP | GameFamily::Platinum => (
+                "data/poketool/trainer/trdata.narc",
+                "data/poketool/trainer/trpoke.narc",
+            ),
+            GameFamily::HGSS => ("data/a/0/5/5", "data/a/0/5/6"),
+        };
+        let trdata = crate::Narc::open(root.join(trdata_rel))?;
+        let trpoke = crate::Narc::open(root.join(trpoke_rel))?;
+        (
+            trdata.member_owned(id as usize)?,
+            trpoke.member_owned(id as usize)?,
+        )
+    };
+
+    TrainerData::from_binary_parts(&mut Cursor::new(&props), &mut Cursor::new(&party), family)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("trainer {id}: {e}")))
+}
+
+/// Load every trainer from a DSPRE project, preferring unpacked trainer files
+/// and falling back to trainer NARCs when unpacked data is unavailable.
+pub fn load_all_dspre_trainers(
+    project_root: impl AsRef<Path>,
+    family: GameFamily,
+) -> io::Result<Vec<TrainerData>> {
+    let root = project_root.as_ref();
+    let props_dir = root.join("unpacked/trainerProperties");
+    let party_dir = root.join("unpacked/trainerParty");
+
+    if props_dir.is_dir() {
+        let mut ids = Vec::new();
+        for entry in std::fs::read_dir(&props_dir)? {
+            let name = entry?.file_name();
+            if let Some(id) = name.to_str().and_then(|s| s.parse::<u16>().ok()) {
+                ids.push(id);
+            }
+        }
+        ids.sort_unstable();
+
+        ids.into_iter()
+            .map(|id| {
+                let props = std::fs::read(props_dir.join(format!("{id:04}")))?;
+                let party = std::fs::read(party_dir.join(format!("{id:04}")))?;
+                TrainerData::from_binary_parts(
+                    &mut Cursor::new(&props),
+                    &mut Cursor::new(&party),
+                    family,
+                )
+                .map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidData, format!("trainer {id}: {e}"))
+                })
+            })
+            .collect()
+    } else {
+        let (trdata_rel, trpoke_rel) = match family {
+            GameFamily::DP | GameFamily::Platinum => (
+                "data/poketool/trainer/trdata.narc",
+                "data/poketool/trainer/trpoke.narc",
+            ),
+            GameFamily::HGSS => ("data/a/0/5/5", "data/a/0/5/6"),
+        };
+        let trdata = crate::Narc::open(root.join(trdata_rel))?;
+        let trpoke = crate::Narc::open(root.join(trpoke_rel))?;
+        if trdata.len() != trpoke.len() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "trainer NARC member count mismatch: trdata={} trpoke={}",
+                    trdata.len(),
+                    trpoke.len()
+                ),
+            ));
+        }
+        (0..trdata.len())
+            .map(|id| {
+                let props = trdata.member_owned(id)?;
+                let party = trpoke.member_owned(id)?;
+                TrainerData::from_binary_parts(
+                    &mut Cursor::new(&props),
+                    &mut Cursor::new(&party),
+                    family,
+                )
+                .map_err(|e| {
+                    io::Error::new(io::ErrorKind::InvalidData, format!("trainer {id}: {e}"))
+                })
+            })
+            .collect()
+    }
+}
 
 impl TrainerProperties {
     pub fn from_binary<R: Read>(reader: &mut R) -> io::Result<Self> {
@@ -180,7 +287,7 @@ impl PartyPokemon {
     }
 
     pub fn binary_size(flags: TrainerFlags, family: GameFamily) -> usize {
-        let mut size = 6; // base: DP/PT difficulty(2) or HGSS difficulty(1)+override(1), plus level(2) + species_form(2)
+        let mut size = 6;
         if flags.contains(TrainerFlags::HAS_ITEMS) {
             size += 2;
         }
@@ -231,9 +338,53 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use std::fs::File;
-    use std::io::BufReader;
-    use std::io::Cursor;
+    use std::io::{BufReader, Cursor};
     use std::path::Path;
+    use tempfile::tempdir;
+
+    fn sample_trainer(family: GameFamily, class: u8, species: u16, level: u16) -> TrainerData {
+        TrainerData {
+            properties: TrainerProperties {
+                flags: TrainerFlags::empty(),
+                trainer_class: class,
+                unknown: 0,
+                party_count: 1,
+                items: [0; 4],
+                ai_flags: AiFlags::BASIC,
+                double_battle: 0,
+            },
+            party: vec![PartyPokemon {
+                difficulty: 7,
+                gender_ability_override: 0,
+                level,
+                species,
+                form: 0,
+                held_item: None,
+                moves: None,
+                ball_seal: if family == GameFamily::DP {
+                    None
+                } else {
+                    Some(0)
+                },
+            }],
+        }
+    }
+
+    fn write_unpacked_trainer(root: &Path, id: u16, trainer: &TrainerData, family: GameFamily) {
+        let props_dir = root.join("unpacked/trainerProperties");
+        let party_dir = root.join("unpacked/trainerParty");
+        std::fs::create_dir_all(&props_dir).unwrap();
+        std::fs::create_dir_all(&party_dir).unwrap();
+
+        let mut props = Vec::new();
+        let mut party = Vec::new();
+        trainer
+            .to_binary_parts(&mut props, &mut party, family)
+            .unwrap();
+
+        std::fs::write(props_dir.join(format!("{id:04}")), props).unwrap();
+        std::fs::write(party_dir.join(format!("{id:04}")), party).unwrap();
+    }
 
     #[test]
     fn test_trainer_properties_roundtrip() {
@@ -505,6 +656,28 @@ mod tests {
             assert_eq!(orig.level, parsed.level);
             assert_eq!(orig.moves, parsed.moves);
         }
+    }
+
+    #[test]
+    fn test_load_dspre_trainer_from_unpacked() {
+        let dir = tempdir().unwrap();
+        let trainer = sample_trainer(GameFamily::Platinum, 12, 25, 19);
+        write_unpacked_trainer(dir.path(), 0, &trainer, GameFamily::Platinum);
+
+        let loaded = load_dspre_trainer(dir.path(), GameFamily::Platinum, 0).unwrap();
+        assert_eq!(loaded, trainer);
+    }
+
+    #[test]
+    fn test_load_all_dspre_trainers_from_unpacked() {
+        let dir = tempdir().unwrap();
+        let first = sample_trainer(GameFamily::Platinum, 1, 10, 5);
+        let second = sample_trainer(GameFamily::Platinum, 2, 20, 10);
+        write_unpacked_trainer(dir.path(), 0, &first, GameFamily::Platinum);
+        write_unpacked_trainer(dir.path(), 1, &second, GameFamily::Platinum);
+
+        let loaded = load_all_dspre_trainers(dir.path(), GameFamily::Platinum).unwrap();
+        assert_eq!(loaded, vec![first, second]);
     }
 
     fn family_strategy() -> impl Strategy<Value = GameFamily> {

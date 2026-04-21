@@ -45,22 +45,6 @@ pub fn item_narc_path(project_path: &Path, family: GameFamily) -> PathBuf {
     }
 }
 
-pub fn trainer_data_narc_path(project_path: &Path, family: GameFamily) -> PathBuf {
-    let paths = project_paths(project_path);
-    match family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_trdata_narc(),
-        GameFamily::HGSS => paths.root().join("data/a/0/5/5"),
-    }
-}
-
-pub fn trainer_party_narc_path(project_path: &Path, family: GameFamily) -> PathBuf {
-    let paths = project_paths(project_path);
-    match family {
-        GameFamily::DP | GameFamily::Platinum => paths.dspre_trpoke_narc(),
-        GameFamily::HGSS => paths.root().join("data/a/0/5/6"),
-    }
-}
-
 pub fn evolution_narc_path(project_path: &Path, family: GameFamily) -> PathBuf {
     let paths = project_paths(project_path);
     match family {

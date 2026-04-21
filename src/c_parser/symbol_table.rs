@@ -1,4 +1,6 @@
 use crate::c_parser::constant_cache::SymbolSnapshot;
+use crate::game::GameFamily;
+use crate::trainer_data::TrainerData;
 use bitcode::{Decode, Encode};
 use dashmap::DashMap;
 use deunicode::deunicode;
@@ -173,6 +175,8 @@ fn canonicalize_text_bank_constant(
     Some(format!("{prefix}{canonical}"))
 }
 
+/// offsets for sound names in sounds text archive,
+/// needs to be hard coded for us to be able to parse them directly.
 fn dspre_sound_constant_value_and_prefix(
     index: usize,
     row_count: usize,
@@ -1230,75 +1234,67 @@ impl SymbolTable {
         Ok(Some(display_name.to_string()))
     }
 
+    /// Parse a JSON text-archive file and return the display name for each row.
+    ///
+    /// This is the format used by pokeplatinum and exported by DSPRE — a top-level
+    /// `messages` array where each entry has language keys such as `en_US`.
+    fn parse_json_text_archive(path: &Path) -> std::io::Result<Vec<Option<String>>> {
+        let content = std::fs::read_to_string(path)
+            .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("{}: {e}", path.display()),
+            )
+        })?;
+        let messages = json
+            .get("messages")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!("{}: missing 'messages' array", path.display()),
+                )
+            })?;
+
+        messages
+            .iter()
+            .enumerate()
+            .map(|(i, msg)| {
+                let obj = msg.as_object().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("{}: messages[{i}] is not an object", path.display()),
+                    )
+                })?;
+                Self::text_bank_display_name(path, i, obj)
+            })
+            .collect()
+    }
+
     pub fn load_dspre_sound_archive_constants(
         &mut self,
         path: impl AsRef<Path>,
     ) -> std::io::Result<usize> {
         let path = path.as_ref();
-        let content = std::fs::read_to_string(path).map_err(|err| {
-            std::io::Error::new(
-                err.kind(),
-                format!(
-                    "Failed to read DSPRE sound archive JSON {} as UTF-8: {err}",
-                    path.display()
-                ),
-            )
-        })?;
         self.record_loaded_file(path);
-        let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Failed to parse DSPRE sound archive JSON {}: {e}",
-                    path.display()
-                ),
-            )
-        })?;
-        let messages = json
-            .get("messages")
-            .and_then(serde_json::Value::as_array)
-            .ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "DSPRE sound archive JSON {} is missing a 'messages' array",
-                        path.display()
-                    ),
-                )
-            })?;
+        let names = Self::parse_json_text_archive(path)?;
+        let row_count = names.len();
 
-        let row_count = messages.len();
         if dspre_sound_constant_value_and_prefix(0, row_count).is_none() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                format!(
-                    "Unsupported DSPRE sound archive row count {} in {}",
-                    row_count,
-                    path.display()
-                ),
+                format!("unsupported sound archive with {row_count} rows"),
             ));
         }
 
         let mut count = 0;
-        for (index, msg) in messages.iter().enumerate() {
-            let message = msg.as_object().ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "DSPRE sound archive JSON {} has non-object 'messages[{}]' entry",
-                        path.display(),
-                        index
-                    ),
-                )
-            })?;
-
-            let Some(display_name) = Self::text_bank_display_name(path, index, message)? else {
-                continue;
-            };
+        for (index, name) in names.iter().enumerate() {
+            let Some(name) = name else { continue };
             let Some((value, _)) = dspre_sound_constant_value_and_prefix(index, row_count) else {
                 continue;
             };
-            let Some(symbol) = dspre_sound_constant_symbol(index, row_count, &display_name) else {
+            let Some(symbol) = dspre_sound_constant_symbol(index, row_count, name) else {
                 continue;
             };
 
@@ -1310,6 +1306,104 @@ impl SymbolTable {
         }
 
         Ok(count)
+    }
+
+    /// Load best-effort DSPRE trainer constants from the trainer-name archive,
+    /// trainer-class archive, and parsed trainer metadata.
+    ///
+    /// This is intentionally heuristic: DSPRE trainer metadata does not encode
+    /// every identity distinction that decomp trainer constants carry, such as
+    /// Platinum's location-based rival/grunt names or HGSS's specialized class
+    /// stems like `BIRD_KEEPER_GS`. Use this for canonicalization testing and
+    /// investigation, not as a claim of full decomp-equivalent identity.
+    pub fn load_dspre_trainer_archive_constants(
+        &mut self,
+        trainer_names_path: impl AsRef<Path>,
+        trainer_classes_path: impl AsRef<Path>,
+        trainers: &[TrainerData],
+        family: GameFamily,
+    ) -> std::io::Result<usize> {
+        let trainer_names_path = trainer_names_path.as_ref();
+        let trainer_classes_path = trainer_classes_path.as_ref();
+        self.record_loaded_file(trainer_names_path);
+        self.record_loaded_file(trainer_classes_path);
+
+        let names = Self::parse_json_text_archive(trainer_names_path)?;
+        let classes = Self::parse_json_text_archive(trainer_classes_path)?;
+
+        if names.len() != trainers.len() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "trainer-name archive has {} rows but {} trainers were loaded",
+                    names.len(),
+                    trainers.len()
+                ),
+            ));
+        }
+
+        let trainer_class_names: Vec<String> =
+            classes.into_iter().map(|n| n.unwrap_or_default()).collect();
+
+        let mut hgss_occurrences = HashMap::new();
+        for (index, (name, trainer)) in names.iter().zip(trainers).enumerate() {
+            let Some(name_display) = name else { continue };
+            let canonical_name = canonicalize_constant_name(name_display);
+
+            let symbol = if index == 0 || canonical_name.is_empty() || name_display == "-" {
+                "TRAINER_NONE".to_string()
+            } else if family == GameFamily::Platinum
+                && matches!(name_display.as_str(), "Mickey" | "Angelica" | "Tara & Tim")
+                && !trainer.party.is_empty()
+                && trainer
+                    .party
+                    .iter()
+                    .all(|p| p.species_id() == 19 && p.level == 5)
+            {
+                format!("TRAINER_DUMMY_{index:03}")
+            } else {
+                let class_index = trainer.properties.trainer_class as usize;
+                let class_display = trainer_class_names.get(class_index).ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!("trainer {index} references out-of-range class {class_index}"),
+                    )
+                })?;
+
+                let class_display = class_display
+                    .strip_prefix("[PK][MN] ")
+                    .unwrap_or(class_display)
+                    .trim();
+                let class_stem = match family {
+                    GameFamily::DP | GameFamily::Platinum => canonicalize_constant_name(
+                        class_display.trim_end_matches(|ch| matches!(ch, '♂' | '♀')),
+                    ),
+                    GameFamily::HGSS if class_display == "Trainer" => "PKMN_TRAINER".to_string(),
+                    GameFamily::HGSS => canonicalize_constant_name(class_display),
+                };
+
+                let mut symbol = format!("TRAINER_{class_stem}_{canonical_name}");
+                if family == GameFamily::HGSS
+                    && matches!(class_display, "Leader" | "Elite Four" | "Trainer")
+                {
+                    symbol.push('_');
+                    symbol.push_str(&canonical_name);
+                }
+                if family == GameFamily::HGSS {
+                    let occurrence = hgss_occurrences.entry(symbol.clone()).or_insert(0usize);
+                    *occurrence += 1;
+                    if *occurrence > 1 {
+                        symbol.push('_');
+                        symbol.push_str(&occurrence.to_string());
+                    }
+                }
+                symbol
+            };
+
+            self.insert_indexed_symbol(&symbol, index, trainer_names_path);
+        }
+
+        Ok(names.len())
     }
 
     fn load_text_bank_messages(

@@ -127,7 +127,7 @@ fn game_family_key(game_family: GameFamily) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{ConstantCache, CONSTANT_CACHE_VERSION};
+    use super::{CONSTANT_CACHE_VERSION, ConstantCache};
     use crate::c_parser::defines::CFunctionMacro;
     use crate::c_parser::{ConstantFamily, SourceManager, SymbolSnapshot, SymbolTable, SymbolTag};
     use crate::game::GameFamily;
@@ -157,9 +157,11 @@ mod tests {
 
         assert_eq!(restored.resolve_constant("SPECIES_BULBASAUR"), Some(1));
         assert_eq!(restored.resolve_constant("OTHER"), Some(1));
-        assert!(restored
-            .get_symbols_by_tag(&SymbolTag::Map(12))
-            .contains(&"MAP_CONST".to_string()));
+        assert!(
+            restored
+                .get_symbols_by_tag(&SymbolTag::Map(12))
+                .contains(&"MAP_CONST".to_string())
+        );
         assert_eq!(
             restored.constant_family("SPECIES_BULBASAUR"),
             Some(ConstantFamily::Species)
@@ -200,13 +202,15 @@ mod tests {
 
         assert_eq!(loaded.version, CONSTANT_CACHE_VERSION);
         assert!(loaded.file_hashes.contains_key("include/constants/test.h"));
-        assert!(loaded
-            .is_current(
-                project_root,
-                GameFamily::Platinum,
-                std::slice::from_ref(&header)
-            )
-            .unwrap());
+        assert!(
+            loaded
+                .is_current(
+                    project_root,
+                    GameFamily::Platinum,
+                    std::slice::from_ref(&header)
+                )
+                .unwrap()
+        );
         assert_eq!(
             SymbolTable::from_snapshot(&loaded.snapshot).resolve_constant("SPECIES_BULBASAUR"),
             Some(1)
@@ -239,14 +243,16 @@ mod tests {
         cache.save(&cache_path).unwrap();
 
         fs::write(&header, "#define TEST_CONST 43\n").unwrap();
-        assert!(!ConstantCache::load(&cache_path)
-            .unwrap()
-            .is_current(
-                project_root,
-                GameFamily::Platinum,
-                std::slice::from_ref(&header)
-            )
-            .unwrap());
+        assert!(
+            !ConstantCache::load(&cache_path)
+                .unwrap()
+                .is_current(
+                    project_root,
+                    GameFamily::Platinum,
+                    std::slice::from_ref(&header)
+                )
+                .unwrap()
+        );
 
         fs::write(&cache_path, b"not-bitcode").unwrap();
         assert!(ConstantCache::load(&cache_path).is_err());
@@ -273,31 +279,37 @@ mod tests {
 
         let mut wrong_version = cache.clone();
         wrong_version.version += 1;
-        assert!(!wrong_version
-            .is_current(
-                project_root,
-                GameFamily::Platinum,
-                std::slice::from_ref(&header)
-            )
-            .unwrap());
+        assert!(
+            !wrong_version
+                .is_current(
+                    project_root,
+                    GameFamily::Platinum,
+                    std::slice::from_ref(&header)
+                )
+                .unwrap()
+        );
 
         let mut wrong_uxie_version = cache.clone();
         wrong_uxie_version.uxie_version.push_str("-mutated");
-        assert!(!wrong_uxie_version
-            .is_current(
-                project_root,
-                GameFamily::Platinum,
-                std::slice::from_ref(&header)
-            )
-            .unwrap());
+        assert!(
+            !wrong_uxie_version
+                .is_current(
+                    project_root,
+                    GameFamily::Platinum,
+                    std::slice::from_ref(&header)
+                )
+                .unwrap()
+        );
 
-        assert!(!cache
-            .is_current(
-                project_root,
-                GameFamily::HGSS,
-                std::slice::from_ref(&header)
-            )
-            .unwrap());
+        assert!(
+            !cache
+                .is_current(
+                    project_root,
+                    GameFamily::HGSS,
+                    std::slice::from_ref(&header)
+                )
+                .unwrap()
+        );
     }
 
     #[test]
