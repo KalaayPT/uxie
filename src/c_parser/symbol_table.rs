@@ -309,12 +309,13 @@ impl SymbolTable {
             let entry = sm.get_or_parse(path)?;
             self.load_file_entry(&entry, &canonical, tag);
         } else {
-            let content = std::fs::read_to_string(path).map_err(|err| {
+            let bytes = std::fs::read(path).map_err(|err| {
                 std::io::Error::new(
                     err.kind(),
-                    format!("Failed to read header {} as UTF-8: {err}", path.display()),
+                    format!("Failed to read header {}: {err}", path.display()),
                 )
             })?;
+            let content = String::from_utf8_lossy(&bytes);
             self.load_header_str_with_tag(&content, &canonical, tag)?;
         }
 
@@ -1376,7 +1377,7 @@ impl SymbolTable {
                     .trim();
                 let class_stem = match family {
                     GameFamily::DP | GameFamily::Platinum => canonicalize_constant_name(
-                        class_display.trim_end_matches(|ch| matches!(ch, '♂' | '♀')),
+                        class_display.trim_end_matches(['♂', '♀']),
                     ),
                     GameFamily::HGSS if class_display == "Trainer" => "PKMN_TRAINER".to_string(),
                     GameFamily::HGSS => canonicalize_constant_name(class_display),
@@ -1778,6 +1779,83 @@ impl SymbolTable {
         }
 
         Ok(false)
+    }
+
+    /// Attempt to load constants from a `.gmm` (Game Message XML) file when the
+    /// expected `.h` header is missing. Returns `true` if a `.gmm` was found and
+    /// parsed, `false` otherwise.
+    pub fn try_load_gmm_fallback(
+        &mut self,
+        parent_dir: &Path,
+        include_dirs: &[PathBuf],
+        include_path: &str,
+    ) -> std::io::Result<bool> {
+        if !include_path.ends_with(".h") {
+            return Ok(false);
+        }
+
+        let gmm_path_str = format!("{}.gmm", &include_path[..include_path.len() - 2]);
+
+        let direct = parent_dir.join(&gmm_path_str);
+        if direct.is_file() {
+            self.load_gmm_file(&direct)?;
+            return Ok(true);
+        }
+
+        for dir in include_dirs {
+            let candidate = dir.join(&gmm_path_str);
+            if candidate.is_file() {
+                self.load_gmm_file(&candidate)?;
+                return Ok(true);
+            }
+        }
+
+        Ok(false)
+    }
+
+    /// Parse a `.gmm` XML file and insert row IDs as indexed constants.
+    fn load_gmm_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
+        #[derive(serde::Deserialize)]
+        struct GmmArchive {
+            #[serde(rename = "row")]
+            rows: Vec<GmmRow>,
+        }
+
+        #[derive(serde::Deserialize)]
+        struct GmmRow {
+            #[serde(rename = "@id")]
+            id: String,
+            #[serde(rename = "@index")]
+            index: i64,
+        }
+
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!("Failed to read GMM file '{}': {err}", path.display()),
+            )
+        })?;
+        self.record_loaded_file(path);
+
+        let archive: GmmArchive = quick_xml::de::from_str(&content).map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("Failed to parse GMM '{}': {e}", path.display()),
+            )
+        })?;
+
+        for row in archive.rows {
+            self.symbols.insert(row.id.clone(), row.index);
+            self.value_to_names
+                .entry(row.index)
+                .or_default()
+                .push(row.id.clone());
+            self.record_symbol_origin(&row.id, path, Some(&SymbolTag::Global));
+            self.assign_constant_family(&row.id);
+        }
+
+        Ok(())
     }
 
     fn collect_header_files(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {

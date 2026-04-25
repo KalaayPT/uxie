@@ -548,9 +548,31 @@ impl Workspace {
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.to_ascii_lowercase());
         match extension.as_deref() {
-            Some("txt") => symbols.load_list_file(path),
+            Some("txt") => {
+                // Skip template files (e.g. Jinja2/Handlebars) that happen to
+                // have a .txt extension but are not constant list files.
+                let content = std::fs::read_to_string(path)?;
+                if content.contains("{%") || content.contains("{{") {
+                    return Ok(());
+                }
+                symbols.load_list_file(path)
+            }
             Some("py") => symbols.load_python_enum(path),
-            Some("json") => symbols.load_text_bank_json(path).map(|_| ()),
+            Some("json") => {
+                // Quick sniff-test: only treat JSON as a text bank if it has
+                // a top-level "messages" or "object_events" array. This skips
+                // levelscripts and other non-text-bank JSON files that may live
+                // in the include tree.
+                let content = std::fs::read_to_string(path)?;
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    let messages = json.get("messages").and_then(|v| v.as_array());
+                    let object_events = json.get("object_events").and_then(|v| v.as_array());
+                    if messages.is_some() || object_events.is_some() {
+                        return symbols.load_text_bank_json(path).map(|_| ());
+                    }
+                }
+                Ok(())
+            }
             _ => symbols.load_header(path),
         }
     }

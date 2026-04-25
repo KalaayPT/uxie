@@ -51,6 +51,7 @@ serde_json = "1.0"
 serde_yaml = "0.9"
 thiserror = "2.0"
 regex = "1.11"
+quick-xml = { version = "0.37", features = ["serialize"] }
 deunicode = "1.6"
 rustc-hash = "2.1.0"
 dashmap = "6.1.0"
