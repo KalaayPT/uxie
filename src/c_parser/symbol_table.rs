@@ -481,6 +481,16 @@ impl SymbolTable {
             return Ok(());
         }
 
+        // If the parent symbol table already covers this file (and its entire
+        // transitive include tree), skip re-processing its defines into this
+        // child.  All symbols remain reachable via the parent chain at lookup
+        // time, and the shared eval_cache makes repeat lookups cheap.
+        if let Some(parent) = &self.parent {
+            if parent.loaded_files.contains(&canonical) {
+                return Ok(());
+            }
+        }
+
         let entry = sm.get_or_parse(path)?;
         self.load_file_entry(&entry, &canonical, tag.clone());
         self.loaded_files.insert(canonical.clone());
@@ -1986,6 +1996,27 @@ impl SymbolTable {
             .or_default()
             .push(name.clone());
         self.assign_constant_family(&name);
+    }
+
+    /// Add DSPRE-specific aliases for canonicalization gaps.
+    ///
+    /// These bridge differences between DSPRE's raw text-bank output and the
+    /// canonical constant names used by rotom/uxie (e.g. periods becoming
+    /// separators, null-move conventions).
+    pub fn add_dspre_aliases(&mut self) {
+        for (alias, canonical) in [
+            ("SPECIES_NIDORANF", "SPECIES_NIDORAN_F"),
+            ("SPECIES_NIDORANM", "SPECIES_NIDORAN_M"),
+            ("ITEM_SS_TICKET", "ITEM_S_S_TICKET"),
+            ("MOVE__", "MOVE_NONE"),
+        ] {
+            if self.resolve_constant(alias).is_some() {
+                continue;
+            }
+            if let Some(value) = self.resolve_constant(canonical) {
+                self.insert_define(alias.to_string(), value);
+            }
+        }
     }
 
     pub fn insert_enum(&mut self, _name: String, variants: Vec<(String, Option<i64>)>) {
