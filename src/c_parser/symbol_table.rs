@@ -1,5 +1,5 @@
 use crate::c_parser::constant_cache::SymbolSnapshot;
-use crate::game::GameFamily;
+use crate::game::{GameFamily, GameLanguage};
 use crate::trainer_data::TrainerData;
 use bitcode::{Decode, Encode};
 use dashmap::DashMap;
@@ -836,6 +836,26 @@ impl SymbolTable {
             }
         }
 
+        // DSPRE text-bank constants may contain non-ASCII characters (e.g. German
+        // umlauts) that are de-unicoded on the insert side. Try a de-unicoded
+        // fallback so lookups like ITEM_STERNENSTÜCK resolve to ITEM_STERNENSTUCK.
+        if !name.is_ascii() {
+            let ascii = deunicode::deunicode(name);
+            if ascii != name {
+                if let Some(val) = self.symbols.get(&ascii) {
+                    return Some(*val);
+                }
+                if let Some(val) = self.eval_cache.get(&ascii) {
+                    return Some(*val);
+                }
+                if let Some(parent) = &self.parent {
+                    if let Some(val) = parent.resolve_constant(&ascii) {
+                        return Some(val);
+                    }
+                }
+            }
+        }
+
         let expr = self.pending.get(name)?;
         let expanded = self.expand_function_macros(expr, 0)?;
         let eval_target = expanded.as_deref().unwrap_or(expr);
@@ -1180,8 +1200,12 @@ impl SymbolTable {
         path: &Path,
         index: usize,
         message: &serde_json::Map<String, serde_json::Value>,
+        language: GameLanguage,
     ) -> std::io::Result<Option<String>> {
-        let display_name = if let Some(value) = message.get("en_US") {
+        let preferred = language.locale_key();
+        let display_name = if let Some(value) = message.get(preferred) {
+            Some(value)
+        } else if let Some(value) = message.get("en_US") {
             Some(value)
         } else if let Some(value) = message.get("ja_JP") {
             Some(value)
@@ -1249,7 +1273,10 @@ impl SymbolTable {
     ///
     /// This is the format used by pokeplatinum and exported by DSPRE — a top-level
     /// `messages` array where each entry has language keys such as `en_US`.
-    fn parse_json_text_archive(path: &Path) -> std::io::Result<Vec<Option<String>>> {
+    fn parse_json_text_archive(
+        path: &Path,
+        language: GameLanguage,
+    ) -> std::io::Result<Vec<Option<String>>> {
         let content = std::fs::read_to_string(path)
             .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", path.display())))?;
         let json: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
@@ -1278,7 +1305,7 @@ impl SymbolTable {
                         format!("{}: messages[{i}] is not an object", path.display()),
                     )
                 })?;
-                Self::text_bank_display_name(path, i, obj)
+                Self::text_bank_display_name(path, i, obj, language)
             })
             .collect()
     }
@@ -1286,10 +1313,11 @@ impl SymbolTable {
     pub fn load_dspre_sound_archive_constants(
         &mut self,
         path: impl AsRef<Path>,
+        language: GameLanguage,
     ) -> std::io::Result<usize> {
         let path = path.as_ref();
         self.record_loaded_file(path);
-        let names = Self::parse_json_text_archive(path)?;
+        let names = Self::parse_json_text_archive(path, language)?;
         let row_count = names.len();
 
         if dspre_sound_constant_value_and_prefix(0, row_count).is_none() {
@@ -1333,14 +1361,15 @@ impl SymbolTable {
         trainer_classes_path: impl AsRef<Path>,
         trainers: &[TrainerData],
         family: GameFamily,
+        language: GameLanguage,
     ) -> std::io::Result<usize> {
         let trainer_names_path = trainer_names_path.as_ref();
         let trainer_classes_path = trainer_classes_path.as_ref();
         self.record_loaded_file(trainer_names_path);
         self.record_loaded_file(trainer_classes_path);
 
-        let names = Self::parse_json_text_archive(trainer_names_path)?;
-        let classes = Self::parse_json_text_archive(trainer_classes_path)?;
+        let names = Self::parse_json_text_archive(trainer_names_path, language)?;
+        let classes = Self::parse_json_text_archive(trainer_classes_path, language)?;
 
         if names.len() != trainers.len() {
             return Err(std::io::Error::new(
@@ -1552,6 +1581,7 @@ impl SymbolTable {
         path: impl AsRef<Path>,
         prefix: &str,
         index_suffix_width: Option<usize>,
+        language: GameLanguage,
     ) -> std::io::Result<usize> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path).map_err(|err| {
@@ -1597,7 +1627,7 @@ impl SymbolTable {
                 )
             })?;
 
-            let Some(display_name) = Self::text_bank_display_name(path, index, message)? else {
+            let Some(display_name) = Self::text_bank_display_name(path, index, message, language)? else {
                 continue;
             };
             let Some(symbol) = canonicalize_text_bank_constant(&display_name, prefix, index) else {
@@ -2009,6 +2039,20 @@ impl SymbolTable {
             ("SPECIES_NIDORANM", "SPECIES_NIDORAN_M"),
             ("ITEM_SS_TICKET", "ITEM_S_S_TICKET"),
             ("MOVE__", "MOVE_NONE"),
+            // German Platinum: DSPRE canonicalizes hyphens as underscores for
+            // items, whereas rotom strips them. Also handles dot-to-underscore
+            // differences (e.g. Mitgl.Karte).
+            ("ITEM_TOP_TRANK", "ITEM_TOPTRANK"),
+            ("ITEM_ADAMANT_ORB", "ITEM_ADAMANTORB"),
+            ("ITEM_MITGLKARTE", "ITEM_MITGL_KARTE"),
+            ("ITEM_L_SCHLUSSEL", "ITEM_LSCHLUSSEL"),
+            ("ITEM_K_SCHLUSSEL", "ITEM_KSCHLUSSEL"),
+            ("ITEM_G_SCHLUSSEL", "ITEM_GSCHLUSSEL"),
+            ("ITEM_B_SCHLUSSEL", "ITEM_BSCHLUSSEL"),
+            ("ITEM_WEISS_ORB", "ITEM_WEISSORB"),
+            ("ITEM_WEIß_ORB", "ITEM_WEISSORB"),
+            ("ITEM_X_ANGRIFF", "ITEM_XANGRIFF"),
+            ("ITEM_?_OFFNER", "ITEM_OFFNER"),
         ] {
             if self.resolve_constant(alias).is_some() {
                 continue;

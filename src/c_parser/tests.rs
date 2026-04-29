@@ -2,7 +2,8 @@
 mod c_parser_tests {
     use crate::c_parser::{ConstantFamily, SourceManager, SymbolTable, canonicalize_constant_name};
     use crate::{
-        GameFamily, TrainerData, TrainerFlags, TrainerProperties, load_all_dspre_trainers,
+        GameFamily, GameLanguage, TrainerData, TrainerFlags, TrainerProperties,
+        load_all_dspre_trainers,
     };
     use proptest::prelude::*;
     use regex::Regex;
@@ -449,41 +450,41 @@ metang_generators = {
     }
 
     proptest! {
-                #[test]
-                fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
-                    let dir = tempdir().unwrap();
-                    let generated_dir = dir.path().join("generated");
-                    std::fs::create_dir_all(&generated_dir).unwrap();
+                    #[test]
+                    fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+                        let dir = tempdir().unwrap();
+                        let generated_dir = dir.path().join("generated");
+                        std::fs::create_dir_all(&generated_dir).unwrap();
 
-                    std::fs::write(
-                        generated_dir.join("meson.build"),
-                        r"
+                        std::fs::write(
+                            generated_dir.join("meson.build"),
+                            r"
 metang_generators = {
     'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
 }
 ",
-                    )
-                    .unwrap();
+                        )
+                        .unwrap();
 
-                    let mut content = String::new();
-                    for i in 0..entry_count {
-                        use std::fmt::Write as _;
-                        writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
-                    }
-                    std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+                        let mut content = String::new();
+                        for i in 0..entry_count {
+                            use std::fmt::Write as _;
+                            writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
+                        }
+                        std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
 
-                    let mut table = SymbolTable::new();
-                    table.load_headers_from_dir(&generated_dir).unwrap();
+                        let mut table = SymbolTable::new();
+                        table.load_headers_from_dir(&generated_dir).unwrap();
 
-                    for i in 0..entry_count {
-                        let expected = 1_i64 << i;
-                        prop_assert_eq!(
-                            table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
-                            Some(expected)
-                        );
+                        for i in 0..entry_count {
+                            let expected = 1_i64 << i;
+                            prop_assert_eq!(
+                                table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                                Some(expected)
+                            );
+                        }
                     }
                 }
-            }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {
@@ -710,7 +711,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_text_bank_json_constants(&json_path, "SPECIES_", None)
+            .load_text_bank_json_constants(&json_path, "SPECIES_", None, GameLanguage::English)
             .unwrap();
 
         assert_eq!(loaded, 4);
@@ -743,7 +744,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_text_bank_json_constants(&json_path, "ITEM_", None)
+            .load_text_bank_json_constants(&json_path, "ITEM_", None, GameLanguage::English)
             .unwrap();
 
         assert_eq!(loaded, 6);
@@ -778,7 +779,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_text_bank_json_constants(&json_path, "MOVE_", None)
+            .load_text_bank_json_constants(&json_path, "MOVE_", None, GameLanguage::English)
             .unwrap();
 
         assert_eq!(loaded, 6);
@@ -810,7 +811,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_text_bank_json_constants(&json_path, "TRAINER_", Some(3))
+            .load_text_bank_json_constants(&json_path, "TRAINER_", Some(3), GameLanguage::English)
             .unwrap();
 
         assert_eq!(loaded, 3);
@@ -864,6 +865,7 @@ metang_generators = {
                 &trainer_classes_path,
                 &trainers,
                 GameFamily::Platinum,
+                GameLanguage::English,
             )
             .unwrap();
 
@@ -920,6 +922,7 @@ metang_generators = {
                 &trainer_classes_path,
                 &trainers,
                 GameFamily::HGSS,
+                GameLanguage::English,
             )
             .unwrap();
 
@@ -964,7 +967,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_dspre_sound_archive_constants(&json_path)
+            .load_dspre_sound_archive_constants(&json_path, GameLanguage::English)
             .unwrap();
 
         assert_eq!(loaded, 1013);
@@ -1015,7 +1018,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_dspre_sound_archive_constants(&json_path)
+            .load_dspre_sound_archive_constants(&json_path, GameLanguage::English)
             .unwrap();
 
         assert_eq!(loaded, 1372);
@@ -1251,7 +1254,7 @@ metang_generators = {
 
             let mut table = SymbolTable::new();
             let loaded = table
-                .load_text_bank_json_constants(&json_path, prefix, None)
+                .load_text_bank_json_constants(&json_path, prefix, None, GameLanguage::English)
                 .unwrap();
             assert_eq!(
                 loaded,
@@ -1304,7 +1307,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_text_bank_json_constants(&json_path, "SPECIES_", None)
+            .load_text_bank_json_constants(&json_path, "SPECIES_", None, GameLanguage::English)
             .unwrap();
         assert_eq!(
             loaded,
@@ -1410,7 +1413,7 @@ metang_generators = {
 
         let mut table = SymbolTable::new();
         let loaded = table
-            .load_text_bank_json_constants(&json_path, "SPECIES_", None)
+            .load_text_bank_json_constants(&json_path, "SPECIES_", None, GameLanguage::English)
             .unwrap();
         assert_eq!(
             loaded,
@@ -1472,6 +1475,7 @@ metang_generators = {
                 &trainer_classes_path,
                 &trainers,
                 GameFamily::Platinum,
+                GameLanguage::English,
             )
             .unwrap();
 
@@ -1527,6 +1531,7 @@ metang_generators = {
                 &trainer_classes_path,
                 &trainers,
                 GameFamily::HGSS,
+                GameLanguage::English,
             )
             .unwrap();
 

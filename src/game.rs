@@ -93,4 +93,17 @@ impl GameLanguage {
     pub fn is_japanese(&self) -> bool {
         matches!(self, GameLanguage::Japanese)
     }
+
+    /// Return the DSPRE/Decomp locale key for this language.
+    pub fn locale_key(&self) -> &'static str {
+        match self {
+            GameLanguage::English => "en_US",
+            GameLanguage::Japanese => "ja_JP",
+            GameLanguage::French => "fr_FR",
+            GameLanguage::German => "de_DE",
+            GameLanguage::Italian => "it_IT",
+            GameLanguage::Spanish => "es_ES",
+            GameLanguage::Korean => "ko_KR",
+        }
+    }
 }
