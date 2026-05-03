@@ -461,6 +461,19 @@ impl SymbolTable {
         root_dir: &Path,
         include_dirs: &[PathBuf],
     ) -> std::io::Result<()> {
+        self.load_c_directives_with_handler(defines, includes, root_dir, include_dirs, None)
+    }
+
+    /// Load constants from already-parsed `#include` and `#define` directives,
+    /// with the same unresolved-include fallback hook used by recursive file loading.
+    pub fn load_c_directives_with_handler(
+        &mut self,
+        defines: &[crate::c_parser::defines::CDefine],
+        includes: &[crate::c_parser::includes::CInclude],
+        root_dir: &Path,
+        include_dirs: &[PathBuf],
+        mut unresolved_include_handler: Option<&mut UnresolvedIncludeHandler<'_>>,
+    ) -> std::io::Result<()> {
         let dummy_path = root_dir.join("inline_source.h");
 
         for def in defines {
@@ -472,12 +485,27 @@ impl SymbolTable {
             );
         }
 
+        let sm = self
+            .source_manager
+            .get_or_insert_with(SourceManager::new)
+            .clone();
+        let mut visited = FxHashSet::default();
+
         for inc in includes {
             if inc.is_system {
                 continue;
             }
             if let Some(p) = Self::resolve_include_path(root_dir, include_dirs, &inc.path) {
-                self.load_recursive_strict(&p, include_dirs)?;
+                self.load_recursive_internal(
+                    &p,
+                    include_dirs,
+                    &sm,
+                    &mut visited,
+                    SymbolTag::Global,
+                    &mut unresolved_include_handler,
+                )?;
+            } else if let Some(handler) = unresolved_include_handler.as_mut() {
+                handler(self, root_dir, include_dirs, &inc.path)?;
             } else {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
