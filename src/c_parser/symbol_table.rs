@@ -447,6 +447,48 @@ impl SymbolTable {
         Ok(())
     }
 
+    /// Load constants from already-parsed `#include` and `#define` directives.
+    ///
+    /// This is a thin bridge for callers (e.g. the Rotom compiler) that have
+    /// already extracted preprocessor directives from their own parser.  Each
+    /// include path is resolved and loaded recursively; each define is fed
+    /// directly to `process_define` so Uxie handles evaluation, caching, and
+    /// pending resolution just like a parsed C file.
+    pub fn load_c_directives(
+        &mut self,
+        defines: &[crate::c_parser::defines::CDefine],
+        includes: &[crate::c_parser::includes::CInclude],
+        root_dir: &Path,
+        include_dirs: &[PathBuf],
+    ) -> std::io::Result<()> {
+        let dummy_path = root_dir.join("inline_source.h");
+
+        for def in defines {
+            self.process_define(
+                def.name.clone(),
+                def.value.clone(),
+                &dummy_path,
+                SymbolTag::Global,
+            );
+        }
+
+        for inc in includes {
+            if inc.is_system {
+                continue;
+            }
+            if let Some(p) = Self::resolve_include_path(root_dir, include_dirs, &inc.path) {
+                self.load_recursive_strict(&p, include_dirs)?;
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("Unresolved include '{}' (searched from {})", inc.path, root_dir.display()),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
     fn resolve_include_path(
         parent_dir: &Path,
         include_dirs: &[PathBuf],
@@ -536,7 +578,7 @@ impl SymbolTable {
         }
     }
 
-    fn process_define(&mut self, name: String, value: String, path: &Path, tag: SymbolTag) {
+    pub fn process_define(&mut self, name: String, value: String, path: &Path, tag: SymbolTag) {
         self.record_symbol_origin(&name, path, Some(&tag));
         self.assign_constant_family(&name);
 
