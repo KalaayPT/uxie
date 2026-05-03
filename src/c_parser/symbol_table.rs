@@ -88,6 +88,7 @@ pub struct SymbolTable {
     pub(crate) symbol_to_file: FxHashMap<String, PathBuf>,
     pub(crate) symbol_to_tags: FxHashMap<String, FxHashSet<SymbolTag>>,
     pub(crate) symbol_to_family: FxHashMap<String, ConstantFamily>,
+    pub(crate) family_value_to_name: FxHashMap<(ConstantFamily, i64), String>,
     pub(crate) loaded_files: FxHashSet<PathBuf>,
     pub(crate) eval_cache: Arc<DashMap<String, i64>>,
     pub(crate) shortest_name_cache: Arc<DashMap<i64, String>>,
@@ -608,35 +609,22 @@ impl SymbolTable {
 
     pub fn process_define(&mut self, name: String, value: String, path: &Path, tag: SymbolTag) {
         self.record_symbol_origin(&name, path, Some(&tag));
-        self.assign_constant_family(&name);
 
         let val_trimmed = value.trim();
         if val_trimmed.starts_with("0x") || val_trimmed.starts_with("0X") {
             if let Ok(val) = i64::from_str_radix(&val_trimmed[2..], 16) {
-                self.symbols.insert(name.clone(), val);
-                self.value_to_names
-                    .entry(val)
-                    .or_default()
-                    .push(name.clone());
+                self.register_symbol(name.clone(), val);
                 self.pending.insert(name, value);
                 return;
             }
         }
         if let Ok(val) = val_trimmed.parse::<i64>() {
-            self.symbols.insert(name.clone(), val);
-            self.value_to_names
-                .entry(val)
-                .or_default()
-                .push(name.clone());
+            self.register_symbol(name.clone(), val);
             self.pending.insert(name, value);
             return;
         }
         if let Some(&val) = self.symbols.get(val_trimmed) {
-            self.symbols.insert(name.clone(), val);
-            self.value_to_names
-                .entry(val)
-                .or_default()
-                .push(name.clone());
+            self.register_symbol(name.clone(), val);
             self.pending.insert(name, value);
             return;
         }
@@ -646,11 +634,7 @@ impl SymbolTable {
             &self.symbols,
             &self.eval_cache,
         ) {
-            self.symbols.insert(name.clone(), val);
-            self.value_to_names
-                .entry(val)
-                .or_default()
-                .push(name.clone());
+            self.register_symbol(name.clone(), val);
             self.pending.insert(name, value);
             return;
         }
@@ -683,13 +667,8 @@ impl SymbolTable {
                     current = val;
                 }
             }
-            self.symbols.insert(v.name.clone(), current);
-            self.value_to_names
-                .entry(current)
-                .or_default()
-                .push(v.name.clone());
+            self.register_symbol(v.name.clone(), current);
             self.record_symbol_origin(&v.name, path, Some(&tag));
-            self.assign_constant_family(&v.name);
             current += 1;
         }
     }
@@ -983,8 +962,7 @@ impl SymbolTable {
         let keys: Vec<String> = self.pending.keys().cloned().collect();
         for name in keys {
             if let Some(val) = self.resolve_constant(&name) {
-                self.symbols.insert(name.clone(), val);
-                self.value_to_names.entry(val).or_default().push(name);
+                self.register_symbol(name, val);
             }
         }
         self.pending.clear();
@@ -1017,19 +995,14 @@ impl SymbolTable {
     }
 
     pub fn resolve_name_in_family(&self, value: i64, family: ConstantFamily) -> Option<String> {
-        if let Some(names) = self.value_to_names.get(&value) {
-            if let Some(name) = names
-                .iter()
-                .filter(|name| self.constant_family(name.as_str()) == Some(family))
-                .min_by_key(|name| name.len())
-            {
-                return Some(name.clone());
-            }
-        }
-
-        self.parent
-            .as_ref()
-            .and_then(|parent| parent.resolve_name_in_family(value, family))
+        self.family_value_to_name
+            .get(&(family, value))
+            .cloned()
+            .or_else(|| {
+                self.parent
+                    .as_ref()
+                    .and_then(|parent| parent.resolve_name_in_family(value, family))
+            })
     }
 
     pub fn resolve_name_with_tag(
@@ -1162,14 +1135,9 @@ impl SymbolTable {
                     )
                 })?;
                 current_index = val;
-                self.symbols.insert(name.clone(), current_index);
-                self.value_to_names
-                    .entry(current_index)
-                    .or_default()
-                    .push(name.clone());
+                self.register_symbol(name.clone(), current_index);
                 self.pending.insert(name.clone(), current_index.to_string());
                 self.record_symbol_origin(&name, path, Some(&tag));
-                self.assign_constant_family(&name);
             } else {
                 // Strip inline comments (e.g., "CONSTANT  # comment")
                 let name = line
@@ -1196,14 +1164,9 @@ impl SymbolTable {
                     current_index
                 };
 
-                self.symbols.insert(name.clone(), value);
-                self.value_to_names
-                    .entry(value)
-                    .or_default()
-                    .push(name.clone());
+                self.register_symbol(name.clone(), value);
                 self.pending.insert(name.clone(), value.to_string());
                 self.record_symbol_origin(&name, path, Some(&tag));
-                self.assign_constant_family(&name);
             }
             current_index += 1;
         }
@@ -1252,13 +1215,8 @@ impl SymbolTable {
     }
 
     fn insert_symbol_at_value(&mut self, id: &str, value: i64, path: &Path) {
-        self.symbols.insert(id.to_string(), value);
-        self.value_to_names
-            .entry(value)
-            .or_default()
-            .push(id.to_string());
+        self.register_symbol(id.to_string(), value);
         self.record_symbol_origin(id, path, None);
-        self.assign_constant_family(id);
     }
 
     fn insert_indexed_symbol(&mut self, id: &str, index: usize, path: &Path) {
@@ -1766,11 +1724,7 @@ impl SymbolTable {
                 )
             })?;
             let val = index as i64;
-            self.symbols.insert(id.to_string(), val);
-            self.value_to_names
-                .entry(val)
-                .or_default()
-                .push(id.to_string());
+            self.register_symbol(id.to_string(), val);
             self.symbol_to_file
                 .insert(id.to_string(), path.to_path_buf());
             count += 1;
@@ -1956,13 +1910,8 @@ impl SymbolTable {
         })?;
 
         for row in archive.rows {
-            self.symbols.insert(row.id.clone(), row.index);
-            self.value_to_names
-                .entry(row.index)
-                .or_default()
-                .push(row.id.clone());
+            self.register_symbol(row.id.clone(), row.index);
             self.record_symbol_origin(&row.id, path, Some(&SymbolTag::Global));
-            self.assign_constant_family(&row.id);
         }
 
         Ok(())
@@ -2043,14 +1992,9 @@ impl SymbolTable {
                     )
                 })?;
 
-                self.symbols.insert(name.clone(), val);
-                self.value_to_names
-                    .entry(val)
-                    .or_default()
-                    .push(name.clone());
+                self.register_symbol(name.clone(), val);
                 self.pending.insert(name.clone(), val.to_string());
                 self.record_symbol_origin(&name, path, Some(&tag));
-                self.assign_constant_family(&name);
             }
         }
         Ok(())
@@ -2090,12 +2034,7 @@ impl SymbolTable {
     }
 
     pub fn insert_define(&mut self, name: String, value: i64) {
-        self.symbols.insert(name.clone(), value);
-        self.value_to_names
-            .entry(value)
-            .or_default()
-            .push(name.clone());
-        self.assign_constant_family(&name);
+        self.register_symbol(name, value);
     }
 
     /// Add DSPRE-specific aliases for canonicalization gaps.
@@ -2136,12 +2075,7 @@ impl SymbolTable {
     pub fn insert_enum(&mut self, _name: String, variants: Vec<(String, Option<i64>)>) {
         for (v_name, v_val) in &variants {
             if let Some(val) = v_val {
-                self.symbols.insert(v_name.clone(), *val);
-                self.value_to_names
-                    .entry(*val)
-                    .or_default()
-                    .push(v_name.clone());
-                self.assign_constant_family(v_name);
+                self.register_symbol(v_name.clone(), *val);
             }
         }
     }
@@ -2176,6 +2110,16 @@ impl SymbolTable {
         self.symbol_to_file.extend(other.symbol_to_file);
         self.symbol_to_tags.extend(other.symbol_to_tags);
         self.symbol_to_family.extend(other.symbol_to_family);
+        for (key, name) in other.family_value_to_name {
+            let should_insert = self
+                .family_value_to_name
+                .get(&key)
+                .map(|existing| name.len() < existing.len())
+                .unwrap_or(true);
+            if should_insert {
+                self.family_value_to_name.insert(key, name);
+            }
+        }
         self.loaded_files.extend(other.loaded_files);
         if !Arc::ptr_eq(&self.eval_cache, &other.eval_cache) {
             for entry in other.eval_cache.iter() {
@@ -2245,6 +2189,11 @@ impl SymbolTable {
             .iter()
             .map(|(name, family)| (name.clone(), *family))
             .collect();
+        let family_value_to_name = self
+            .family_value_to_name
+            .iter()
+            .map(|(key, name)| (*key, name.clone()))
+            .collect();
 
         SymbolSnapshot {
             symbols,
@@ -2253,6 +2202,7 @@ impl SymbolTable {
             function_macros,
             symbol_to_tags,
             symbol_to_family,
+            family_value_to_name,
         }
     }
 
@@ -2290,6 +2240,11 @@ impl SymbolTable {
                 .iter()
                 .map(|(name, family)| (name.clone(), *family))
                 .collect(),
+            family_value_to_name: snapshot
+                .family_value_to_name
+                .iter()
+                .map(|(key, name)| (*key, name.clone()))
+                .collect(),
             loaded_files: FxHashSet::default(),
             eval_cache: Arc::default(),
             shortest_name_cache: Arc::default(),
@@ -2316,9 +2271,28 @@ impl SymbolTable {
         }
     }
 
-    fn assign_constant_family(&mut self, name: &str) {
-        if let Some(family) = ConstantFamily::from_symbol_name(name) {
-            self.symbol_to_family.insert(name.to_string(), family);
+    /// Register a name → value mapping and update all reverse indexes.
+    ///
+    /// Populates `symbols`, `value_to_names`, `symbol_to_family`, and
+    /// `family_value_to_name` in one go.  When multiple names share the same
+    /// family and value, the shortest name wins in `family_value_to_name`.
+    fn register_symbol(&mut self, name: String, value: i64) {
+        self.symbols.insert(name.clone(), value);
+        self.value_to_names
+            .entry(value)
+            .or_default()
+            .push(name.clone());
+        if let Some(family) = ConstantFamily::from_symbol_name(&name) {
+            self.symbol_to_family.insert(name.clone(), family);
+            let key = (family, value);
+            let should_insert = self
+                .family_value_to_name
+                .get(&key)
+                .map(|existing| name.len() < existing.len())
+                .unwrap_or(true);
+            if should_insert {
+                self.family_value_to_name.insert(key, name);
+            }
         }
     }
 }

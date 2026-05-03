@@ -372,11 +372,16 @@ impl RomHeader {
     /// ```
     pub fn detect_game(&self) -> Option<Game> {
         match self.game_code.as_str() {
-            "ADAE" | "ADAJ" | "ADAP" | "ADAS" | "ADAK" => Some(Game::Diamond),
-            "APAE" | "APAJ" | "APAP" | "APAS" | "APAK" => Some(Game::Pearl),
-            "CPUE" | "CPUJ" | "CPUP" | "CPUS" | "CPUK" => Some(Game::Platinum),
-            "IPKE" | "IPKJ" | "IPKP" | "IPKS" | "IPKK" => Some(Game::HeartGold),
-            "IPGE" | "IPGJ" | "IPGP" | "IPGS" | "IPGK" => Some(Game::SoulSilver),
+            "ADAE" | "ADAJ" | "ADAP" | "ADAS" | "ADAK" | "ADAD" | "ADAF" | "ADAI"
+            => Some(Game::Diamond),
+            "APAE" | "APAJ" | "APAP" | "APAS" | "APAK" | "APAD" | "APAF" | "APAI"
+            => Some(Game::Pearl),
+            "CPUE" | "CPUJ" | "CPUP" | "CPUS" | "CPUK" | "CPUD" | "CPUF" | "CPUI"
+            => Some(Game::Platinum),
+            "IPKE" | "IPKJ" | "IPKP" | "IPKS" | "IPKK" | "IPKD" | "IPKF" | "IPKI"
+            => Some(Game::HeartGold),
+            "IPGE" | "IPGJ" | "IPGP" | "IPGS" | "IPGK" | "IPGD" | "IPGF" | "IPGI"
+            => Some(Game::SoulSilver),
             _ => None,
         }
     }

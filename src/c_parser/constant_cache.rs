@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub const CONSTANT_CACHE_VERSION: u32 = 3;
+pub const CONSTANT_CACHE_VERSION: u32 = 4;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, PartialEq, Eq)]
 pub struct ConstantCache {
@@ -27,6 +27,7 @@ pub struct SymbolSnapshot {
     pub function_macros: HashMap<String, CFunctionMacro>,
     pub symbol_to_tags: HashMap<String, HashSet<SymbolTag>>,
     pub symbol_to_family: HashMap<String, ConstantFamily>,
+    pub family_value_to_name: HashMap<(ConstantFamily, i64), String>,
 }
 
 impl ConstantCache {
