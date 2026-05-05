@@ -54,6 +54,8 @@ pub enum ConstantFamily {
     Trainer,
     TrainerClass,
     Sound,
+    Variable,
+    Flag,
 }
 
 impl ConstantFamily {
@@ -72,6 +74,10 @@ impl ConstantFamily {
             Some(Self::Location)
         } else if name.starts_with("SEQ_") {
             Some(Self::Sound)
+        } else if name.starts_with("VAR_") {
+            Some(Self::Variable)
+        } else if name.starts_with("FLAG_") {
+            Some(Self::Flag)
         } else {
             None
         }
@@ -510,7 +516,11 @@ impl SymbolTable {
             } else {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
-                    format!("Unresolved include '{}' (searched from {})", inc.path, root_dir.display()),
+                    format!(
+                        "Unresolved include '{}' (searched from {})",
+                        inc.path,
+                        root_dir.display()
+                    ),
                 ));
             }
         }
@@ -1443,9 +1453,9 @@ impl SymbolTable {
                     .unwrap_or(class_display)
                     .trim();
                 let class_stem = match family {
-                    GameFamily::DP | GameFamily::Platinum => canonicalize_constant_name(
-                        class_display.trim_end_matches(['♂', '♀']),
-                    ),
+                    GameFamily::DP | GameFamily::Platinum => {
+                        canonicalize_constant_name(class_display.trim_end_matches(['♂', '♀']))
+                    }
                     GameFamily::HGSS if class_display == "Trainer" => "PKMN_TRAINER".to_string(),
                     GameFamily::HGSS => canonicalize_constant_name(class_display),
                 };
@@ -1655,7 +1665,8 @@ impl SymbolTable {
                 )
             })?;
 
-            let Some(display_name) = Self::text_bank_display_name(path, index, message, language)? else {
+            let Some(display_name) = Self::text_bank_display_name(path, index, message, language)?
+            else {
                 continue;
             };
             let Some(symbol) = canonicalize_text_bank_constant(&display_name, prefix, index) else {
