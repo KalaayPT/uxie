@@ -519,6 +519,15 @@ metang_generators = {
 #define MAPSEC_JUBILIFE_CITY 4
 #define MOVE_TACKLE 5
 #define SEQ_SE_CONFIRM 6
+#define ABILITY_LEVITATE 7
+#define TYPE_NORMAL 8
+#define BATTLE_TYPE_SINGLE 9
+#define BATTLES_COUNT 10
+#define FLAG_UNK 11
+#define VAR_TEMP 12
+#define VARS_COUNT 13
+#define TEMP_LOCAL 14
+#define MAPTEMP_FLAG 15
 ",
             )
             .unwrap();
@@ -554,6 +563,38 @@ metang_generators = {
         assert_eq!(
             table.constant_family("SEQ_SE_CONFIRM"),
             Some(ConstantFamily::Sound)
+        );
+        assert_eq!(
+            table.constant_family("ABILITY_LEVITATE"),
+            Some(ConstantFamily::Ability)
+        );
+        assert_eq!(
+            table.constant_family("TYPE_NORMAL"),
+            Some(ConstantFamily::Type)
+        );
+        assert_eq!(
+            table.constant_family("BATTLE_TYPE_SINGLE"),
+            Some(ConstantFamily::Battle)
+        );
+        assert_eq!(
+            table.constant_family("BATTLES_COUNT"),
+            Some(ConstantFamily::Battle)
+        );
+        assert_eq!(
+            table.constant_family("VAR_TEMP"),
+            Some(ConstantFamily::Variable)
+        );
+        assert_eq!(
+            table.constant_family("VARS_COUNT"),
+            Some(ConstantFamily::Variable)
+        );
+        assert_eq!(
+            table.constant_family("TEMP_LOCAL"),
+            Some(ConstantFamily::Variable)
+        );
+        assert_eq!(
+            table.constant_family("MAPTEMP_FLAG"),
+            Some(ConstantFamily::Variable)
         );
         assert_eq!(table.constant_family("TRUE"), None);
 

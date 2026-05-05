@@ -56,6 +56,9 @@ pub enum ConstantFamily {
     Sound,
     Variable,
     Flag,
+    Ability,
+    Type,
+    Battle,
 }
 
 impl ConstantFamily {
@@ -74,7 +77,17 @@ impl ConstantFamily {
             Some(Self::Location)
         } else if name.starts_with("SEQ_") {
             Some(Self::Sound)
-        } else if name.starts_with("VAR_") {
+        } else if name.starts_with("ABILITY_") {
+            Some(Self::Ability)
+        } else if name.starts_with("BATTLE_") || name.starts_with("BATTLES_") {
+            Some(Self::Battle)
+        } else if name.starts_with("TYPE_") {
+            Some(Self::Type)
+        } else if name.starts_with("VAR_")
+            || name.starts_with("VARS_")
+            || name.starts_with("TEMP_")
+            || name.starts_with("MAPTEMP_")
+        {
             Some(Self::Variable)
         } else if name.starts_with("FLAG_") {
             Some(Self::Flag)
