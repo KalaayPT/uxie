@@ -6,7 +6,7 @@
 use crate::c_parser::ConstantCache;
 use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily};
-use crate::provider::{Arm9Provider, DataProvider};
+use crate::provider::{Arm9Provider, DataProvider, DecompProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::{
     GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
@@ -18,8 +18,12 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
+    /// DSPRE binary ROM hacking project (header.bin, arm9.bin).
     Dspre,
+    /// pokeplatinum / pokeheartgold decompilation project.
     Decomp,
+    /// hg-engine code-injection framework project (armips/, narcs.mk, rom.nds).
+    HgEngine,
 }
 
 pub struct Workspace {
@@ -45,13 +49,22 @@ impl Workspace {
         let mut ws = match Self::detect_project_type(&path) {
             ProjectType::Decomp => Self::open_decomp(path)?,
             ProjectType::Dspre => Self::open_dspre(path)?,
+            ProjectType::HgEngine => Self::open_hg_engine(path)?,
         };
 
         ws.load_names()?;
         Ok(ws)
     }
 
+    /// Detect the project type by checking for marker files.
+    /// HgEngine markers are checked first since they share `include/constants/`
+    /// with decomp projects but have a fundamentally different structure.
     fn detect_project_type(path: &Path) -> ProjectType {
+        let hge_markers = [path.join("armips"), path.join("narcs.mk")];
+        if hge_markers.iter().any(|marker| marker.exists()) {
+            return ProjectType::HgEngine;
+        }
+
         let decomp_markers = [
             path.join("include/constants"),
             path.join("res/field/scripts/scripts.order"),
@@ -89,6 +102,7 @@ impl Workspace {
         match self.project_type {
             ProjectType::Dspre => self.load_dspre_internal_names(),
             ProjectType::Decomp => self.load_decomp_internal_names(),
+            ProjectType::HgEngine => Ok(None),
         }
     }
 
@@ -144,6 +158,7 @@ impl Workspace {
         match self.project_type {
             ProjectType::Dspre => self.load_dspre_location_names(),
             ProjectType::Decomp => self.load_decomp_location_names(),
+            ProjectType::HgEngine => Ok(None),
         }
     }
 
@@ -280,6 +295,54 @@ impl Workspace {
 
     pub fn get_map_script_info(&self, map_id: u16) -> crate::error::Result<MapScriptInfo> {
         crate::script_file::get_script_file_info_for_map(map_id, self.provider.as_ref())
+    }
+
+    /// Open an hg-engine project. Requires `rom.nds` in the project root for
+    /// game detection. Constants (C headers, armips `.equ`) are not loaded
+    /// here yet — call `load_constants()` on the returned workspace after
+    /// the armips `.equ` parser is available.
+    fn open_hg_engine(path: PathBuf) -> std::io::Result<Self> {
+        // rom.nds must exist in the project root for game detection.
+        let rom_path = path.join("rom.nds");
+        if !rom_path.exists() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!(
+                    "rom.nds not found in HgEngine project at {}",
+                    path.display()
+                ),
+            ));
+        }
+        let header = RomHeader::open(&rom_path)?;
+        let game = header.detect_game().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Could not detect game from rom.nds header",
+            )
+        })?;
+        let family = game.family();
+
+        let sm = SourceManager::new();
+        let p = path.clone();
+        Ok(Self {
+            project_path: path,
+            project_type: ProjectType::HgEngine,
+            game,
+            family,
+            provider: Box::new(DecompProvider::new(
+                &p,
+                SymbolTable::new(),
+                family,
+            )),
+            symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+        })
     }
 
     fn open_dspre(path: PathBuf) -> std::io::Result<Self> {
@@ -943,13 +1006,6 @@ mod tests {
         }
 
         Ok(None)
-    }
-
-    #[test]
-    fn test_project_type_equality() {
-        assert_eq!(ProjectType::Dspre, ProjectType::Dspre);
-        assert_eq!(ProjectType::Decomp, ProjectType::Decomp);
-        assert_ne!(ProjectType::Dspre, ProjectType::Decomp);
     }
 
     #[test]

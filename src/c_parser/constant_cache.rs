@@ -325,6 +325,10 @@ mod tests {
                 HashSet::from([SymbolTag::Global]),
             )]),
             symbol_to_family: HashMap::from([("VALUE".to_string(), ConstantFamily::Item)]),
+            family_value_to_name: HashMap::from([(
+                (ConstantFamily::Item, 5),
+                "VALUE".to_string(),
+            )]),
         };
 
         assert_eq!(
