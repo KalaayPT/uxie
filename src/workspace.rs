@@ -299,8 +299,7 @@ impl Workspace {
 
     /// Open an hg-engine project. Requires `rom.nds` in the project root for
     /// game detection. Constants (C headers, armips `.equ`) are not loaded
-    /// here yet — call `load_constants()` on the returned workspace after
-    /// the armips `.equ` parser is available.
+    /// here yet — call `load_hg_engine_constants` afterward.
     fn open_hg_engine(path: PathBuf) -> std::io::Result<Self> {
         // rom.nds must exist in the project root for game detection.
         let rom_path = path.join("rom.nds");
@@ -339,6 +338,27 @@ impl Workspace {
             location_names: None,
             internal_names: None,
         })
+    }
+
+    /// Load HgEngine constants into this workspace's symbol table.
+    ///
+    /// 1. C headers from `include/constants/` (parsed first — takes priority).
+    /// 2. Armips `.equ`/`equ` directives from `armips/include/` and
+    ///    `asm/include/` (skips names already defined by C headers).
+    pub fn load_hg_engine_constants(&mut self) -> std::io::Result<()> {
+        let root = &self.project_path;
+        let symbols = std::sync::Arc::make_mut(&mut self.symbols);
+
+        let c_dir = root.join("include/constants");
+        if c_dir.exists() {
+            symbols.load_headers_from_dir(c_dir)?;
+        }
+
+        for dir in [root.join("armips/include"), root.join("asm/include")] {
+            crate::c_parser::armips_equ::parse_armips_equ_dir(&dir, symbols)?;
+        }
+
+        Ok(())
     }
 
     fn open_dspre(path: PathBuf) -> std::io::Result<Self> {
