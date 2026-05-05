@@ -329,11 +329,7 @@ impl Workspace {
             project_type: ProjectType::HgEngine,
             game,
             family,
-            provider: Box::new(DecompProvider::new(
-                &p,
-                SymbolTable::new(),
-                family,
-            )),
+            provider: Box::new(DecompProvider::new(&p, SymbolTable::new(), family)),
             symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
             scripts: ScriptTable::new(),
             text_banks: TextBankTable::new(),
@@ -1924,6 +1920,74 @@ mod tests {
         assert_eq!(ws.game, Game::Platinum);
         assert_eq!(ws.family, GameFamily::Platinum);
         assert_eq!(ws.scripts.get_name(0), Some("script_main"));
+    }
+
+    #[test]
+    fn test_open_hg_engine_detection() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("armips")).unwrap();
+        fs::write(root.join("narcs.mk"), "").unwrap();
+        write_test_header_bin(&root.join("rom.nds"), "POKEMON HG", "IPKE");
+
+        let ws = Workspace::open(root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::HgEngine);
+        assert_eq!(ws.game, Game::HeartGold);
+        assert_eq!(ws.family, GameFamily::HGSS);
+    }
+
+    #[test]
+    fn test_open_hg_engine_detection_wins_over_decomp() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        // Both HgEngine and Decomp markers present — HgEngine must win.
+        fs::create_dir_all(root.join("armips")).unwrap();
+        fs::write(root.join("narcs.mk"), "").unwrap();
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::write(root.join("include/constants/test.h"), "#define X 1\n").unwrap();
+        write_test_header_bin(&root.join("rom.nds"), "POKEMON HG", "IPKE");
+
+        let ws = Workspace::open(root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::HgEngine);
+    }
+
+    #[test]
+    fn test_open_hg_engine_missing_rom_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("armips")).unwrap();
+        fs::write(root.join("narcs.mk"), "").unwrap();
+
+        let result = Workspace::open(root);
+        match result {
+            Err(err) => {
+                assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+                assert!(err.to_string().contains("rom.nds"));
+            }
+            Ok(_) => panic!("expected NotFound error"),
+        }
+    }
+
+    #[test]
+    fn test_open_hg_engine_invalid_rom_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("armips")).unwrap();
+        fs::write(root.join("narcs.mk"), "").unwrap();
+        // Write a file that is too short to contain a valid NDS header.
+        fs::write(root.join("rom.nds"), b"too short").unwrap();
+
+        let result = Workspace::open(root);
+        match result {
+            Err(err) => assert_eq!(err.kind(), std::io::ErrorKind::UnexpectedEof),
+            Ok(_) => panic!("expected UnexpectedEof error"),
+        }
     }
 
     #[test]
