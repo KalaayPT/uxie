@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use regex::Regex;
 
@@ -12,13 +12,21 @@ static RE_ARMIPS_EQU: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+equ\s+(.+)$").unwrap()
 });
 
+struct PendingEqu {
+    name: String,
+    expr: String,
+    source: PathBuf,
+    line_number: usize,
+}
+
 /// Parse armips `.equ` / `equ` directives from a file and insert them into the
 /// symbol table. Skips names that are already defined (C headers take priority).
 ///
 /// Handles:
 /// - `.equ NAME, value` (GNU asm)
 /// - `NAME equ value`   (armips native)
-/// - `;` line comments in value position
+/// - `;` and `//` line comments
+/// - Forward references (multi-pass resolution)
 ///
 /// Values are evaluated through the symbol table's expression parser, so they
 /// can reference previously-defined symbols.
@@ -31,74 +39,88 @@ pub fn parse_armips_equ_file(
 }
 
 /// Parse armips `.equ` / `equ` directives from a string (for testing).
+///
+/// Uses multi-pass resolution to handle forward references (a constant defined
+/// later in the file referencing an earlier definition).
 pub fn parse_armips_equ_str(
     content: &str,
     source: &Path,
     symbols: &mut SymbolTable,
 ) -> std::io::Result<usize> {
-    let mut count = 0;
+    // First pass: collect all definitions, skipping already-known names.
+    let mut pending: Vec<PendingEqu> = Vec::new();
 
     for (line_idx, line) in content.lines().enumerate() {
         let line_number = line_idx + 1;
 
-        // Strip ; and // line comments before parsing
         let line = line.split(';').next().unwrap_or(line);
         let line = line.split("//").next().unwrap_or(line).trim();
         if line.is_empty() {
             continue;
         }
 
-        // Try GNU .equ format
-        if let Some(caps) = RE_GNU_EQU.captures(line) {
-            let name = caps.get(1).unwrap().as_str();
-            let expr = caps.get(2).unwrap().as_str().trim();
+        let (name, expr) = if let Some(caps) = RE_GNU_EQU.captures(line) {
+            (caps.get(1).unwrap().as_str().to_string(), caps.get(2).unwrap().as_str().trim().to_string())
+        } else if let Some(caps) = RE_ARMIPS_EQU.captures(line) {
+            (caps.get(1).unwrap().as_str().to_string(), caps.get(2).unwrap().as_str().trim().to_string())
+        } else {
+            continue;
+        };
 
-            if symbols.resolve_constant(name).is_some() {
-                continue;
-            }
-
-            let value = symbols.evaluate_expression(expr).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Failed to evaluate .equ expression '{}' for '{}' at {}:{}",
-                        expr, name, source.display(), line_number
-                    ),
-                )
-            })?;
-
-            symbols.insert_define(name.to_string(), value);
-            count += 1;
+        if symbols.resolve_constant(&name).is_some() {
             continue;
         }
 
-        // Try armips equ format
-        if let Some(caps) = RE_ARMIPS_EQU.captures(line) {
-            let name = caps.get(1).unwrap().as_str();
-            let expr = caps.get(2).unwrap().as_str().trim();
-
-            if symbols.resolve_constant(name).is_some() {
-                continue;
-            }
-
-            let value = symbols.evaluate_expression(expr).ok_or_else(|| {
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!(
-                        "Failed to evaluate equ expression '{}' for '{}' at {}:{}",
-                        expr, name, source.display(), line_number
-                    ),
-                )
-            })?;
-
-            symbols.insert_define(name.to_string(), value);
-            count += 1;
-        }
-        // Lines that don't match either format are silently ignored (they may
-        // be armips directives, labels, or other assembly).
+        pending.push(PendingEqu {
+            name,
+            expr,
+            source: source.to_path_buf(),
+            line_number,
+        });
     }
 
-    Ok(count)
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    // Multi-pass resolution: evaluate expressions iteratively until no
+    // progress is made. This handles forward references within the file.
+    let mut resolved = 0;
+    loop {
+        let before = resolved;
+        pending.retain(|entry| {
+            if symbols.resolve_constant(&entry.name).is_some() {
+                return false; // already resolved (e.g. by C header from another file)
+            }
+
+            match symbols.evaluate_expression(&entry.expr) {
+                Some(value) => {
+                    symbols.insert_define(entry.name.clone(), value);
+                    resolved += 1;
+                    false
+                }
+                None => true, // still pending — may resolve in a later pass
+            }
+        });
+
+        if resolved == before || pending.is_empty() {
+            break;
+        }
+    }
+
+    // Anything still pending is a genuine resolution failure.
+    if let Some(entry) = pending.first() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Failed to evaluate .equ expression '{}' for '{}' at {}:{} \
+                 (unresolved symbols, possibly a circular dependency)",
+                entry.expr, entry.name, entry.source.display(), entry.line_number
+            ),
+        ));
+    }
+
+    Ok(resolved)
 }
 
 /// Parse all armips `.equ` / `equ` directives from every file in a directory
@@ -250,6 +272,46 @@ mod tests {
         let path = std::path::Path::new("test.s");
         let result = parse_armips_equ_str(
             ".equ BAD, UNDEFINED_SYMBOL + 1\n",
+            path,
+            &mut table,
+        );
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn forward_references_resolve_in_multipass() {
+        let mut table = SymbolTable::new();
+        let path = std::path::Path::new("test.s");
+        // CONTESTANT_TYPE_PLAYER references BATTLER_TYPE_* which are defined
+        // later in the same file — must resolve via multi-pass.
+        let n = parse_armips_equ_str(
+            "\
+.equ CONTESTANT_TYPE_PLAYER, BATTLER_TYPE_MAX + BATTLER_TYPE_SOLO_PLAYER
+.equ BATTLER_TYPE_SOLO_PLAYER, 1
+.equ BATTLER_TYPE_TAG_PARTNER, 2
+.equ BATTLER_TYPE_MAX, BATTLER_TYPE_TAG_PARTNER
+",
+            path,
+            &mut table,
+        )
+        .unwrap();
+        assert_eq!(n, 4);
+        assert_eq!(table.resolve_constant("BATTLER_TYPE_SOLO_PLAYER"), Some(1));
+        assert_eq!(table.resolve_constant("BATTLER_TYPE_MAX"), Some(2));
+        // CONTESTANT_TYPE_PLAYER = 2 + 1 = 3
+        assert_eq!(table.resolve_constant("CONTESTANT_TYPE_PLAYER"), Some(3));
+    }
+
+    #[test]
+    fn circular_dependency_returns_error() {
+        let mut table = SymbolTable::new();
+        let path = std::path::Path::new("test.s");
+        let result = parse_armips_equ_str(
+            ".equ A, B + 1\n.equ B, A + 1\n",
             path,
             &mut table,
         );
