@@ -8,7 +8,8 @@ use std::sync::Arc;
 use uxie::{
     BinaryEncounterFile, DspreProject, EggMoveData, EvolutionData, EvolutionMethod, GameFamily,
     GameStrings, ItemData, JsonEncounterFile, LearnsetData, MapHeaderJson, MoveData, Narc,
-    PersonalData, RomHeader, SymbolTable, Workspace, load_dspre_trainer,
+    PersonalData, RomHeader, SymbolTable, Workspace, decode_text_archives, encode_text_archives,
+    load_dspre_trainer,
 };
 
 pub fn cmd_header(path: &Path, json: bool) -> Result<(), Box<dyn std::error::Error>> {
@@ -805,4 +806,30 @@ fn resolve_name(
             .resolve_name(id as i64, prefix)
             .unwrap_or_else(|| id.to_string()),
     }
+}
+
+pub fn cmd_text_decode(
+    binary_dir: &Path,
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    decode_text_archives(binary_dir, output_dir)?;
+    println!(
+        "Decoded text archives from {} to {}",
+        binary_dir.display(),
+        output_dir.display()
+    );
+    Ok(())
+}
+
+pub fn cmd_text_encode(
+    source_dir: &Path,
+    output_dir: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    encode_text_archives(source_dir, output_dir)?;
+    println!(
+        "Encoded text archives from {} to {}",
+        source_dir.display(),
+        output_dir.display()
+    );
+    Ok(())
 }

@@ -1254,23 +1254,21 @@ impl SymbolTable {
         language: GameLanguage,
     ) -> std::io::Result<Option<String>> {
         let preferred = language.locale_key();
-        let display_name = if let Some(value) = message.get(preferred) {
-            Some(value)
-        } else if let Some(value) = message.get("en_US") {
-            Some(value)
-        } else if let Some(value) = message.get("ja_JP") {
-            Some(value)
-        } else {
-            message.iter().find_map(|(key, value)| {
-                if key == "id" {
-                    None
-                } else if value.is_string() || value.is_array() {
-                    Some(value)
-                } else {
-                    None
-                }
-            })
-        };
+        let display_name = message
+            .get(preferred)
+            .or_else(|| message.get("en_US"))
+            .or_else(|| message.get("ja_JP"))
+            .or_else(|| {
+                message.iter().find_map(|(key, value)| {
+                    if key == "id" {
+                        None
+                    } else if value.is_string() || value.is_array() {
+                        Some(value)
+                    } else {
+                        None
+                    }
+                })
+            });
 
         let Some(display_name) = display_name else {
             return Ok(None);

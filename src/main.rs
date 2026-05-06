@@ -5,7 +5,8 @@ mod cli;
 
 use crate::cli::commands::{
     cmd_egg_moves, cmd_encounter, cmd_event, cmd_evolution, cmd_header, cmd_item, cmd_learnset,
-    cmd_map, cmd_move, cmd_parse_header, cmd_personal, cmd_resolve_script, cmd_trainer,
+    cmd_map, cmd_move, cmd_parse_header, cmd_personal, cmd_resolve_script, cmd_text_decode,
+    cmd_text_encode, cmd_trainer,
 };
 
 #[derive(Parser)]
@@ -123,6 +124,24 @@ enum Commands {
         #[command(flatten)]
         args: ProjectArgs,
     },
+
+    #[command(name = "text-decode")]
+    TextDecode {
+        /// Directory containing binary text archives
+        binary_dir: PathBuf,
+
+        /// Directory to write decoded .json files
+        output_dir: PathBuf,
+    },
+
+    #[command(name = "text-encode")]
+    TextEncode {
+        /// Directory containing .json text sources
+        source_dir: PathBuf,
+
+        /// Directory to write encoded binary archives
+        output_dir: PathBuf,
+    },
 }
 
 fn main() {
@@ -148,6 +167,14 @@ fn main() {
         Commands::EggMoves { species, args } => {
             cmd_egg_moves(species, &args.project, args.decomp, args.json)
         }
+        Commands::TextDecode {
+            binary_dir,
+            output_dir,
+        } => cmd_text_decode(&binary_dir, &output_dir),
+        Commands::TextEncode {
+            source_dir,
+            output_dir,
+        } => cmd_text_encode(&source_dir, &output_dir),
     };
 
     if let Err(e) = result {

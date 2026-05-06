@@ -138,7 +138,7 @@ impl GlobalScriptTable {
     ///
     /// Entries will be sorted by min_script_id descending.
     pub fn from_entries(mut entries: Vec<GlobalScriptEntry>) -> Self {
-        entries.sort_by(|a, b| b.min_script_id.cmp(&a.min_script_id));
+        entries.sort_by_key(|b| std::cmp::Reverse(b.min_script_id));
         Self { entries }
     }
 
