@@ -47,9 +47,66 @@ pub fn parse_armips_equ_str(
     source: &Path,
     symbols: &mut SymbolTable,
 ) -> std::io::Result<usize> {
-    // First pass: collect all definitions, skipping already-known names.
-    let mut pending: Vec<PendingEqu> = Vec::new();
+    let mut pending = Vec::new();
+    collect_pending_from_str(content, source, symbols, &mut pending);
+    resolve_all_pending(&mut pending, symbols)
+}
 
+/// Parse all armips `.equ` / `equ` directives from every file in one or more
+/// directories (non-recursive). Files with extensions `.s` and `.inc` are
+/// processed. All definitions are resolved together in a single multi-pass so
+/// cross-file forward references work.
+pub fn parse_armips_equ_dirs(
+    dirs: &[&Path],
+    symbols: &mut SymbolTable,
+) -> std::io::Result<usize> {
+    let mut all_pending: Vec<PendingEqu> = Vec::new();
+
+    for dir in dirs {
+        if !dir.exists() {
+            continue;
+        }
+
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("");
+            if !matches!(ext.to_ascii_lowercase().as_str(), "s" | "inc") {
+                continue;
+            }
+
+            let content = std::fs::read_to_string(&path)?;
+            collect_pending_from_str(&content, &path, symbols, &mut all_pending);
+        }
+    }
+
+    resolve_all_pending(&mut all_pending, symbols)
+}
+
+/// Parse all armips `.equ` / `equ` directives from every file in a directory
+/// (non-recursive). Files with extensions `.s` and `.inc` are processed.
+/// Returns the total number of constants inserted.
+pub fn parse_armips_equ_dir(
+    dir: &Path,
+    symbols: &mut SymbolTable,
+) -> std::io::Result<usize> {
+    parse_armips_equ_dirs(&[dir], symbols)
+}
+
+// --- internal helpers ---
+
+fn collect_pending_from_str(
+    content: &str,
+    source: &Path,
+    symbols: &SymbolTable,
+    pending: &mut Vec<PendingEqu>,
+) {
     for (line_idx, line) in content.lines().enumerate() {
         let line_number = line_idx + 1;
 
@@ -78,19 +135,22 @@ pub fn parse_armips_equ_str(
             line_number,
         });
     }
+}
 
+fn resolve_all_pending(
+    pending: &mut Vec<PendingEqu>,
+    symbols: &mut SymbolTable,
+) -> std::io::Result<usize> {
     if pending.is_empty() {
         return Ok(0);
     }
 
-    // Multi-pass resolution: evaluate expressions iteratively until no
-    // progress is made. This handles forward references within the file.
     let mut resolved = 0;
     loop {
         let before = resolved;
         pending.retain(|entry| {
             if symbols.resolve_constant(&entry.name).is_some() {
-                return false; // already resolved (e.g. by C header from another file)
+                return false;
             }
 
             match symbols.evaluate_expression(&entry.expr) {
@@ -99,7 +159,7 @@ pub fn parse_armips_equ_str(
                     resolved += 1;
                     false
                 }
-                None => true, // still pending — may resolve in a later pass
+                None => true,
             }
         });
 
@@ -108,51 +168,15 @@ pub fn parse_armips_equ_str(
         }
     }
 
-    // Anything still pending is a genuine resolution failure.
     if let Some(entry) = pending.first() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "Failed to evaluate .equ expression '{}' for '{}' at {}:{} \
-                 (unresolved symbols, possibly a circular dependency)",
-                entry.expr, entry.name, entry.source.display(), entry.line_number
-            ),
-        ));
+        eprintln!(
+            "Warning: unresolved .equ at {}:{}: {} = '{}' \
+             (referenced symbol not defined in project sources)",
+            entry.source.display(), entry.line_number, entry.name, entry.expr
+        );
     }
 
     Ok(resolved)
-}
-
-/// Parse all armips `.equ` / `equ` directives from every file in a directory
-/// (non-recursive). Files with extensions `.s` and `.inc` are processed.
-/// Returns the total number of constants inserted.
-pub fn parse_armips_equ_dir(
-    dir: &Path,
-    symbols: &mut SymbolTable,
-) -> std::io::Result<usize> {
-    if !dir.exists() {
-        return Ok(0);
-    }
-
-    let mut total = 0;
-    for entry in std::fs::read_dir(dir)? {
-        let path = entry?.path();
-        if !path.is_file() {
-            continue;
-        }
-
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        if !matches!(ext.to_ascii_lowercase().as_str(), "s" | "inc") {
-            continue;
-        }
-
-        total += parse_armips_equ_file(&path, symbols)?;
-    }
-
-    Ok(total)
 }
 
 #[cfg(test)]
@@ -270,16 +294,16 @@ mod tests {
     fn bad_expression_returns_error() {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
+        // UNDEFINED_SYMBOL has no definition anywhere, so it's skipped with a warning.
         let result = parse_armips_equ_str(
             ".equ BAD, UNDEFINED_SYMBOL + 1\n",
             path,
             &mut table,
         );
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
+        // Should NOT error — unresolvable constants are skipped with a warning.
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
+        assert_eq!(table.resolve_constant("BAD"), None);
     }
 
     #[test]
@@ -307,7 +331,7 @@ mod tests {
     }
 
     #[test]
-    fn circular_dependency_returns_error() {
+    fn circular_dependency_is_skipped_with_warning() {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
         let result = parse_armips_equ_str(
@@ -315,11 +339,9 @@ mod tests {
             path,
             &mut table,
         );
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().kind(),
-            std::io::ErrorKind::InvalidData
-        );
+        // Circular refs can't resolve — both are skipped with a warning.
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), 0);
     }
 
     #[test]
@@ -409,5 +431,56 @@ mod tests {
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("HEAP_ADDR"), Some(0x02001000));
         assert_eq!(table.resolve_constant("STACK_ADDR"), Some(0x02001800));
+    }
+
+    #[test]
+    fn cross_file_forward_references_resolve() {
+        let dir = tempdir().unwrap();
+
+        // File A defines a constant that references one in file B.
+        write_file(
+            dir.path(),
+            "animscript.s",
+            ".equ CONTESTANT_TYPE_PLAYER, BATTLER_TYPE_MAX + BATTLER_TYPE_SOLO_PLAYER\n",
+        );
+        // File B defines the referenced constants.
+        write_file(
+            dir.path(),
+            "battle_constants.inc",
+            "\
+.equ BATTLER_TYPE_SOLO_PLAYER, 0x0
+.equ BATTLER_TYPE_MAX, 0x2
+",
+        );
+
+        let mut table = SymbolTable::new();
+        let dirs = [dir.path()];
+        let n = parse_armips_equ_dirs(&dirs, &mut table).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(table.resolve_constant("BATTLER_TYPE_SOLO_PLAYER"), Some(0));
+        assert_eq!(table.resolve_constant("BATTLER_TYPE_MAX"), Some(2));
+        assert_eq!(table.resolve_constant("CONTESTANT_TYPE_PLAYER"), Some(2));
+    }
+
+    #[test]
+    fn parse_actual_scriptmacros_s() {
+        let path = std::path::Path::new(
+            "/home/kalaay/dev/slop-engine/armips/include/scriptmacros.s",
+        );
+        if !path.exists() {
+            eprintln!("skipping: slop-engine not found at {}", path.display());
+            return;
+        }
+
+        let mut table = SymbolTable::new();
+        let n = parse_armips_equ_file(path, &mut table).unwrap();
+        assert!(n > 0, "should parse at least some .equ directives");
+
+        // Verify a few known constants from the file.
+        assert_eq!(table.resolve_constant("SCRDEF_END_CONSTANT"), Some(0xFD13));
+        assert_eq!(table.resolve_constant("DIR_NORTH"), Some(0));
+        assert_eq!(table.resolve_constant("DIR_SOUTH"), Some(1));
+        assert_eq!(table.resolve_constant("DIR_WEST"), Some(2));
+        assert_eq!(table.resolve_constant("DIR_EAST"), Some(3));
     }
 }

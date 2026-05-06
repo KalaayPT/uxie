@@ -18,6 +18,7 @@ pub mod symbol_table;
 mod tests;
 
 pub use armips_equ::parse_armips_equ_dir;
+pub use armips_equ::parse_armips_equ_dirs;
 
 pub use constant_cache::{ConstantCache, SymbolSnapshot};
 pub use defines::{CDefine, parse_and_resolve_defines, parse_defines, parse_value};

@@ -354,8 +354,18 @@ impl Workspace {
             symbols.load_headers_from_dir(c_dir)?;
         }
 
-        for dir in [root.join("armips/include"), root.join("asm/include")] {
-            crate::c_parser::armips_equ::parse_armips_equ_dir(&dir, symbols)?;
+        // Load armips .equ directives, skipping names already known.
+        // Process all files together so cross-file forward references resolve.
+        let armips_dirs: Vec<PathBuf> = [
+            root.join("armips/include"),
+            root.join("asm/include"),
+        ]
+        .into_iter()
+        .filter(|d| d.exists())
+        .collect();
+        if !armips_dirs.is_empty() {
+            let refs: Vec<&Path> = armips_dirs.iter().map(|d| d.as_path()).collect();
+            crate::c_parser::armips_equ::parse_armips_equ_dirs(&refs, symbols)?;
         }
 
         Ok(())

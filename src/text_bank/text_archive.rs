@@ -1,56 +1,83 @@
+use std::fs;
 use std::path::Path;
 
-/// Decode all binary text archives in `binary_dir` (`7_*` files in hge) to `.json`
-/// files in `output_dir` using the built-in HGSS charmap.
+/// Decode all binary text archives in `binary_dir` to `.json` files in
+/// `output_dir` using the built-in HGSS charmap.
 pub fn decode_text_archives(
     binary_dir: &Path,
     output_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let charmap = chatot::get_default_charmap();
-    let source = chatot::BinarySource {
-        archive: None,
-        archive_dir: Some(binary_dir.to_path_buf()),
-    };
-    let destination = chatot::TextSource {
-        txt: None,
-        text_dir: Some(output_dir.to_path_buf()),
-    };
-    let settings = chatot::Settings {
-        json: true,
-        lang: "en_US".to_string(),
-        newer_only: false,
-        msgenc_format: false,
-    };
+    fs::create_dir_all(output_dir)?;
 
-    std::fs::create_dir_all(output_dir)?;
-    chatot::decode::decode_archives(charmap, &source, &destination, &settings)?;
+    for entry in fs::read_dir(binary_dir)? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let json_path = output_dir.join(format!("{stem}.json"));
+
+        let mut file = fs::File::open(&path)?;
+        let archive = chatot::decode_archive(charmap, &mut file, false)?;
+
+        // Output in the chatot-compatible JSON format so encode_text_archives
+        // can read it back directly.
+        let json = serde_json::json!({
+            "key": archive.key,
+            "messages": archive.messages.iter().enumerate().map(|(i, msg)| {
+                serde_json::json!({
+                    "id": format!("msg_{stem}_{i:05}"),
+                    "en_US": msg,
+                })
+            }).collect::<Vec<_>>(),
+        });
+        fs::write(&json_path, serde_json::to_string_pretty(&json)?)?;
+    }
+
     Ok(())
 }
 
-/// Encode all `.json` text archive sources in `source_dir` to binary
-/// files in `output_dir` using the built-in HGSS charmap.
+/// Encode all `.json` text archive sources in `source_dir` to binary archives
+/// in `output_dir` using the built-in HGSS charmap.
 pub fn encode_text_archives(
     source_dir: &Path,
     output_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let charmap = chatot::get_default_charmap();
-    let source = chatot::TextSource {
-        txt: None,
-        text_dir: Some(source_dir.to_path_buf()),
-    };
-    let destination = chatot::BinarySource {
-        archive: None,
-        archive_dir: Some(output_dir.to_path_buf()),
-    };
-    let settings = chatot::Settings {
-        json: true,
-        lang: "en_US".to_string(),
-        newer_only: false,
-        msgenc_format: false,
-    };
+    fs::create_dir_all(output_dir)?;
 
-    std::fs::create_dir_all(output_dir)?;
-    chatot::encode::encode_texts(charmap, &source, &destination, &settings)?;
+    for entry in fs::read_dir(source_dir)? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        if !ext.eq_ignore_ascii_case("json") {
+            continue;
+        }
+
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let binary_path = output_dir.join(stem);
+
+        let src = chatot::TextSource {
+            txt: Some(vec![path]),
+            text_dir: None,
+        };
+        let dst = chatot::BinarySource {
+            archive: Some(vec![binary_path]),
+            archive_dir: None,
+        };
+        let settings = chatot::Settings {
+            json: true,
+            lang: "en_US".to_string(),
+            newer_only: false,
+            msgenc_format: false,
+        };
+        chatot::encode::encode_texts(charmap, &src, &dst, &settings)?;
+    }
+
     Ok(())
 }
 
