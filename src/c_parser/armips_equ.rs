@@ -41,8 +41,9 @@ pub fn parse_armips_equ_str(
     for (line_idx, line) in content.lines().enumerate() {
         let line_number = line_idx + 1;
 
-        // Strip ; comments (armips uses ; for line comments)
-        let line = line.split(';').next().unwrap_or(line).trim();
+        // Strip ; and // line comments before parsing
+        let line = line.split(';').next().unwrap_or(line);
+        let line = line.split("//").next().unwrap_or(line).trim();
         if line.is_empty() {
             continue;
         }
