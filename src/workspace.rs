@@ -144,6 +144,7 @@ impl Workspace {
         ))
     }
 
+    #[allow(dead_code)]
     fn location_text_archive_id(&self) -> u16 {
         match self.family {
             GameFamily::DP => 382,
@@ -241,7 +242,10 @@ impl Workspace {
     /// single map header.
     pub fn text_archive_for_script_file(&self, script_file_name: &str) -> Option<u16> {
         let file_id = self.scripts.get_id(script_file_name)?;
-        if let Ok(Some(id)) = self.provider.get_text_archive_for_script_file(file_id as u16) {
+        if let Ok(Some(id)) = self
+            .provider
+            .get_text_archive_for_script_file(file_id as u16)
+        {
             return Some(id);
         }
         self.global_script_table

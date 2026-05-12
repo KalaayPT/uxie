@@ -1986,7 +1986,88 @@ impl SymbolTable {
             self.record_symbol_origin(&row.id, path, Some(&SymbolTag::Global));
         }
 
+        // Second pass: extract English message text for hover/lookup.
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            if let Ok(messages) = Self::extract_gmm_messages(&content) {
+                self.text_messages.insert(stem.to_string(), messages);
+            }
+        }
+
         Ok(())
+    }
+
+    /// Extract English message text from GMM XML content.
+    ///
+    /// This is a public wrapper around the internal GMM text extraction
+    /// so that consumers (e.g. the LSP) can read GMM files on demand.
+    /// Extract English message text from GMM XML content.
+    pub fn extract_gmm_messages(xml: &str) -> std::io::Result<Vec<String>> {
+        use quick_xml::events::Event;
+        use quick_xml::Reader;
+
+        let mut reader = Reader::from_str(xml);
+        let mut messages = Vec::new();
+        let mut in_language = false;
+        let mut is_english = false;
+        let mut current_index: Option<usize> = None;
+        let mut text_buf = String::new();
+
+        loop {
+            match reader.read_event() {
+                Ok(Event::Start(ref e)) => {
+                    let name = e.name();
+                    let tag = name.as_ref();
+                    if tag == b"row" {
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"index" {
+                                if let Some(idx) = std::str::from_utf8(&attr.value).ok()
+                                    .and_then(|s| s.parse::<usize>().ok())
+                                {
+                                    current_index = Some(idx);
+                                }
+                                break;
+                            }
+                        }
+                    } else if tag == b"language" {
+                        in_language = true;
+                        is_english = false;
+                        for attr in e.attributes().flatten() {
+                            if attr.key.as_ref() == b"name"
+                                && attr.value.as_ref() == b"English"
+                            {
+                                is_english = true;
+                            }
+                        }
+                        text_buf.clear();
+                    }
+                }
+                Ok(Event::Text(ref e)) if in_language && is_english => {
+                    if let Ok(t) = e.unescape() {
+                        text_buf.push_str(&t);
+                    }
+                }
+                Ok(Event::End(ref e)) => {
+                    let tag = e.name();
+                    let tag_bytes = tag.as_ref();
+                    if tag_bytes == b"row" {
+                        current_index = None;
+                    } else if tag_bytes == b"language" && in_language && is_english {
+                        if let Some(idx) = current_index {
+                            if idx >= messages.len() {
+                                messages.resize(idx + 1, String::new());
+                            }
+                            messages[idx] = std::mem::take(&mut text_buf);
+                        }
+                        in_language = false;
+                    }
+                }
+                Ok(Event::Eof) => break,
+                Err(e) => return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+                _ => {}
+            }
+        }
+
+        Ok(messages)
     }
 
     fn collect_header_files(dir: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {

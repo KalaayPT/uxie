@@ -65,7 +65,7 @@ Or add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-uxie = "0.6.10"
+uxie = "0.6.11"
 ```
 
 If your own crate links `uxie` into an executable that you distribute, ship the corresponding `nitroarc_ffi` shared library next to that executable.

@@ -81,10 +81,69 @@ pub fn encode_text_archives(
     Ok(())
 }
 
+/// Read the message strings from a binary text archive (chatot `.bin` format).
+pub fn read_text_archive_bin(
+    path: impl AsRef<Path>,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let charmap = chatot::get_default_charmap();
+    let mut file = std::fs::File::open(path)?;
+    let archive = chatot::decode_archive(&charmap, &mut file, false)?;
+    Ok(archive.messages)
+}
+
+/// Read message strings from a GMM (Game Message XML) file.
+///
+/// Uses the same extraction logic that `SymbolTable::load_gmm_file` uses
+/// for constant resolution, exposed here for on-demand reading.
+pub fn read_gmm_file_messages(
+    path: impl AsRef<Path>,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let content = std::fs::read_to_string(path)?;
+    let messages = crate::c_parser::SymbolTable::extract_gmm_messages(&content)?;
+    Ok(messages)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_read_gmm_file_messages() {
+        let dir = tempdir().unwrap();
+        let gmm_path = dir.path().join("test.gmm");
+
+        let xml = r#"<?xml version="1.0"?>
+<body language="English">
+  <row id="msg_00000" index="0">
+    <language name="English">Hello world</language>
+  </row>
+  <row id="msg_00001" index="1">
+    <language name="English">Second message</language>
+  </row>
+</body>"#;
+        std::fs::write(&gmm_path, xml).unwrap();
+
+        let messages = read_gmm_file_messages(&gmm_path).unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0], "Hello world");
+        assert_eq!(messages[1], "Second message");
+    }
+
+    #[test]
+    fn test_read_gmm_file_messages_against_fixture() {
+        // Read from the rotom test fixture
+        let fixture = Path::new("../rotom/tests/fixtures/decomp/pokeheartgold/files/msgdata/msg/msg_0115_D36R0101.gmm");
+        if !fixture.exists() {
+            eprintln!("Skipping fixture test: {} not found", fixture.display());
+            return;
+        }
+        let messages = read_gmm_file_messages(fixture).unwrap();
+        assert!(!messages.is_empty(), "expected at least one message");
+        // Verify message at index 36 exists and has content
+        assert!(messages.len() > 36, "expected at least 37 messages");
+        assert!(!messages[36].is_empty(), "message 36 should not be empty");
+    }
 
     #[test]
     fn test_decode_text_archives_directory() {
