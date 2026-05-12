@@ -112,6 +112,9 @@ pub struct SymbolTable {
     pub(crate) eval_cache: Arc<DashMap<String, i64>>,
     pub(crate) shortest_name_cache: Arc<DashMap<i64, String>>,
     pub(crate) source_manager: Option<SourceManager>,
+    /// Cached message strings from text bank JSON files, keyed by file stem
+    /// (e.g. `"acuity_cavern"`).  Populated during `load_text_bank_json`.
+    pub(crate) text_messages: FxHashMap<String, Vec<String>>,
 }
 
 static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
@@ -1544,6 +1547,51 @@ impl SymbolTable {
         Ok(count)
     }
 
+    /// Cache message strings from a text bank JSON so they can be served
+    /// later via [`message_text`].
+    fn cache_text_bank_messages(&mut self, path: &Path, messages_value: &serde_json::Value) {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            return;
+        };
+        let Some(messages) = messages_value.as_array() else {
+            return;
+        };
+        let texts: Vec<String> = messages
+            .iter()
+            .map(|msg| {
+                let value = msg
+                    .get("en_US")
+                    .or_else(|| msg.get("ja_JP"));
+                let Some(value) = value else { return String::new() };
+                match value {
+                    serde_json::Value::String(s) => s.clone(),
+                    serde_json::Value::Array(parts) => {
+                        let mut joined = String::new();
+                        for part in parts {
+                            if let Some(s) = part.as_str() {
+                                joined.push_str(s);
+                            }
+                        }
+                        joined
+                    }
+                    _ => String::new(),
+                }
+            })
+            .collect();
+        self.text_messages.insert(stem.to_string(), texts);
+    }
+
+    /// Look up a cached message string by file stem and zero-based index.
+    ///
+    /// `stem` is the text bank JSON file name without extension, e.g.
+    /// `"acuity_cavern"` for `res/text/acuity_cavern.json`.
+    pub fn message_text(&self, stem: &str, index: usize) -> Option<&str> {
+        self.text_messages
+            .get(stem)
+            .and_then(|msgs| msgs.get(index))
+            .map(String::as_str)
+    }
+
     fn load_text_bank_events(
         &mut self,
         path: &Path,
@@ -1611,7 +1659,9 @@ impl SymbolTable {
 
         let mut count = 0;
         if let Some(messages_value) = messages_field {
-            count += self.load_text_bank_messages(path, messages_value)?;
+            let result = self.load_text_bank_messages(path, messages_value);
+            self.cache_text_bank_messages(path, messages_value);
+            count += result?;
         }
         if let Some(events_value) = events_field {
             count += self.load_text_bank_events(path, events_value)?;
@@ -2268,6 +2318,7 @@ impl SymbolTable {
                 .map(|(key, name)| (*key, name.clone()))
                 .collect(),
             loaded_files: FxHashSet::default(),
+            text_messages: FxHashMap::default(),
             eval_cache: Arc::default(),
             shortest_name_cache: Arc::default(),
             source_manager: None,

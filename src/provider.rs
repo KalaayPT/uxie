@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 ///
 /// Implementations provide unified access to map headers and related data
 /// from different project types (DSPRE, decompilation, etc.).
-pub trait DataProvider {
+pub trait DataProvider: Send + Sync {
     /// Get a specific map header by ID
     fn get_map_header(&self, id: u16) -> Result<MapHeader>;
     /// Get the total number of map headers

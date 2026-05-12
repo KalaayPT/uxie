@@ -234,6 +234,33 @@ impl Workspace {
             .map(str::to_string)
     }
 
+    /// Return the `text_archive_id` associated with a script file.
+    ///
+    /// First scans map headers for the script file.  Falls back to the
+    /// global script table for common scripts that are not tied to any
+    /// single map header.
+    pub fn text_archive_for_script_file(&self, script_file_name: &str) -> Option<u16> {
+        let file_id = self.scripts.get_id(script_file_name)?;
+        if let Ok(Some(id)) = self.provider.get_text_archive_for_script_file(file_id as u16) {
+            return Some(id);
+        }
+        self.global_script_table
+            .find_by_script_file_id(file_id as u16)
+            .map(|e| e.text_archive_id)
+    }
+
+    /// Read a single message from a text archive cached during symbol loading.
+    ///
+    /// Uses the `TextBankTable` to resolve `text_archive_id` to a text bank
+    /// name, then looks up the message in the symbol table's cached strings.
+    pub fn read_message(&self, text_archive_id: u16, msg_index: u16) -> Option<String> {
+        let name = self.text_banks.get_name(text_archive_id as usize)?;
+        let stem = name.strip_prefix("TEXT_BANK_")?.to_lowercase();
+        self.symbols
+            .message_text(&stem, msg_index as usize)
+            .map(str::to_string)
+    }
+
     pub fn get_symbols_for_map(&self, map_id: u16) -> Vec<String> {
         use crate::c_parser::SymbolTag;
         self.symbols.get_symbols_by_tag(&SymbolTag::Map(map_id))
