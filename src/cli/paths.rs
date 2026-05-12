@@ -77,6 +77,15 @@ pub fn egg_move_overlay_path(project_path: &Path, family: GameFamily) -> PathBuf
     }
 }
 
+pub fn event_narc_path(project_path: &Path, family: GameFamily) -> PathBuf {
+    match family {
+        GameFamily::DP | GameFamily::Platinum => {
+            project_path.join("data/fielddata/eventdata/zone_event.narc")
+        }
+        GameFamily::HGSS => project_path.join("data/a/0/3/2"),
+    }
+}
+
 fn project_paths(project_path: &Path) -> DecompPaths {
     DecompPaths::new(project_path)
 }

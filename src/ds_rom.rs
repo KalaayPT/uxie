@@ -1,8 +1,4 @@
-//! DSPRE and ds-rom-tool project structures
-//!
-//! This module provides support for:
-//! - DSPRE project directories (legacy ROM hacking tool format)
-//! - ds-rom-tool projects (modern YAML-based ROM build system)
+//! DSPRE and ds-rom project structures
 
 use crate::game::{Game, GameFamily};
 use crate::rom_header::RomHeader;
@@ -18,18 +14,31 @@ fn from_yaml_file<T: DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> 
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
 }
 
+/// A DSPRE project directory.
+///
+/// DSPRE projects use ds-rom for ROM management (`config.yaml`) and may also
+/// have an `unpacked/` directory of individual binary files pre-extracted by
+/// DSPRE's editor. The `has_unpacked_*` helpers let callers check availability;
+/// the `load_*` methods return errors when the specific files are absent.
 #[derive(Debug, Clone)]
 pub struct DspreProject {
     pub root: PathBuf,
 }
 
 impl DspreProject {
+    /// Open a DSPRE project at `root`.
+    ///
+    /// Accepts ds-rom projects (`config.yaml`), projects with a `header.bin`,
+    /// and classic DSPRE projects that have an `unpacked/` directory.
     pub fn open(root: impl AsRef<Path>) -> io::Result<Self> {
         let root = root.as_ref().to_path_buf();
-        if !root.join("unpacked").exists() {
+        let is_dspre = root.join("config.yaml").exists()
+            || root.join("header.bin").exists()
+            || root.join("unpacked").exists();
+        if !is_dspre {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
-                "Not a DSPRE project (missing 'unpacked' directory)",
+                "Not a DSPRE project (missing config.yaml, header.bin, or unpacked directory)",
             ));
         }
         Ok(Self { root })

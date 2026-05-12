@@ -43,7 +43,7 @@
 //! - [`map_header`]: Map header structures for all Gen 4 games
 //! - [`provider`]: Trait-based data access for different project types
 //! - [`event_file`] / [`encounter_file`]: Event and encounter data structures
-//! - [`ds_rom`]: DSPRE and ds-rom-tool project structures
+//! - [`ds_rom`]: ds-rom project structures
 //! - [`narc`]: Nintendo Archive (NARC) file format reader
 //! - [`game`]: Game version detection and family classification
 //!

@@ -1,6 +1,7 @@
 use super::paths::{
-    egg_move_narc_path, egg_move_overlay_path, encounter_narc_path, evolution_narc_path,
-    family_name, item_narc_path, learnset_narc_path, move_narc_path, personal_narc_path,
+    egg_move_narc_path, egg_move_overlay_path, encounter_narc_path, event_narc_path,
+    evolution_narc_path, family_name, item_narc_path, learnset_narc_path, move_narc_path,
+    personal_narc_path,
 };
 use super::render::{print_encounter_file, print_event_file, print_map_header};
 use std::path::{Path, PathBuf};
@@ -92,8 +93,18 @@ pub fn cmd_event(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let ws = open_workspace_with_decomp(project_path, decomp.as_deref())?;
 
-    let dspre = DspreProject::open(project_path)?;
-    let bin_event = dspre.load_event_file(id)?;
+    // Try unpacked/eventFiles first (DSPRE fast path), fall back to event NARC.
+    let bin_event = if let Ok(dspre) = DspreProject::open(project_path)
+        && let Ok(ev) = dspre.load_event_file(id)
+    {
+        ev
+    } else {
+        let narc_path = event_narc_path(project_path, ws.family);
+        let narc = Narc::open(&narc_path)
+            .map_err(|e| format!("Event NARC not found at {}: {e}", narc_path.display()))?;
+        let data = narc.member(id as usize)?;
+        uxie::BinaryEventFile::from_binary(&mut std::io::Cursor::new(data))?
+    };
     let event = uxie::JsonEventFile::from_binary(&bin_event, &ws.symbols);
 
     if json {
@@ -124,11 +135,10 @@ pub fn cmd_encounter(
         let unpacked_path = project_path
             .join("unpacked/encounters")
             .join(format!("{:04}", id));
-        let bin_data = if unpacked_path.exists() {
-            std::fs::read(unpacked_path)?
-        } else {
+        if !unpacked_path.exists() {
             return Err("Encounter data not found (tried NARC and unpacked/encounters)".into());
-        };
+        }
+        let bin_data = std::fs::read(unpacked_path)?;
         let mut reader = std::io::Cursor::new(bin_data.as_slice());
         BinaryEncounterFile::from_binary(&mut reader, ws.family)?
     };

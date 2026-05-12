@@ -68,7 +68,7 @@ enum MessageContent {
     Multi(Vec<String>),
 }
 
-/// Holds all game string tables loaded from DSPRE's expanded/textArchives folder.
+/// Holds all game string tables loaded from expanded/textArchives (DSPRE text export).
 /// Provides name-to-ID and ID-to-name resolution for species, items, moves, abilities, and types.
 #[derive(Debug, Clone, Default)]
 pub struct GameStrings {
@@ -104,7 +104,7 @@ impl GameStrings {
         Self::default()
     }
 
-    /// Load game strings from a DSPRE project's expanded/textArchives folder
+    /// Load game strings from expanded/textArchives (DSPRE text export folder)
     pub fn load_from_dspre(
         project_path: impl AsRef<Path>,
         family: GameFamily,

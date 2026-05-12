@@ -112,7 +112,7 @@ impl DecompPaths {
         ))
     }
 
-    // --- DSPRE-style paths (for compatibility) ---
+    // --- ds-rom paths ---
 
     pub fn dspre_personal_narc(&self) -> PathBuf {
         self.root.join("data/poketool/personal/pl_personal.narc")

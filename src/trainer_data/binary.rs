@@ -6,8 +6,11 @@ use std::path::Path;
 
 pub const TRAINER_PROPERTIES_SIZE: usize = 20;
 
-/// Load one trainer from a DSPRE project, preferring unpacked trainer files and
-/// falling back to trainer NARCs when unpacked data is unavailable.
+/// Load one trainer from a DSPRE project.
+///
+/// Tries `unpacked/trainerProperties` and `unpacked/trainerParty` first (fast
+/// path when DSPRE has already extracted the files), then falls back to the
+/// trainer NARCs provided by ds-rom.
 pub fn load_dspre_trainer(
     project_root: impl AsRef<Path>,
     family: GameFamily,
@@ -41,8 +44,11 @@ pub fn load_dspre_trainer(
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("trainer {id}: {e}")))
 }
 
-/// Load every trainer from a DSPRE project, preferring unpacked trainer files
-/// and falling back to trainer NARCs when unpacked data is unavailable.
+/// Load every trainer from a DSPRE project.
+///
+/// Tries `unpacked/trainerProperties` and `unpacked/trainerParty` first (fast
+/// path when DSPRE has already extracted the files), then falls back to the
+/// trainer NARCs provided by ds-rom.
 pub fn load_all_dspre_trainers(
     project_root: impl AsRef<Path>,
     family: GameFamily,
@@ -387,6 +393,28 @@ mod tests {
     }
 
     #[test]
+    fn test_load_dspre_trainer_from_unpacked() {
+        let dir = tempdir().unwrap();
+        let trainer = sample_trainer(GameFamily::Platinum, 12, 25, 19);
+        write_unpacked_trainer(dir.path(), 0, &trainer, GameFamily::Platinum);
+
+        let loaded = load_dspre_trainer(dir.path(), GameFamily::Platinum, 0).unwrap();
+        assert_eq!(loaded, trainer);
+    }
+
+    #[test]
+    fn test_load_all_dspre_trainers_from_unpacked() {
+        let dir = tempdir().unwrap();
+        let first = sample_trainer(GameFamily::Platinum, 1, 10, 5);
+        let second = sample_trainer(GameFamily::Platinum, 2, 20, 10);
+        write_unpacked_trainer(dir.path(), 0, &first, GameFamily::Platinum);
+        write_unpacked_trainer(dir.path(), 1, &second, GameFamily::Platinum);
+
+        let loaded = load_all_dspre_trainers(dir.path(), GameFamily::Platinum).unwrap();
+        assert_eq!(loaded, vec![first, second]);
+    }
+
+    #[test]
     fn test_trainer_properties_roundtrip() {
         let props = TrainerProperties {
             flags: TrainerFlags::HAS_MOVES | TrainerFlags::HAS_ITEMS,
@@ -658,27 +686,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_load_dspre_trainer_from_unpacked() {
-        let dir = tempdir().unwrap();
-        let trainer = sample_trainer(GameFamily::Platinum, 12, 25, 19);
-        write_unpacked_trainer(dir.path(), 0, &trainer, GameFamily::Platinum);
-
-        let loaded = load_dspre_trainer(dir.path(), GameFamily::Platinum, 0).unwrap();
-        assert_eq!(loaded, trainer);
-    }
-
-    #[test]
-    fn test_load_all_dspre_trainers_from_unpacked() {
-        let dir = tempdir().unwrap();
-        let first = sample_trainer(GameFamily::Platinum, 1, 10, 5);
-        let second = sample_trainer(GameFamily::Platinum, 2, 20, 10);
-        write_unpacked_trainer(dir.path(), 0, &first, GameFamily::Platinum);
-        write_unpacked_trainer(dir.path(), 1, &second, GameFamily::Platinum);
-
-        let loaded = load_all_dspre_trainers(dir.path(), GameFamily::Platinum).unwrap();
-        assert_eq!(loaded, vec![first, second]);
-    }
 
     fn family_strategy() -> impl Strategy<Value = GameFamily> {
         prop_oneof![

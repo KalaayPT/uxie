@@ -189,16 +189,32 @@ mod event_file_tests {
         let headers_path = decomp_path.join("build/generated");
         let expected_path = decomp_path.join("res/field/events/events_eterna_city_dp_gym.json");
 
-        if !dspre_path.exists() || !headers_path.exists() || !expected_path.exists() {
+        if !headers_path.exists() || !expected_path.exists() {
             eprintln!("Skipping: test data not available at configured paths");
             return;
         }
 
-        let project = DspreProject::open(&dspre_path).unwrap();
         let mut symbols = SymbolTable::new();
         symbols.load_headers_from_dir(&headers_path).unwrap();
 
-        let bin_event = project.load_event_file(67).unwrap();
+        // Try unpacked/eventFiles first; fall back to zone_event NARC.
+        let bin_event = if let Ok(project) = DspreProject::open(&dspre_path) {
+            if let Ok(ev) = project.load_event_file(67) {
+                ev
+            } else {
+                let narc_path = dspre_path.join("data/fielddata/eventdata/zone_event.narc");
+                let narc = crate::Narc::open(&narc_path).unwrap();
+                BinaryEventFile::from_binary(&mut Cursor::new(narc.member(67).unwrap())).unwrap()
+            }
+        } else {
+            let narc_path = dspre_path.join("data/fielddata/eventdata/zone_event.narc");
+            if !narc_path.exists() {
+                eprintln!("Skipping: neither unpacked/ nor zone_event.narc available");
+                return;
+            }
+            let narc = crate::Narc::open(&narc_path).unwrap();
+            BinaryEventFile::from_binary(&mut Cursor::new(narc.member(67).unwrap())).unwrap()
+        };
         let json_event = JsonEventFile::from_binary(&bin_event, &symbols);
 
         let expected: JsonEventFile =

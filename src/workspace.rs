@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
-    /// DSPRE binary ROM hacking project (header.bin, arm9.bin).
+    /// ds-rom project (config.yaml or header.bin, arm9.bin).
     Dspre,
     /// pokeplatinum / pokeheartgold decompilation project.
     Decomp,
@@ -80,8 +80,6 @@ impl Workspace {
             path.join("config.yaml"),
             path.join("arm9/arm9.bin"),
             path.join("arm9.bin"),
-            path.join("unpacked/arm9.bin"),
-            path.join("unpacked"),
         ];
 
         if decomp_markers.iter().any(|marker| marker.exists()) {
@@ -163,27 +161,7 @@ impl Workspace {
     }
 
     fn load_dspre_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
-        let location_text_id = self.location_text_archive_id();
-        let archive_path = self
-            .project_path
-            .join(format!("unpacked/textArchives/{:04}", location_text_id));
-        if !archive_path.exists() {
-            return Ok(None);
-        }
-
-        let mut file = std::fs::File::open(&archive_path)?;
-        let charmap = chatot::get_default_charmap();
-        let archive = chatot::decode_archive(charmap, &mut file, false).map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!(
-                    "Failed to decode location names archive {}: {e}",
-                    archive_path.display()
-                ),
-            )
-        })?;
-
-        Ok(Some(archive.messages))
+        Ok(None)
     }
 
     fn load_decomp_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
@@ -356,13 +334,10 @@ impl Workspace {
 
         // Load armips .equ directives, skipping names already known.
         // Process all files together so cross-file forward references resolve.
-        let armips_dirs: Vec<PathBuf> = [
-            root.join("armips/include"),
-            root.join("asm/include"),
-        ]
-        .into_iter()
-        .filter(|d| d.exists())
-        .collect();
+        let armips_dirs: Vec<PathBuf> = [root.join("armips/include"), root.join("asm/include")]
+            .into_iter()
+            .filter(|d| d.exists())
+            .collect();
         if !armips_dirs.is_empty() {
             let refs: Vec<&Path> = armips_dirs.iter().map(|d| d.as_path()).collect();
             crate::c_parser::armips_equ::parse_armips_equ_dirs(&refs, symbols)?;
@@ -381,20 +356,16 @@ impl Workspace {
         })?;
         let family = game.family();
 
-        let arm9_path = [
-            path.join("arm9/arm9.bin"),
-            path.join("arm9.bin"),
-            path.join("unpacked/arm9.bin"),
-        ]
-        .into_iter()
-        .find(|candidate| candidate.exists())
-        .unwrap_or_else(|| path.join("arm9/arm9.bin"));
+        let arm9_path = [path.join("arm9/arm9.bin"), path.join("arm9.bin")]
+            .into_iter()
+            .find(|candidate| candidate.exists())
+            .unwrap_or_else(|| path.join("arm9/arm9.bin"));
 
         if !arm9_path.exists() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!(
-                    "arm9.bin not found in DSPRE project at {} (tried arm9/arm9.bin, arm9.bin, unpacked/arm9.bin)",
+                    "arm9.bin not found in ds-rom project at {} (tried arm9/arm9.bin, arm9.bin)",
                     path.display()
                 ),
             ));
