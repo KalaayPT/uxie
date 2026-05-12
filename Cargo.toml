@@ -1,6 +1,6 @@
 [package]
 name = "uxie"
-version = "0.6.10"
+version = "0.6.11"
 edition = "2024"
 description = "Data fetching library for Pokemon Gen 4 romhacking - map headers, C parsing, and more"
 license = "MIT"
