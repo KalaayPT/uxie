@@ -1566,13 +1566,12 @@ impl SymbolTable {
                 match value {
                     serde_json::Value::String(s) => s.clone(),
                     serde_json::Value::Array(parts) => {
-                        let mut joined = String::new();
-                        for part in parts {
-                            if let Some(s) = part.as_str() {
-                                joined.push_str(s);
-                            }
+                        let lines: Vec<&str> = parts.iter().filter_map(|p| p.as_str()).collect();
+                        if lines.len() <= 1 {
+                            lines.concat()
+                        } else {
+                            lines.join("  \n")
                         }
-                        joined
                     }
                     _ => String::new(),
                 }
@@ -1590,6 +1589,38 @@ impl SymbolTable {
             .get(stem)
             .and_then(|msgs| msgs.get(index))
             .map(String::as_str)
+    }
+
+    /// Stems of all text bank files cached during include resolution.
+    pub fn loaded_text_bank_stems(&self) -> impl Iterator<Item = &str> {
+        self.text_messages.keys().map(String::as_str)
+    }
+
+    /// Read a single display-ready message from a chatot-format JSON archive on disk.
+    ///
+    /// Tries `en_US`, then `ja_JP`, then any non-`id` string/array field.
+    /// Multi-line array entries are joined with `"  \n"` (LSP markdown newline).
+    /// Returns `None` if the file, message index, or locale key is absent.
+    pub fn read_json_archive_message(path: &Path, msg_index: usize) -> Option<String> {
+        let content = std::fs::read_to_string(path).ok()?;
+        let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+        let entry = json.get("messages")?.as_array()?.get(msg_index)?;
+        let value = entry
+            .get("en_US")
+            .or_else(|| entry.get("ja_JP"))
+            .or_else(|| {
+                entry.as_object()?.iter().find_map(|(k, v)| {
+                    if k == "id" { None } else if v.is_string() || v.is_array() { Some(v) } else { None }
+                })
+            })?;
+        match value {
+            serde_json::Value::String(s) => Some(s.clone()),
+            serde_json::Value::Array(parts) => {
+                let lines: Vec<&str> = parts.iter().filter_map(|p| p.as_str()).collect();
+                if lines.len() <= 1 { Some(lines.concat()) } else { Some(lines.join("  \n")) }
+            }
+            _ => None,
+        }
     }
 
     fn load_text_bank_events(

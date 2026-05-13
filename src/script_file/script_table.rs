@@ -136,6 +136,47 @@ impl ScriptTable {
         Ok(())
     }
 
+    /// Loads script file names from a DSPRE `expanded/scripts/` directory.
+    ///
+    /// DSPRE names each script file by its NARC index (`0213.script` /
+    /// `0213.rotom`), so the stem is both the name and the ID.  Non-numeric
+    /// stems and non-`.script`/`.rotom` files are silently skipped.
+    pub fn load_dspre_script_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<()> {
+        let mut parsed: Vec<(usize, String)> = Vec::new();
+
+        for entry in std::fs::read_dir(dir.as_ref())? {
+            let entry = entry?;
+            if !entry.file_type()?.is_file() {
+                continue;
+            }
+            let path = entry.path();
+            let ext = path.extension().and_then(|e| e.to_str());
+            if !matches!(ext, Some("script" | "rotom")) {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            let Ok(id) = stem.parse::<usize>() else {
+                continue;
+            };
+            parsed.push((id, stem.to_string()));
+        }
+
+        parsed.sort_by_key(|(id, _)| *id);
+
+        for (id, name) in parsed {
+            if let Some(old) = self.sparse_names.insert(id, name.clone()) {
+                if old != name {
+                    self.name_to_id.remove(&old);
+                }
+            }
+            self.name_to_id.insert(name, id);
+        }
+
+        Ok(())
+    }
+
     /// Returns the script name for a given file ID.
     ///
     /// Returns `None` if the ID is out of range.
@@ -496,5 +537,27 @@ mod tests {
             prop_assert_eq!(table.get_name(names.len()), None);
             prop_assert_eq!(table.get_name(names.len().saturating_add(100)), None);
         }
+    }
+
+    #[test]
+    fn test_load_dspre_script_dir() {
+        let dir = tempdir().unwrap();
+        // Both .script (raw DSPRE export) and .rotom (post-conversion) are accepted.
+        fs::write(dir.path().join("0213.script"), "").unwrap();
+        fs::write(dir.path().join("0000.rotom"), "").unwrap();
+        fs::write(dir.path().join("readme.txt"), "").unwrap();
+        fs::write(dir.path().join("not_a_number.rotom"), "").unwrap();
+
+        let mut table = ScriptTable::new();
+        table.load_dspre_script_dir(dir.path()).unwrap();
+
+        assert_eq!(table.get_name(213), Some("0213"));
+        assert_eq!(table.get_name(0), Some("0000"));
+        assert_eq!(table.get_id("0213"), Some(213));
+        assert_eq!(table.get_id("0000"), Some(0));
+        // Non-numeric stem skipped.
+        assert_eq!(table.get_id("not_a_number"), None);
+        // Wrong extension skipped.
+        assert_eq!(table.get_id("readme"), None);
     }
 }

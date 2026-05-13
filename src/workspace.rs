@@ -12,6 +12,7 @@ use crate::script_file::{
     GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
 };
 use crate::text_bank::{GameStrings, TextBankTable};
+use dashmap::DashMap;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -40,6 +41,11 @@ pub struct Workspace {
     pub source_manager: SourceManager,
     location_names: Option<Vec<String>>,
     internal_names: Option<Vec<String>>,
+    /// Lazily-populated cache mapping archive IDs to their on-disk paths.
+    ///
+    /// Populated on first access via [`Workspace::read_message`]; subsequent
+    /// calls for the same ID are O(1).
+    text_archive_paths: DashMap<u16, PathBuf>,
 }
 
 impl Workspace {
@@ -240,8 +246,15 @@ impl Workspace {
     /// First scans map headers for the script file.  Falls back to the
     /// global script table for common scripts that are not tied to any
     /// single map header.
+    ///
+    /// For DSPRE projects the script table is empty; the file name is the
+    /// numeric NARC index (`"0213"` → 213), so that is tried directly when
+    /// the name-based lookup returns `None`.
     pub fn text_archive_for_script_file(&self, script_file_name: &str) -> Option<u16> {
-        let file_id = self.scripts.get_id(script_file_name)?;
+        let file_id = self
+            .scripts
+            .get_id(script_file_name)
+            .or_else(|| script_file_name.parse::<u16>().ok().map(|n| n as usize))?;
         if let Ok(Some(id)) = self
             .provider
             .get_text_archive_for_script_file(file_id as u16)
@@ -253,18 +266,176 @@ impl Workspace {
             .map(|e| e.text_archive_id)
     }
 
-    /// Read a single message from a text archive cached during symbol loading.
+    /// Resolve message text by archive ID and zero-based message index.
     ///
-    /// Uses the `TextBankTable` to resolve `text_archive_id` to a text bank
-    /// name, then looks up the message in the symbol table's cached strings.
-    pub fn read_message(&self, text_archive_id: u16, msg_index: u16) -> Option<String> {
-        let name = self.text_banks.get_name(text_archive_id as usize)?;
-        let stem = name.strip_prefix("TEXT_BANK_")?.to_lowercase();
+    /// Checks the global symbol cache first (populated during workspace init),
+    /// then falls back to disk.  The resolved path is cached in
+    /// `text_archive_paths` so subsequent calls for the same archive are O(1).
+    pub fn read_message(&self, archive_id: u16, msg_index: u16) -> Option<String> {
+        let path = self.cached_text_archive_path(archive_id)?;
+        let stem = path.file_stem()?.to_str()?;
         self.symbols
-            .message_text(&stem, msg_index as usize)
+            .message_text(stem, msg_index as usize)
             .map(str::to_string)
+            .or_else(|| read_message_from_path(&path, msg_index as usize))
     }
 
+    /// Return the cached path for `archive_id`, resolving and caching it on
+    /// first access.
+    fn cached_text_archive_path(&self, archive_id: u16) -> Option<PathBuf> {
+        if let Some(entry) = self.text_archive_paths.get(&archive_id) {
+            return Some(entry.clone());
+        }
+        let path = self.find_text_archive_path(archive_id)?;
+        self.text_archive_paths.insert(archive_id, path.clone());
+        Some(path)
+    }
+
+    /// Locate the on-disk file for `archive_id` without consulting the cache.
+    fn find_text_archive_path(&self, archive_id: u16) -> Option<PathBuf> {
+        // Named archives (Platinum/HGSS decomp): TEXT_BANK_FOO → foo.json / foo.gmm
+        if let Some(name) = self.text_banks.get_name(archive_id as usize)
+            && let Some(stem) = name.strip_prefix("TEXT_BANK_")
+        {
+            let lower = stem.to_lowercase();
+            let json = self.project_path.join("res/text").join(format!("{lower}.json"));
+            if json.exists() {
+                return Some(json);
+            }
+            for dir in ["files/msgdata/msg", "msgdata/msg"] {
+                let gmm = self.project_path.join(dir).join(format!("{lower}.gmm"));
+                if gmm.exists() {
+                    return Some(gmm);
+                }
+            }
+        }
+
+        // HGSS direct: msg_{id:04}.gmm, with optional locale suffix
+        let stem = format!("msg_{archive_id:04}");
+        let gmm_dir = self.project_path.join("files/msgdata/msg");
+        let exact = gmm_dir.join(format!("{stem}.gmm"));
+        if exact.exists() {
+            return Some(exact);
+        }
+        if let Ok(entries) = std::fs::read_dir(&gmm_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().to_string();
+                if name.starts_with(&format!("{stem}_")) && name.ends_with(".gmm") {
+                    return Some(entry.path());
+                }
+            }
+        }
+
+        // DSPRE: expanded/textArchives/{id:04}.json (zero-padded 4-digit name)
+        let archives_dir = self.project_path.join("expanded/textArchives");
+        let json = archives_dir.join(format!("{archive_id:04}.json"));
+        if json.exists() {
+            return Some(json);
+        }
+
+        None
+    }
+
+    /// Derive a text archive ID from a file stem (include-scan result).
+    ///
+    /// Platinum: stem `"acuity_cavern"` → `TEXT_BANK_ACUITY_CAVERN` → ID.
+    /// HGSS:     stem `"msg_0115_D36R0101"` → parses `0115` → ID.
+    /// DSPRE:    stem is already the numeric ID.
+    pub fn text_archive_id(&self, stem: &str) -> Option<u16> {
+        let upper = format!("TEXT_BANK_{}", stem.to_uppercase().replace('-', "_"));
+        if let Some(id) = self.text_banks.get_id(&upper) {
+            return Some(id as u16);
+        }
+        if let Some(num) = stem.strip_prefix("msg_") {
+            if let Ok(id) = num.split('_').next()?.parse::<u16>() {
+                return Some(id);
+            }
+        }
+        stem.parse::<u16>().ok()
+    }
+
+    /// Return the menu entry text archive ID for a command, or `None`.
+    pub fn menu_entry_id(command: &str, family: GameFamily) -> Option<u16> {
+        match command {
+            "AddMenuEntryImm" | "AddMultiOption" | "MenuItemAdd" | "CreateMultiTouchBox" => {
+                Some(match family {
+                    GameFamily::HGSS => 191,
+                    _ => 361,
+                })
+            }
+            _ => None,
+        }
+    }
+}
+
+/// Read a single message from a text archive file, dispatching by extension.
+fn read_message_from_path(path: &Path, msg_index: usize) -> Option<String> {
+    use crate::c_parser::SymbolTable;
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        SymbolTable::read_json_archive_message(path, msg_index)
+    } else {
+        let content = std::fs::read_to_string(path).ok()?;
+        SymbolTable::extract_gmm_messages(&content).ok()?.into_iter().nth(msg_index)
+    }
+}
+
+/// Return the arm9 map-header table offset and header count for a DSPRE project.
+///
+/// Offsets are per-language, sourced from DSPRE `RomInfo.cs SetHeaderTableOffset`.
+/// Falls back to the English offset for unknown language codes.
+fn map_header_table_offset(
+    family: crate::game::GameFamily,
+    language: crate::game::GameLanguage,
+    game_code: &str,
+) -> (u64, usize) {
+    use crate::game::{GameFamily, GameLanguage};
+    let offset: u64 = match family {
+        GameFamily::DP => match language {
+            GameLanguage::Japanese => {
+                // Diamond vs Pearl differ by 4 bytes
+                if game_code.starts_with("ADAJ") { 0xF0D68 } else { 0xF0D6C }
+            }
+            GameLanguage::English => 0xEEDBC,
+            GameLanguage::French => 0xEEDFC,
+            GameLanguage::German => 0xEEDCC,
+            GameLanguage::Italian => 0xEED70,
+            GameLanguage::Spanish => 0xEEE08,
+            GameLanguage::Korean => 0xEEDBC,
+        },
+        GameFamily::Platinum => match language {
+            GameLanguage::Japanese => 0xE56F0,
+            GameLanguage::English => 0xE601C,
+            GameLanguage::French => 0xE60A4,
+            GameLanguage::German => 0xE6074,
+            GameLanguage::Italian => 0xE6038,
+            GameLanguage::Spanish => 0xE60B0,
+            GameLanguage::Korean => 0xE601C,
+        },
+        GameFamily::HGSS => match language {
+            GameLanguage::Japanese => 0xF6390,
+            GameLanguage::English => 0xF6BE0,
+            GameLanguage::French => 0xF6BC4,
+            GameLanguage::German => 0xF6B94,
+            GameLanguage::Italian => 0xF6B58,
+            GameLanguage::Spanish => {
+                // HG (IPKx) and SS (IPGx) differ
+                if game_code.starts_with("IPK") {
+                    0xF6BC8
+                } else {
+                    0xF6BD0
+                }
+            }
+            GameLanguage::Korean => 0xF6BE0,
+        },
+    };
+    let count = match family {
+        GameFamily::HGSS => 540,
+        _ => 559,
+    };
+    (offset, count)
+}
+
+impl Workspace {
     pub fn get_symbols_for_map(&self, map_id: u16) -> Vec<String> {
         use crate::c_parser::SymbolTag;
         self.symbols.get_symbols_by_tag(&SymbolTag::Map(map_id))
@@ -346,6 +517,7 @@ impl Workspace {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         })
     }
 
@@ -402,18 +574,21 @@ impl Workspace {
             ));
         }
 
-        let (offset, count) = match (family, header.game_code.chars().nth(3)) {
-            (GameFamily::DP, _) => (0xE4B24, 559),
-            (GameFamily::Platinum, _) => (0xE601C, 559),
-            (GameFamily::HGSS, _) => (0xF6BE0, 540),
-        };
+        let language = header.detect_language();
+        let (offset, count) = map_header_table_offset(family, language, &header.game_code);
 
-        let game_strings = GameStrings::load_from_dspre(&path, family, header.detect_language())?;
+        let game_strings = GameStrings::load_from_dspre(&path, family, language)?;
 
         let global_script_table = match family {
             GameFamily::HGSS => GlobalScriptTable::from_hgss_binary_file(&arm9_path)?,
             GameFamily::Platinum | GameFamily::DP => GlobalScriptTable::platinum_hardcoded(),
         };
+
+        let script_dir = path.join("expanded/scripts");
+        let mut scripts = ScriptTable::new();
+        if script_dir.exists() {
+            scripts.load_dspre_script_dir(&script_dir)?;
+        }
 
         let sm = SourceManager::new();
         Ok(Self {
@@ -423,13 +598,14 @@ impl Workspace {
             family,
             provider: Box::new(Arm9Provider::new(arm9_path, offset, count, family)),
             symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
-            scripts: ScriptTable::new(),
+            scripts,
             text_banks: TextBankTable::new(),
             game_strings,
             global_script_table,
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         })
     }
 
@@ -509,6 +685,7 @@ impl Workspace {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         })
     }
 
@@ -1202,6 +1379,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         let result = ws.resolve_script_symbols("SetFlag FLAG_START");
@@ -1231,6 +1409,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         let result = ws.resolve_script_symbols("SetFlag 42");
@@ -1256,6 +1435,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         let result = ws.resolve_script_symbols("UnknownCmd UNKNOWN_FLAG");
@@ -1284,6 +1464,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         let mut file_symbols = SymbolTable::with_parent(ws.symbols.clone());
@@ -1464,6 +1645,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: Some(vec!["D01R0101".to_string(), "D02R0102".to_string()]),
+            text_archive_paths: DashMap::new(),
         };
 
         assert_eq!(ws.get_map_internal_name(0), Some("D01R0101".to_string()));
@@ -1496,6 +1678,7 @@ mod tests {
                 "Sandgem Town".to_string(),
             ]),
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         assert_eq!(
@@ -1532,6 +1715,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         assert_eq!(ws.resolve_constant("TEST_CONST"), Some(12345));
@@ -1557,6 +1741,7 @@ mod tests {
             source_manager: sm,
             location_names: None,
             internal_names: None,
+            text_archive_paths: DashMap::new(),
         };
 
         assert_eq!(ws.get_script_file_for_map(0), None);
@@ -2282,5 +2467,130 @@ mod tests {
         ) -> crate::error::Result<Vec<u16>> {
             Ok(Vec::new())
         }
+    }
+
+    /// Returns archive ID = script_file_id for any input.
+    struct DspreArchiveProvider;
+
+    impl DataProvider for DspreArchiveProvider {
+        fn get_map_header(&self, id: u16) -> crate::error::Result<crate::map_header::MapHeader> {
+            Err(crate::error::UxieError::not_found("Map header", id.to_string()))
+        }
+
+        fn get_map_header_count(&self) -> crate::error::Result<usize> {
+            Ok(0)
+        }
+
+        fn get_text_archive_for_script_file(
+            &self,
+            script_file_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(Some(script_file_id))
+        }
+
+        fn find_map_by_script_file_id(
+            &self,
+            _script_file_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(None)
+        }
+
+        fn find_maps_by_script_file_id(
+            &self,
+            _script_file_id: u16,
+        ) -> crate::error::Result<Vec<u16>> {
+            Ok(Vec::new())
+        }
+
+        fn find_map_by_level_script_file_id(
+            &self,
+            _level_script_file_id: u16,
+        ) -> crate::error::Result<Option<u16>> {
+            Ok(None)
+        }
+
+        fn find_maps_by_level_script_file_id(
+            &self,
+            _level_script_file_id: u16,
+        ) -> crate::error::Result<Vec<u16>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    #[ignore = "requires local HGSS DSPRE fixture via UXIE_TEST_HGSS_DSPRE_PATH"]
+    fn integration_hgss_dspre_text_archive_for_script_file_0003() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_HGSS_DSPRE_PATH",
+            "HGSS DSPRE workspace integration test",
+        ) else {
+            return;
+        };
+        let ws = Workspace::open(&root).expect("open HGSS DSPRE workspace");
+        assert_eq!(ws.project_type, ProjectType::Dspre);
+        assert_eq!(ws.family, GameFamily::HGSS);
+        let script_id = ws.scripts.get_id("0003");
+        println!("scripts.get_id('0003') = {script_id:?}");
+        let archive_id = ws.text_archive_for_script_file("0003");
+        println!("text_archive_for_script_file('0003') = {archive_id:?}");
+        let archive_id = archive_id.expect("expected Some archive ID for script 0003");
+        let msg = ws.read_message(archive_id, 3);
+        println!("read_message({archive_id}, 3) = {msg:?}");
+        assert!(msg.is_some(), "expected a message at index 3 in archive {archive_id}");
+    }
+
+    #[test]
+    #[ignore = "requires local Platinum DSPRE fixture via UXIE_TEST_PLATINUM_DSPRE_PATH"]
+    fn integration_platinum_dspre_text_archive_for_map_bound_script_0224() {
+        let Some(root) = crate::test_env::existing_path_from_env(
+            "UXIE_TEST_PLATINUM_DSPRE_PATH",
+            "Platinum DSPRE workspace integration test",
+        ) else {
+            return;
+        };
+        let ws = Workspace::open(&root).expect("open Platinum DSPRE workspace");
+        assert_eq!(ws.project_type, ProjectType::Dspre);
+        assert_eq!(ws.family, GameFamily::Platinum);
+        let header_count = ws.provider.get_map_header_count().unwrap_or(0);
+        println!("map header count = {header_count}");
+        let raw_provider = ws.provider.get_text_archive_for_script_file(224);
+        println!("provider.get_text_archive_for_script_file(224) = {raw_provider:?}");
+        let global = ws.global_script_table.find_by_script_file_id(224);
+        println!("global_script_table.find_by_script_file_id(224) = {global:?}");
+        // Also check a known-good script (211 = common strings)
+        println!("provider(211) = {:?}", ws.provider.get_text_archive_for_script_file(211));
+        println!("global(211)   = {:?}", ws.global_script_table.find_by_script_file_id(211));
+        let archive_id = ws.text_archive_for_script_file("0224");
+        println!("text_archive_for_script_file('0224') = {archive_id:?}");
+        let archive_id = archive_id.expect("expected Some archive ID for map-bound script 0224");
+        println!("read_message({archive_id}, 0) = {:?}", ws.read_message(archive_id, 0));
+        assert!(ws.read_message(archive_id, 0).is_some(), "expected a message in archive {archive_id}");
+    }
+
+    #[test]
+    fn test_text_archive_for_script_file_dspre_numeric_name() {
+        let sm = SourceManager::new();
+        let ws = Workspace {
+            project_path: PathBuf::from("/test"),
+            project_type: ProjectType::Dspre,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(DspreArchiveProvider),
+            symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+            text_archive_paths: DashMap::new(),
+        };
+
+        // DSPRE scripts are named by NARC index ("0213" → file_id 213).
+        assert_eq!(ws.text_archive_for_script_file("0213"), Some(213));
+        assert_eq!(ws.text_archive_for_script_file("0"), Some(0));
+        // Non-numeric names that aren't in the ScriptTable must return None.
+        assert_eq!(ws.text_archive_for_script_file("script_main"), None);
     }
 }
