@@ -2807,4 +2807,87 @@ mod tests {
         // Non-numeric names that aren't in the ScriptTable must return None.
         assert_eq!(ws.text_archive_for_script_file("script_main"), None);
     }
+
+    fn make_dspre_workspace(project_path: std::path::PathBuf) -> Workspace {
+        let sm = SourceManager::new();
+        Workspace {
+            project_path,
+            project_type: ProjectType::Dspre,
+            language: crate::game::GameLanguage::English,
+            game: Game::Platinum,
+            family: GameFamily::Platinum,
+            provider: Box::new(DspreArchiveProvider),
+            symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+            text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
+        }
+    }
+
+    #[test]
+    fn find_or_add_message_deduplicates_and_appends() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        std::fs::write(
+            archives_dir.join("0000.json"),
+            r#"{"messages": [{"id": "msg_0000_00000", "en_US": "existing"}]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+
+        // First call loads from disk and appends "new message" at index 1.
+        let idx1 = ws.find_or_add_message(0, "new message").unwrap();
+        assert_eq!(idx1, 1);
+
+        // Second call for the same text must return the same index (dedup).
+        let idx2 = ws.find_or_add_message(0, "new message").unwrap();
+        assert_eq!(idx2, 1);
+
+        // Third call for the existing on-disk text must return index 0.
+        let idx0 = ws.find_or_add_message(0, "existing").unwrap();
+        assert_eq!(idx0, 0);
+
+        // A distinct second message gets the next slot.
+        let idx3 = ws.find_or_add_message(0, "another").unwrap();
+        assert_eq!(idx3, 2);
+    }
+
+    #[test]
+    fn flush_pending_messages_writes_new_entries_to_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        let archive_path = archives_dir.join("0005.json");
+        std::fs::write(
+            &archive_path,
+            r#"{"messages": [{"id": "msg_0005_00000", "en_US": "seed"}]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        ws.find_or_add_message(5, "seed").unwrap(); // existing — no new entry
+        ws.find_or_add_message(5, "hello").unwrap();
+        ws.find_or_add_message(5, "world").unwrap();
+
+        ws.flush_pending_messages().unwrap();
+
+        let content = std::fs::read_to_string(&archive_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let messages = json["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["en_US"], "seed");
+        assert_eq!(messages[1]["en_US"], "hello");
+        assert_eq!(messages[2]["en_US"], "world");
+        // IDs should be zero-padded with the archive stem.
+        assert_eq!(messages[1]["id"], "msg_0005_00001");
+        assert_eq!(messages[2]["id"], "msg_0005_00002");
+    }
 }
