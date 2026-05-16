@@ -61,6 +61,18 @@ impl Game {
 }
 
 impl GameFamily {
+    /// Returns a representative game for this family.
+    ///
+    /// Use this only when a specific [`Game`] is required but only a family is known
+    /// (e.g. fallback workspace construction). Prefer [`Workspace::open`] when possible.
+    pub fn default_game(self) -> Game {
+        match self {
+            GameFamily::DP => Game::Diamond,
+            GameFamily::Platinum => Game::Platinum,
+            GameFamily::HGSS => Game::HeartGold,
+        }
+    }
+
     /// Get the map header size in bytes for this game family
     pub fn map_header_size(&self) -> usize {
         24

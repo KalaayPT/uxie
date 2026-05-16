@@ -180,9 +180,16 @@ pub use personal_data::{PERSONAL_DATA_SIZE, PersonalData};
 pub use provider::{Arm9Provider, DataProvider};
 pub use rom_header::RomHeader;
 pub use script_file::ScriptTable;
-pub use text_bank::{GameStrings, TextBankTable, TextArchive, decode_text_archives, encode_text_archives, read_gmm_file_messages, read_text_archive_bin};
+pub use text_bank::{
+    GameStrings, TextArchive, TextBankTable, decode_text_archives, encode_text_archives,
+    read_gmm_file_messages, read_text_archive_bin,
+};
 pub use trainer_data::{
     AiFlags, PartyPokemon, TRAINER_PROPERTIES_SIZE, TrainerData, TrainerFlags, TrainerProperties,
     load_all_dspre_trainers, load_dspre_trainer,
 };
 pub use workspace::{ProjectType, Workspace};
+
+pub fn validate_message(s: &str) -> Vec<chatot::encode::ErrorFormat> {
+    chatot::encode::validate_message(None, s)
+}

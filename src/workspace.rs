@@ -5,7 +5,7 @@
 
 use crate::c_parser::ConstantCache;
 use crate::c_parser::{SourceManager, SymbolTable};
-use crate::game::{Game, GameFamily};
+use crate::game::{Game, GameFamily, GameLanguage};
 use crate::provider::{Arm9Provider, DataProvider, DecompProvider};
 use crate::rom_header::RomHeader;
 use crate::script_file::{
@@ -32,6 +32,7 @@ pub struct Workspace {
     pub project_type: ProjectType,
     pub game: Game,
     pub family: GameFamily,
+    pub language: GameLanguage,
     pub provider: Box<dyn DataProvider>,
     pub symbols: Arc<SymbolTable>,
     pub scripts: ScriptTable,
@@ -46,6 +47,13 @@ pub struct Workspace {
     /// Populated on first access via [`Workspace::read_message`]; subsequent
     /// calls for the same ID are O(1).
     text_archive_paths: DashMap<u16, PathBuf>,
+    /// Accumulates messages for each archive during a compilation run.
+    ///
+    /// Each entry holds the full message list for that archive: existing messages
+    /// loaded from disk on first access (for dedup), followed by any new messages
+    /// appended during compilation. Call [`flush_pending_messages`] after
+    /// compilation to write new entries back to disk.
+    pending_messages: DashMap<u16, Vec<String>>,
 }
 
 impl Workspace {
@@ -366,6 +374,187 @@ impl Workspace {
             _ => None,
         }
     }
+
+    /// Create a lightweight workspace for `project_path` without loading ROM data or symbols.
+    ///
+    /// `family` determines archive directory layouts and game-specific behaviour
+    /// (e.g. menu-entry archive IDs). `project_type` is auto-detected from the
+    /// path, so the caller only needs to know the game family. Text archive path
+    /// resolution works normally; `text_archive_for_script_file` returns `None`
+    /// because no map-header provider is loaded — DSPRE scripts work anyway since
+    /// their archive ID is parsed directly from the numeric file stem.
+    ///
+    /// Use [`Workspace::open`] when full symbol/script-table support is required.
+    pub fn new(project_path: PathBuf, game: Game) -> Self {
+        let family = game.family();
+        let project_type = Self::detect_project_type(&project_path);
+        let sm = SourceManager::new();
+        Self {
+            project_path,
+            project_type,
+            game,
+            family,
+            language: GameLanguage::English,
+            provider: Box::new(NoopProvider),
+            symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
+            scripts: ScriptTable::new(),
+            text_banks: TextBankTable::new(),
+            game_strings: GameStrings::new(),
+            global_script_table: GlobalScriptTable::new(),
+            source_manager: sm,
+            location_names: None,
+            internal_names: None,
+            text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
+        }
+    }
+
+    /// Return the index of `text` in archive `archive_id`, inserting it if absent.
+    ///
+    /// On first access the archive is read from disk to populate the in-memory
+    /// message list (used for deduplication). New messages are appended to that
+    /// list in memory only; call [`flush_pending_messages`] after compilation to
+    /// persist them to disk.
+    pub fn find_or_add_message(&self, archive_id: u16, text: &str) -> std::io::Result<u16> {
+        if !self.pending_messages.contains_key(&archive_id) {
+            let path = self.cached_text_archive_path(archive_id).ok_or_else(|| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!(
+                        "no text archive found for ID {archive_id}; \
+                         string literals require a project workspace"
+                    ),
+                )
+            })?;
+            let messages = read_all_messages(&path, self.language)?;
+            self.pending_messages.entry(archive_id).or_insert(messages);
+        }
+        let mut entry = self.pending_messages.get_mut(&archive_id).unwrap();
+        if let Some(pos) = entry.iter().position(|m| m == text) {
+            return Ok(pos as u16);
+        }
+        let idx = entry.len();
+        entry.push(text.to_string());
+        Ok(idx as u16)
+    }
+
+    /// Write all newly accumulated messages back to their JSON archives on disk.
+    ///
+    /// For each archive touched during compilation, reads the current JSON,
+    /// appends any messages added since the archive was first loaded, and
+    /// writes the file. Archives stored as GMM/binary are skipped (unsupported
+    /// for write-back). This should be called once after all files in a
+    /// compilation batch have been lowered.
+    pub fn flush_pending_messages(&self) -> std::io::Result<()> {
+        for kv in &self.pending_messages {
+            let archive_id = *kv.key();
+            let all_messages = kv.value();
+
+            let path = match self.cached_text_archive_path(archive_id) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                continue;
+            }
+
+            let content = std::fs::read_to_string(&path)?;
+            let mut json: serde_json::Value = serde_json::from_str(&content)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+            let existing_count = json["messages"].as_array().map(|a| a.len()).unwrap_or(0);
+            let new_messages = &all_messages[existing_count..];
+            if new_messages.is_empty() {
+                continue;
+            }
+
+            let lang_key = self.language.locale_key();
+
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let messages_arr = json["messages"]
+                .as_array_mut()
+                .ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "missing messages array",
+                    )
+                })?;
+
+            for (i, text) in new_messages.iter().enumerate() {
+                let idx = existing_count + i;
+                messages_arr.push(serde_json::json!({
+                    "id": format!("msg_{stem}_{idx:05}"),
+                    lang_key: text,
+                }));
+            }
+
+            let updated = serde_json::to_string_pretty(&json)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            std::fs::write(&path, updated)?;
+        }
+        Ok(())
+    }
+}
+
+/// No-op provider used by [`Workspace::empty`].
+struct NoopProvider;
+
+impl DataProvider for NoopProvider {
+    fn get_map_header(&self, _id: u16) -> crate::error::Result<crate::map_header::MapHeader> {
+        Err(crate::error::UxieError::not_found("Map header", "noop"))
+    }
+    fn get_map_header_count(&self) -> crate::error::Result<usize> {
+        Ok(0)
+    }
+    fn get_text_archive_for_script_file(&self, _id: u16) -> crate::error::Result<Option<u16>> {
+        Ok(None)
+    }
+    fn find_maps_by_script_file_id(&self, _id: u16) -> crate::error::Result<Vec<u16>> {
+        Ok(vec![])
+    }
+    fn find_maps_by_level_script_file_id(&self, _id: u16) -> crate::error::Result<Vec<u16>> {
+        Ok(vec![])
+    }
+}
+
+/// Read all message strings from a text archive file, dispatching by extension.
+fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec<String>> {
+    if path.extension().and_then(|e| e.to_str()) == Some("json") {
+        let content = std::fs::read_to_string(path)?;
+        let json: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        let arr = json
+            .get("messages")
+            .and_then(|m| m.as_array())
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "missing messages array")
+            })?;
+        let lang_key = language.locale_key();
+        Ok(arr
+            .iter()
+            .filter_map(|entry| {
+                let obj = entry.as_object()?;
+                // Try the workspace language first, then English, then Japanese,
+                // then whatever key is present — so every entry is counted regardless
+                // of which locale the archive was exported with.
+                obj.get(lang_key)
+                    .or_else(|| obj.get("en_US"))
+                    .or_else(|| obj.get("ja_JP"))
+                    .or_else(|| obj.iter().find(|(k, _)| *k != "id").map(|(_, v)| v))
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+            })
+            .collect())
+    } else {
+        let content = std::fs::read_to_string(path)?;
+        crate::c_parser::SymbolTable::extract_gmm_messages(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+    }
 }
 
 /// Read a single message from a text archive file, dispatching by extension.
@@ -500,6 +689,7 @@ impl Workspace {
             )
         })?;
         let family = game.family();
+        let language = header.detect_language();
 
         let sm = SourceManager::new();
         let p = path.clone();
@@ -508,6 +698,7 @@ impl Workspace {
             project_type: ProjectType::HgEngine,
             game,
             family,
+            language,
             provider: Box::new(DecompProvider::new(&p, SymbolTable::new(), family)),
             symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
             scripts: ScriptTable::new(),
@@ -518,6 +709,7 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         })
     }
 
@@ -596,6 +788,7 @@ impl Workspace {
             project_type: ProjectType::Dspre,
             game,
             family,
+            language,
             provider: Box::new(Arm9Provider::new(arm9_path, offset, count, family)),
             symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
             scripts,
@@ -606,6 +799,7 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         })
     }
 
@@ -672,6 +866,7 @@ impl Workspace {
             project_type: ProjectType::Decomp,
             game,
             family,
+            language: GameLanguage::English,
             provider: Box::new(crate::provider::DecompProvider::new(
                 root,
                 (*symbols).clone(),
@@ -686,6 +881,7 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         })
     }
 
@@ -1368,6 +1564,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1380,6 +1577,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         let result = ws.resolve_script_symbols("SetFlag FLAG_START");
@@ -1398,6 +1596,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1410,6 +1609,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         let result = ws.resolve_script_symbols("SetFlag 42");
@@ -1424,6 +1624,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1436,6 +1637,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         let result = ws.resolve_script_symbols("UnknownCmd UNKNOWN_FLAG");
@@ -1453,6 +1655,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1465,6 +1668,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         let mut file_symbols = SymbolTable::with_parent(ws.symbols.clone());
@@ -1634,6 +1838,7 @@ mod tests {
         let mut ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1646,6 +1851,7 @@ mod tests {
             location_names: None,
             internal_names: Some(vec!["D01R0101".to_string(), "D02R0102".to_string()]),
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         assert_eq!(ws.get_map_internal_name(0), Some("D01R0101".to_string()));
@@ -1664,6 +1870,7 @@ mod tests {
         let mut ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1679,6 +1886,7 @@ mod tests {
             ]),
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         assert_eq!(
@@ -1704,6 +1912,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1716,6 +1925,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         assert_eq!(ws.resolve_constant("TEST_CONST"), Some(12345));
@@ -1730,6 +1940,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
+                language: crate::game::GameLanguage::English,
             game: Game::HeartGold,
             family: GameFamily::HGSS,
             provider: Box::new(HgssScriptProvider { script_file_id: 81 }),
@@ -1742,6 +1953,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         assert_eq!(ws.get_script_file_for_map(0), None);
@@ -2573,6 +2785,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Dspre,
+                language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(DspreArchiveProvider),
@@ -2585,6 +2798,7 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
+            pending_messages: DashMap::new(),
         };
 
         // DSPRE scripts are named by NARC index ("0213" → file_id 213).
