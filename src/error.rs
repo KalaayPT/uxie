@@ -32,6 +32,10 @@ pub enum UxieError {
     #[error("YAML error: {0}")]
     Yaml(#[from] serde_yaml::Error),
 
+    /// Dialogue text formatting error from chatot (wrapping, measuring, etc.)
+    #[error("Text formatting error: {0}")]
+    TextFormat(#[from] chatot::FormatError),
+
     /// Invalid binary format (wrong magic bytes, corrupted data, etc.)
     #[error("Invalid format: {message}")]
     InvalidFormat {
@@ -135,6 +139,7 @@ impl From<UxieError> for std::io::Error {
             UxieError::Io(e) => e,
             UxieError::Json(e) => std::io::Error::new(std::io::ErrorKind::InvalidData, e),
             UxieError::Yaml(e) => std::io::Error::new(std::io::ErrorKind::InvalidData, e),
+            UxieError::TextFormat(e) => std::io::Error::new(std::io::ErrorKind::InvalidData, e),
             UxieError::InvalidFormat { message } => {
                 std::io::Error::new(std::io::ErrorKind::InvalidData, message)
             }

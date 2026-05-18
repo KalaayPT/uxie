@@ -167,6 +167,37 @@ impl GlobalScriptTable {
         Self::from_hgss_binary(&mut cursor)
     }
 
+    /// Load from HGSS arm9.bin using the correct pointer offset for the given game and language.
+    ///
+    /// Pointer offsets vary by locale and (for Spanish/Korean) by title.
+    /// Falls back gracefully if the binary is unreadable (e.g. unexpected layout).
+    pub fn from_hgss_binary_file_for_language(
+        path: impl AsRef<Path>,
+        game: crate::game::Game,
+        language: crate::game::GameLanguage,
+    ) -> io::Result<Self> {
+        use crate::game::{Game, GameLanguage};
+        let pointer_offset: u64 = match (game, language) {
+            (Game::HeartGold | Game::SoulSilver, GameLanguage::Japanese) => 0x3FEB0,
+            (Game::HeartGold, GameLanguage::Korean) => 0x403FC,
+            (Game::SoulSilver, GameLanguage::Korean) => 0x403F4,
+            (Game::HeartGold, GameLanguage::Spanish) => 0x4015C,
+            _ => HGSS_TABLE_POINTER_OFFSET,
+        };
+
+        let data = std::fs::read(path)?;
+        let mut cursor = Cursor::new(data);
+        cursor.seek(SeekFrom::Start(pointer_offset))?;
+        let table_addr = cursor.read_u32::<LittleEndian>()?;
+        let table_offset = table_addr.saturating_sub(HGSS_MEMORY_BASE) as u64;
+        cursor.seek(SeekFrom::Start(table_offset))?;
+        let mut entries = Vec::with_capacity(HGSS_TABLE_ENTRY_COUNT);
+        for _ in 0..HGSS_TABLE_ENTRY_COUNT {
+            entries.push(GlobalScriptEntry::read_from(&mut cursor)?);
+        }
+        Ok(Self::from_entries(entries))
+    }
+
     /// Parse HGSS `sScriptBankMapping` table from fieldmap.c source.
     ///
     /// Requires a `SymbolTable` to resolve symbolic constants like
@@ -268,44 +299,231 @@ impl GlobalScriptTable {
         })
     }
 
-    /// Get hardcoded Platinum table.
+    /// Hardcoded table for Platinum Western (US/EU/DE/FR/IT/ES).
     ///
-    /// Extracted from pokeplatinum `src/script_manager.c` `ScriptContext_LoadAndOffsetID`.
-    /// Used for DSPRE projects without decomp source access.
+    /// Extracted from `ScriptContext_LoadAndOffsetID` in arm9 (func 0x3EB20, pool 0x3EE08).
+    /// Source: `~/dev/gen4-test-roms/research/offsets_research.md`.
     pub fn platinum_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10490, 499, 0x21D), // scripts_unk_0499
-            GlobalScriptEntry::new(10450, 500, 0x010), // scripts_unk_0500
-            GlobalScriptEntry::new(10400, 419, 0x0CB), // scripts_pokemon_center_daily_trainers
-            GlobalScriptEntry::new(10300, 1051, 0x17B), // scripts_unk_1051
-            GlobalScriptEntry::new(10200, 407, 0x17B), // scripts_unk_0407
-            GlobalScriptEntry::new(10150, 460, 0x26D), // scripts_tv_reporter_interviews
-            GlobalScriptEntry::new(10100, 459, 0x26E), // scripts_tv_broadcast
-            GlobalScriptEntry::new(10000, 410, 0x17D), // scripts_field_moves
-            GlobalScriptEntry::new(9950, 412, 0x17D),  // scripts_pokedex_ratings
-            GlobalScriptEntry::new(9900, 397, 0x0D5),  // scripts_unk_0397
-            GlobalScriptEntry::new(9800, 212, 0x0D9),  // scripts_unk_0212
-            GlobalScriptEntry::new(9700, 423, 0x1AD),  // scripts_follower_partners
-            GlobalScriptEntry::new(9600, 413, 0x0D5),  // scripts_init_new_game
-            GlobalScriptEntry::new(9500, 501, 0x223),  // scripts_unk_0501
-            GlobalScriptEntry::new(9400, 426, 0x1B0),  // scripts_unk_0426
-            GlobalScriptEntry::new(9300, 406, 0x176),  // scripts_unk_0406
-            GlobalScriptEntry::new(9200, 422, 0x1AE),  // scripts_unk_0423
-            GlobalScriptEntry::new(9100, 0, 0x00B),    // scripts_unk_0000
-            GlobalScriptEntry::new(9000, 213, 0x0DD),  // scripts_unk_0213
-            GlobalScriptEntry::new(8970, 425, 0x007),  // scripts_unk_0425
-            GlobalScriptEntry::new(8950, 498, 0x21B),  // scripts_unk_0498
-            GlobalScriptEntry::new(8900, 424, 0x1AF),  // scripts_unk_0424
-            GlobalScriptEntry::new(8800, 405, 0x175),  // scripts_safari_game
-            GlobalScriptEntry::new(8000, 408, 0x17C),  // scripts_unk_0408 (hidden items)
-            GlobalScriptEntry::new(7000, 404, 0x171),  // scripts_unk_0404
-            GlobalScriptEntry::new(5000, 1114, 0x0D5), // scripts_unk_1114 (double battles)
-            GlobalScriptEntry::new(3000, 1114, 0x0D5), // scripts_unk_1114 (single battles)
-            GlobalScriptEntry::new(2800, 414, 0x18D),  // scripts_berry_tree_interaction
-            GlobalScriptEntry::new(2500, 1, 0x011),    // scripts_unk_0001
-            GlobalScriptEntry::new(2000, 211, 0x0D5),  // scripts_common
-        ];
+        Self::platinum_western_hardcoded()
+    }
 
+    /// Hardcoded table for Platinum Western (US/EU/DE/FR/IT/ES).
+    pub fn platinum_western_hardcoded() -> Self {
+        let entries = vec![
+            GlobalScriptEntry::new(10490, 499, 499),
+            GlobalScriptEntry::new(10450, 500, 16),
+            GlobalScriptEntry::new(10400, 400, 203),
+            GlobalScriptEntry::new(10300, 1051, 552),
+            GlobalScriptEntry::new(10200, 407, 379),
+            GlobalScriptEntry::new(10150, 1116, 621),
+            GlobalScriptEntry::new(10100, 1115, 622),
+            GlobalScriptEntry::new(10000, 409, 381),
+            GlobalScriptEntry::new(9950, 411, 383),
+            GlobalScriptEntry::new(9900, 397, 213),
+            GlobalScriptEntry::new(9800, 212, 217),
+            GlobalScriptEntry::new(9700, 422, 422),
+            GlobalScriptEntry::new(9600, 412, 213),
+            GlobalScriptEntry::new(9500, 501, 501),
+            GlobalScriptEntry::new(9400, 426, 426),
+            GlobalScriptEntry::new(9300, 406, 374),
+            GlobalScriptEntry::new(9200, 423, 423),
+            GlobalScriptEntry::new(9100, 0, 11),
+            GlobalScriptEntry::new(9000, 213, 221),
+            GlobalScriptEntry::new(8970, 425, 7),
+            GlobalScriptEntry::new(8950, 498, 498),
+            GlobalScriptEntry::new(8900, 424, 424),
+            GlobalScriptEntry::new(8800, 497, 497),
+            GlobalScriptEntry::new(8000, 408, 380),
+            GlobalScriptEntry::new(7000, 404, 369),
+            GlobalScriptEntry::new(5000, 1114, 213),
+            GlobalScriptEntry::new(3000, 1114, 213),
+            GlobalScriptEntry::new(2800, 413, 397),
+            GlobalScriptEntry::new(2500, 1, 17),
+            GlobalScriptEntry::new(2000, 211, 213),
+        ];
+        Self::from_entries(entries)
+    }
+
+    /// Hardcoded table for Platinum Japanese.
+    ///
+    /// Extracted from arm9 func 0x3E6D8, pool 0x3E9C0.
+    pub fn platinum_japanese_hardcoded() -> Self {
+        let entries = vec![
+            GlobalScriptEntry::new(10490, 499, 499),
+            GlobalScriptEntry::new(10450, 500, 15),
+            GlobalScriptEntry::new(10400, 400, 202),
+            GlobalScriptEntry::new(10300, 1051, 546),
+            GlobalScriptEntry::new(10200, 407, 378),
+            GlobalScriptEntry::new(10150, 1116, 613),
+            GlobalScriptEntry::new(10100, 1115, 614),
+            GlobalScriptEntry::new(10000, 409, 380),
+            GlobalScriptEntry::new(9950, 411, 382),
+            GlobalScriptEntry::new(9900, 397, 212),
+            GlobalScriptEntry::new(9800, 212, 216),
+            GlobalScriptEntry::new(9700, 422, 422),
+            GlobalScriptEntry::new(9600, 412, 212),
+            GlobalScriptEntry::new(9500, 501, 501),
+            GlobalScriptEntry::new(9400, 426, 426),
+            GlobalScriptEntry::new(9300, 406, 373),
+            GlobalScriptEntry::new(9200, 423, 423),
+            GlobalScriptEntry::new(9100, 0, 11),
+            GlobalScriptEntry::new(9000, 213, 220),
+            GlobalScriptEntry::new(8970, 425, 7),
+            GlobalScriptEntry::new(8950, 498, 498),
+            GlobalScriptEntry::new(8900, 424, 424),
+            GlobalScriptEntry::new(8800, 497, 497),
+            GlobalScriptEntry::new(8000, 408, 379),
+            GlobalScriptEntry::new(7000, 404, 368),
+            GlobalScriptEntry::new(5000, 1114, 212),
+            GlobalScriptEntry::new(3000, 1114, 212),
+            GlobalScriptEntry::new(2800, 413, 393),
+            GlobalScriptEntry::new(2500, 1, 16),
+            GlobalScriptEntry::new(2000, 211, 212),
+        ];
+        Self::from_entries(entries)
+    }
+
+    /// Hardcoded table for Platinum Korean (Giratina build).
+    ///
+    /// Extracted from arm9 func 0x3F00C, pool 0x3F2F4.
+    pub fn platinum_korean_hardcoded() -> Self {
+        let entries = vec![
+            GlobalScriptEntry::new(10490, 499, 499),
+            GlobalScriptEntry::new(10450, 500, 15),
+            GlobalScriptEntry::new(10400, 400, 202),
+            GlobalScriptEntry::new(10300, 1051, 547),
+            GlobalScriptEntry::new(10200, 407, 378),
+            GlobalScriptEntry::new(10150, 1116, 614),
+            GlobalScriptEntry::new(10100, 1115, 615),
+            GlobalScriptEntry::new(10000, 409, 380),
+            GlobalScriptEntry::new(9950, 411, 382),
+            GlobalScriptEntry::new(9900, 397, 212),
+            GlobalScriptEntry::new(9800, 212, 216),
+            GlobalScriptEntry::new(9700, 422, 422),
+            GlobalScriptEntry::new(9600, 412, 212),
+            GlobalScriptEntry::new(9500, 501, 501),
+            GlobalScriptEntry::new(9400, 426, 426),
+            GlobalScriptEntry::new(9300, 406, 373),
+            GlobalScriptEntry::new(9200, 423, 423),
+            GlobalScriptEntry::new(9100, 0, 11),
+            GlobalScriptEntry::new(9000, 213, 220),
+            GlobalScriptEntry::new(8970, 425, 7),
+            GlobalScriptEntry::new(8950, 498, 498),
+            GlobalScriptEntry::new(8900, 424, 424),
+            GlobalScriptEntry::new(8800, 497, 497),
+            GlobalScriptEntry::new(8000, 408, 379),
+            GlobalScriptEntry::new(7000, 404, 368),
+            GlobalScriptEntry::new(5000, 1114, 212),
+            GlobalScriptEntry::new(3000, 1114, 212),
+            GlobalScriptEntry::new(2800, 413, 393),
+            GlobalScriptEntry::new(2500, 1, 16),
+            GlobalScriptEntry::new(2000, 211, 212),
+        ];
+        Self::from_entries(entries)
+    }
+
+    /// Hardcoded table for Diamond/Pearl Western (US/EU Rev 5).
+    ///
+    /// Extracted from `LoadScriptsAndMessagesByMapId` in arm9 (func 0x38F18, pool 0x39210).
+    /// Source: `~/dev/gen4-test-roms/research/offsets_research.md`.
+    pub fn dp_western_hardcoded() -> Self {
+        let entries = vec![
+            GlobalScriptEntry::new(10300, 977, 496),
+            GlobalScriptEntry::new(10200, 373, 332),
+            GlobalScriptEntry::new(10150, 1042, 562),
+            GlobalScriptEntry::new(10100, 1041, 563),
+            GlobalScriptEntry::new(10000, 375, 334),
+            GlobalScriptEntry::new(9950, 376, 335),
+            GlobalScriptEntry::new(9900, 365, 199),
+            GlobalScriptEntry::new(9800, 206, 203),
+            GlobalScriptEntry::new(9700, 387, 378),
+            GlobalScriptEntry::new(9500, 464, 464),
+            GlobalScriptEntry::new(9400, 391, 381),
+            GlobalScriptEntry::new(9200, 388, 379),
+            GlobalScriptEntry::new(9100, 0, 9),
+            GlobalScriptEntry::new(9000, 207, 207),
+            GlobalScriptEntry::new(8970, 390, 7),
+            GlobalScriptEntry::new(8950, 463, 463),
+            GlobalScriptEntry::new(8900, 389, 380),
+            GlobalScriptEntry::new(8800, 462, 462),
+            GlobalScriptEntry::new(8000, 374, 333),
+            GlobalScriptEntry::new(7000, 370, 325),
+            GlobalScriptEntry::new(5000, 1040, 199),
+            GlobalScriptEntry::new(3000, 1040, 199),
+            GlobalScriptEntry::new(2800, 378, 350),
+            GlobalScriptEntry::new(2500, 1, 13),
+            GlobalScriptEntry::new(2000, 205, 199),
+        ];
+        Self::from_entries(entries)
+    }
+
+    /// Hardcoded table for Diamond/Pearl Japanese.
+    ///
+    /// Extracted from arm9 func 0x3B6B0, pool 0x3B95C.
+    pub fn dp_japanese_hardcoded() -> Self {
+        let entries = vec![
+            GlobalScriptEntry::new(10300, 977, 488),
+            GlobalScriptEntry::new(10200, 373, 330),
+            GlobalScriptEntry::new(10150, 1042, 552),
+            GlobalScriptEntry::new(10100, 1041, 553),
+            GlobalScriptEntry::new(10000, 375, 332),
+            GlobalScriptEntry::new(9950, 376, 333),
+            GlobalScriptEntry::new(9900, 365, 198),
+            GlobalScriptEntry::new(9800, 206, 202),
+            GlobalScriptEntry::new(9700, 387, 370),
+            GlobalScriptEntry::new(9600, 377, 198),
+            GlobalScriptEntry::new(9500, 464, 484),
+            GlobalScriptEntry::new(9400, 391, 373),
+            GlobalScriptEntry::new(9300, 372, 327),
+            GlobalScriptEntry::new(9200, 388, 371),
+            GlobalScriptEntry::new(9100, 0, 9),
+            GlobalScriptEntry::new(9000, 207, 206),
+            GlobalScriptEntry::new(8970, 390, 7),
+            GlobalScriptEntry::new(8950, 463, 478),
+            GlobalScriptEntry::new(8900, 389, 372),
+            GlobalScriptEntry::new(8800, 462, 477),
+            GlobalScriptEntry::new(8000, 374, 331),
+            GlobalScriptEntry::new(7000, 370, 323),
+            GlobalScriptEntry::new(5000, 1040, 198),
+            GlobalScriptEntry::new(3000, 1040, 198),
+            GlobalScriptEntry::new(2800, 378, 344),
+            GlobalScriptEntry::new(2500, 1, 12),
+            GlobalScriptEntry::new(2000, 205, 198),
+        ];
+        Self::from_entries(entries)
+    }
+
+    /// Hardcoded table for Diamond/Pearl Korean.
+    ///
+    /// Extracted from arm9 func 0x39388, pool 0x3967C.
+    pub fn dp_korean_hardcoded() -> Self {
+        let entries = vec![
+            GlobalScriptEntry::new(10300, 977, 490),
+            GlobalScriptEntry::new(10200, 373, 331),
+            GlobalScriptEntry::new(10150, 1042, 554),
+            GlobalScriptEntry::new(10100, 1041, 555),
+            GlobalScriptEntry::new(10000, 375, 333),
+            GlobalScriptEntry::new(9950, 376, 334),
+            GlobalScriptEntry::new(9900, 365, 198),
+            GlobalScriptEntry::new(9800, 206, 202),
+            GlobalScriptEntry::new(9700, 387, 372),
+            GlobalScriptEntry::new(9500, 464, 464),
+            GlobalScriptEntry::new(9400, 391, 375),
+            GlobalScriptEntry::new(9200, 388, 373),
+            GlobalScriptEntry::new(9100, 0, 9),
+            GlobalScriptEntry::new(9000, 207, 206),
+            GlobalScriptEntry::new(8970, 390, 7),
+            GlobalScriptEntry::new(8950, 463, 463),
+            GlobalScriptEntry::new(8900, 389, 374),
+            GlobalScriptEntry::new(8800, 462, 462),
+            GlobalScriptEntry::new(8000, 374, 332),
+            GlobalScriptEntry::new(7000, 370, 324),
+            GlobalScriptEntry::new(5000, 1040, 198),
+            GlobalScriptEntry::new(3000, 1040, 198),
+            GlobalScriptEntry::new(2800, 378, 345),
+            GlobalScriptEntry::new(2500, 1, 12),
+            GlobalScriptEntry::new(2000, 205, 198),
+        ];
         Self::from_entries(entries)
     }
 
@@ -354,13 +572,14 @@ mod tests {
     use proptest::prelude::*;
 
     #[test]
-    fn test_platinum_hardcoded_table() {
-        let table = GlobalScriptTable::platinum_hardcoded();
-        assert_eq!(table.len(), PLATINUM_TABLE_ENTRY_COUNT);
+    fn test_platinum_western_hardcoded_table() {
+        let table = GlobalScriptTable::platinum_western_hardcoded();
+        assert_eq!(table.len(), 30);
 
         let entry = table.lookup(2000).unwrap();
         assert_eq!(entry.min_script_id, 2000);
         assert_eq!(entry.script_file_id, 211);
+        assert_eq!(entry.text_archive_id, 213);
 
         let entry = table.lookup(2050).unwrap();
         assert_eq!(entry.min_script_id, 2000);
@@ -368,10 +587,22 @@ mod tests {
         let entry = table.lookup(3500).unwrap();
         assert_eq!(entry.min_script_id, 3000);
         assert_eq!(entry.script_file_id, 1114);
+        assert_eq!(entry.text_archive_id, 213);
+    }
 
-        let entry = table.lookup(5500).unwrap();
-        assert_eq!(entry.min_script_id, 5000);
-        assert_eq!(entry.script_file_id, 1114);
+    #[test]
+    fn test_dp_western_hardcoded_table() {
+        let table = GlobalScriptTable::dp_western_hardcoded();
+        assert_eq!(table.len(), 25);
+
+        let entry = table.lookup(2000).unwrap();
+        assert_eq!(entry.min_script_id, 2000);
+        assert_eq!(entry.script_file_id, 205);
+        assert_eq!(entry.text_archive_id, 199);
+
+        let entry = table.lookup(3500).unwrap();
+        assert_eq!(entry.min_script_id, 3000);
+        assert_eq!(entry.script_file_id, 1040);
     }
 
     #[test]

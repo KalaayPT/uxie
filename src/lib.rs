@@ -193,3 +193,21 @@ pub use workspace::{ProjectType, Workspace};
 pub fn validate_message(s: &str) -> Vec<chatot::encode::ErrorFormat> {
     chatot::encode::validate_message(None, s)
 }
+
+pub fn format_message(text: &str) -> Result<String> {
+    Ok(chatot::word_wrap(
+        text,
+        chatot::get_default_charmap(),
+        chatot::default_glyph_widths(),
+        chatot::DIALOG_LINE_MAX_PX,
+    )?)
+}
+
+pub fn format_line_is_too_long(text: &str) -> Result<bool> {
+    Ok(chatot::line_is_too_long(
+        text,
+        chatot::get_default_charmap(),
+        chatot::default_glyph_widths(),
+        chatot::DIALOG_LINE_MAX_PX,
+    )?)
+}

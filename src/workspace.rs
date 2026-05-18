@@ -306,7 +306,10 @@ impl Workspace {
             && let Some(stem) = name.strip_prefix("TEXT_BANK_")
         {
             let lower = stem.to_lowercase();
-            let json = self.project_path.join("res/text").join(format!("{lower}.json"));
+            let json = self
+                .project_path
+                .join("res/text")
+                .join(format!("{lower}.json"));
             if json.exists() {
                 return Some(json);
             }
@@ -368,6 +371,7 @@ impl Workspace {
             "AddMenuEntryImm" | "AddMultiOption" | "MenuItemAdd" | "CreateMultiTouchBox" => {
                 Some(match family {
                     GameFamily::HGSS => 191,
+                    GameFamily::DP => 321,
                     _ => 361,
                 })
             }
@@ -433,6 +437,14 @@ impl Workspace {
         if let Some(pos) = entry.iter().position(|m| m == text) {
             return Ok(pos as u16);
         }
+        // Reuse the first garbage (empty/whitespace-only) slot rather than appending.
+        if let Some(pos) = entry
+            .iter()
+            .position(|m| m.chars().all(char::is_whitespace))
+        {
+            entry[pos] = text.to_string();
+            return Ok(pos as u16);
+        }
         let idx = entry.len();
         entry.push(text.to_string());
         Ok(idx as u16)
@@ -463,12 +475,6 @@ impl Workspace {
             let mut json: serde_json::Value = serde_json::from_str(&content)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-            let existing_count = json["messages"].as_array().map(|a| a.len()).unwrap_or(0);
-            let new_messages = &all_messages[existing_count..];
-            if new_messages.is_empty() {
-                continue;
-            }
-
             let lang_key = self.language.locale_key();
 
             let stem = path
@@ -476,20 +482,60 @@ impl Workspace {
                 .and_then(|s| s.to_str())
                 .unwrap_or("unknown")
                 .to_string();
-            let messages_arr = json["messages"]
-                .as_array_mut()
-                .ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::InvalidData,
-                        "missing messages array",
-                    )
-                })?;
+
+            let existing_count = json["messages"].as_array().map(|a| a.len()).unwrap_or(0);
+            let new_messages = &all_messages[existing_count..];
+
+            let messages_arr = json["messages"].as_array_mut().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "missing messages array")
+            })?;
+
+            // Overwrite any garbage slots that were reused: the pending entry is non-empty
+            // while the on-disk entry is whitespace-only.
+            let mut any_garbage_replaced = false;
+            for idx in 0..existing_count.min(all_messages.len()) {
+                let pending = &all_messages[idx];
+                if pending.chars().all(char::is_whitespace) {
+                    continue;
+                }
+                let on_disk_is_garbage = messages_arr[idx]
+                    .get(&lang_key)
+                    .map(|v| match v {
+                        serde_json::Value::String(s) => s.chars().all(char::is_whitespace),
+                        serde_json::Value::Array(lines) => lines.iter().all(|l| {
+                            l.as_str()
+                                .map_or(true, |s| s.chars().all(char::is_whitespace))
+                        }),
+                        _ => false,
+                    })
+                    .unwrap_or(false);
+                if on_disk_is_garbage {
+                    let content = split_message_into_lines(pending);
+                    let content_value = if content.len() == 1 {
+                        serde_json::json!(content[0])
+                    } else {
+                        serde_json::json!(content)
+                    };
+                    messages_arr[idx][&lang_key] = content_value;
+                    any_garbage_replaced = true;
+                }
+            }
+
+            if new_messages.is_empty() && !any_garbage_replaced {
+                continue;
+            }
 
             for (i, text) in new_messages.iter().enumerate() {
                 let idx = existing_count + i;
+                let content = split_message_into_lines(text);
+                let content_value = if content.len() == 1 {
+                    serde_json::json!(content[0])
+                } else {
+                    serde_json::json!(content)
+                };
                 messages_arr.push(serde_json::json!({
                     "id": format!("msg_{stem}_{idx:05}"),
-                    lang_key: text,
+                    lang_key: content_value,
                 }));
             }
 
@@ -522,6 +568,42 @@ impl DataProvider for NoopProvider {
     }
 }
 
+/// Split a chatot-encoded message string at line-break escape sequences.
+///
+/// Each segment retains the trailing `\n`, `\r`, or `\f` escape. Returns a
+/// single-element vec for messages with no internal breaks so callers can
+/// store them as a plain JSON string rather than an array.
+fn split_message_into_lines(text: &str) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(&next) = chars.peek() {
+                if matches!(next, 'n' | 'r' | 'f') {
+                    chars.next();
+                    current.push('\\');
+                    current.push(next);
+                    lines.push(std::mem::take(&mut current));
+                    continue;
+                }
+            }
+        }
+        current.push(ch);
+    }
+
+    if !current.is_empty() {
+        lines.push(current);
+    }
+
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+
+    lines
+}
+
 /// Read all message strings from a text archive file, dispatching by extension.
 fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec<String>> {
     if path.extension().and_then(|e| e.to_str()) == Some("json") {
@@ -542,12 +624,22 @@ fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec
                 // Try the workspace language first, then English, then Japanese,
                 // then whatever key is present — so every entry is counted regardless
                 // of which locale the archive was exported with.
-                obj.get(lang_key)
+                let v = obj
+                    .get(lang_key)
                     .or_else(|| obj.get("en_US"))
                     .or_else(|| obj.get("ja_JP"))
-                    .or_else(|| obj.iter().find(|(k, _)| *k != "id").map(|(_, v)| v))
-                    .and_then(|v| v.as_str())
-                    .map(str::to_string)
+                    .or_else(|| obj.iter().find(|(k, _)| *k != "id").map(|(_, v)| v))?;
+
+                // Messages are stored as either a plain string or an array of
+                // line segments (chatot multi-line format). Arrays are joined
+                // without a separator — chatot does the same when encoding.
+                if let Some(s) = v.as_str() {
+                    Some(s.to_string())
+                } else if let Some(arr) = v.as_array() {
+                    Some(arr.iter().filter_map(|e| e.as_str()).collect::<String>())
+                } else {
+                    None
+                }
             })
             .collect())
     } else {
@@ -564,7 +656,10 @@ fn read_message_from_path(path: &Path, msg_index: usize) -> Option<String> {
         SymbolTable::read_json_archive_message(path, msg_index)
     } else {
         let content = std::fs::read_to_string(path).ok()?;
-        SymbolTable::extract_gmm_messages(&content).ok()?.into_iter().nth(msg_index)
+        SymbolTable::extract_gmm_messages(&content)
+            .ok()?
+            .into_iter()
+            .nth(msg_index)
     }
 }
 
@@ -582,7 +677,11 @@ fn map_header_table_offset(
         GameFamily::DP => match language {
             GameLanguage::Japanese => {
                 // Diamond vs Pearl differ by 4 bytes
-                if game_code.starts_with("ADAJ") { 0xF0D68 } else { 0xF0D6C }
+                if game_code.starts_with("ADAJ") {
+                    0xF0D68
+                } else {
+                    0xF0D6C
+                }
             }
             GameLanguage::English => 0xEEDBC,
             GameLanguage::French => 0xEEDFC,
@@ -772,8 +871,22 @@ impl Workspace {
         let game_strings = GameStrings::load_from_dspre(&path, family, language)?;
 
         let global_script_table = match family {
-            GameFamily::HGSS => GlobalScriptTable::from_hgss_binary_file(&arm9_path)?,
-            GameFamily::Platinum | GameFamily::DP => GlobalScriptTable::platinum_hardcoded(),
+            GameFamily::HGSS => {
+                GlobalScriptTable::from_hgss_binary_file_for_language(&arm9_path, game, language)
+                    .unwrap_or_else(|_| GlobalScriptTable::new())
+            }
+            GameFamily::Platinum => match language {
+                crate::game::GameLanguage::Japanese => {
+                    GlobalScriptTable::platinum_japanese_hardcoded()
+                }
+                crate::game::GameLanguage::Korean => GlobalScriptTable::platinum_korean_hardcoded(),
+                _ => GlobalScriptTable::platinum_western_hardcoded(),
+            },
+            GameFamily::DP => match language {
+                crate::game::GameLanguage::Japanese => GlobalScriptTable::dp_japanese_hardcoded(),
+                crate::game::GameLanguage::Korean => GlobalScriptTable::dp_korean_hardcoded(),
+                _ => GlobalScriptTable::dp_western_hardcoded(),
+            },
         };
 
         let script_dir = path.join("expanded/scripts");
@@ -851,14 +964,15 @@ impl Workspace {
                     GlobalScriptTable::new()
                 }
             }
-            GameFamily::Platinum | GameFamily::DP => {
+            GameFamily::Platinum => {
                 let script_manager_path = root.join("src/script_manager.c");
                 if script_manager_path.exists() {
                     GlobalScriptTable::from_platinum_decomp_file(&script_manager_path, &symbols)?
                 } else {
-                    GlobalScriptTable::platinum_hardcoded()
+                    GlobalScriptTable::platinum_western_hardcoded()
                 }
             }
+            GameFamily::DP => GlobalScriptTable::dp_western_hardcoded(),
         };
 
         Ok(Self {
@@ -1564,7 +1678,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1596,7 +1710,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1624,7 +1738,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1655,7 +1769,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1838,7 +1952,7 @@ mod tests {
         let mut ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1870,7 +1984,7 @@ mod tests {
         let mut ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1912,7 +2026,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(MockProvider),
@@ -1940,7 +2054,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Decomp,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::HeartGold,
             family: GameFamily::HGSS,
             provider: Box::new(HgssScriptProvider { script_file_id: 81 }),
@@ -2686,7 +2800,10 @@ mod tests {
 
     impl DataProvider for DspreArchiveProvider {
         fn get_map_header(&self, id: u16) -> crate::error::Result<crate::map_header::MapHeader> {
-            Err(crate::error::UxieError::not_found("Map header", id.to_string()))
+            Err(crate::error::UxieError::not_found(
+                "Map header",
+                id.to_string(),
+            ))
         }
 
         fn get_map_header_count(&self) -> crate::error::Result<usize> {
@@ -2748,7 +2865,10 @@ mod tests {
         let archive_id = archive_id.expect("expected Some archive ID for script 0003");
         let msg = ws.read_message(archive_id, 3);
         println!("read_message({archive_id}, 3) = {msg:?}");
-        assert!(msg.is_some(), "expected a message at index 3 in archive {archive_id}");
+        assert!(
+            msg.is_some(),
+            "expected a message at index 3 in archive {archive_id}"
+        );
     }
 
     #[test]
@@ -2770,13 +2890,25 @@ mod tests {
         let global = ws.global_script_table.find_by_script_file_id(224);
         println!("global_script_table.find_by_script_file_id(224) = {global:?}");
         // Also check a known-good script (211 = common strings)
-        println!("provider(211) = {:?}", ws.provider.get_text_archive_for_script_file(211));
-        println!("global(211)   = {:?}", ws.global_script_table.find_by_script_file_id(211));
+        println!(
+            "provider(211) = {:?}",
+            ws.provider.get_text_archive_for_script_file(211)
+        );
+        println!(
+            "global(211)   = {:?}",
+            ws.global_script_table.find_by_script_file_id(211)
+        );
         let archive_id = ws.text_archive_for_script_file("0224");
         println!("text_archive_for_script_file('0224') = {archive_id:?}");
         let archive_id = archive_id.expect("expected Some archive ID for map-bound script 0224");
-        println!("read_message({archive_id}, 0) = {:?}", ws.read_message(archive_id, 0));
-        assert!(ws.read_message(archive_id, 0).is_some(), "expected a message in archive {archive_id}");
+        println!(
+            "read_message({archive_id}, 0) = {:?}",
+            ws.read_message(archive_id, 0)
+        );
+        assert!(
+            ws.read_message(archive_id, 0).is_some(),
+            "expected a message in archive {archive_id}"
+        );
     }
 
     #[test]
@@ -2785,7 +2917,7 @@ mod tests {
         let ws = Workspace {
             project_path: PathBuf::from("/test"),
             project_type: ProjectType::Dspre,
-                language: crate::game::GameLanguage::English,
+            language: crate::game::GameLanguage::English,
             game: Game::Platinum,
             family: GameFamily::Platinum,
             provider: Box::new(DspreArchiveProvider),
@@ -2858,6 +2990,54 @@ mod tests {
         // A distinct second message gets the next slot.
         let idx3 = ws.find_or_add_message(0, "another").unwrap();
         assert_eq!(idx3, 2);
+    }
+
+    #[test]
+    fn find_or_add_message_reuses_garbage_slots() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        // Archive with one real entry and one garbage (all-spaces) entry.
+        std::fs::write(
+            archives_dir.join("0002.json"),
+            r#"{"messages": [{"id": "msg_0002_00000", "en_US": "real"}, {"id": "msg_0002_00001", "en_US": "   "}]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+
+        // Asking for a new string should reuse the garbage slot (index 1) instead of appending.
+        let idx = ws.find_or_add_message(2, "replacement").unwrap();
+        assert_eq!(idx, 1);
+
+        // The slot is now taken; a second new string gets appended.
+        let idx2 = ws.find_or_add_message(2, "appended").unwrap();
+        assert_eq!(idx2, 2);
+    }
+
+    #[test]
+    fn flush_pending_messages_overwrites_garbage_slots() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        let archive_path = archives_dir.join("0003.json");
+        std::fs::write(
+            &archive_path,
+            r#"{"messages": [{"id": "msg_0003_00000", "en_US": "real"}, {"id": "msg_0003_00001", "en_US": "   "}]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        ws.find_or_add_message(3, "replacement").unwrap(); // reuses slot 1
+        ws.flush_pending_messages().unwrap();
+
+        let content = std::fs::read_to_string(&archive_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let messages = json["messages"].as_array().unwrap();
+        // Still 2 entries — no new slot appended.
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["en_US"], "real");
+        assert_eq!(messages[1]["en_US"], "replacement");
     }
 
     #[test]
