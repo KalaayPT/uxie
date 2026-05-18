@@ -561,7 +561,9 @@ impl GlobalScriptTable {
     /// Returns the first matching entry, or `None` if no entry uses the
     /// given script file.
     pub fn find_by_script_file_id(&self, script_file_id: u16) -> Option<&GlobalScriptEntry> {
-        self.entries.iter().find(|e| e.script_file_id == script_file_id)
+        self.entries
+            .iter()
+            .find(|e| e.script_file_id == script_file_id)
     }
 }
 
