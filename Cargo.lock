@@ -171,9 +171,9 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "chatot"
-version = "0.6.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "126202f93b6a0f3722187664e0c13c2fd38012a56fb7c317d9bd6170a47527dd"
+checksum = "054a8697e41f5af020c28e31174fd5d0e68f98863a745f8cfd22c7f72bbb8a17"
 dependencies = [
  "byteorder",
  "clap",

@@ -47,13 +47,16 @@ pub struct Workspace {
     /// Populated on first access via [`Workspace::read_message`]; subsequent
     /// calls for the same ID are O(1).
     text_archive_paths: DashMap<u16, PathBuf>,
-    /// Accumulates messages for each archive during a compilation run.
-    ///
-    /// Each entry holds the full message list for that archive: existing messages
-    /// loaded from disk on first access (for dedup), followed by any new messages
-    /// appended during compilation. Call [`flush_pending_messages`] after
-    /// compilation to write new entries back to disk.
-    pending_messages: DashMap<u16, Vec<String>>,
+    /// Full message text for each loaded archive, keyed by archive ID.
+    /// Lazily populated on first access. Replaces `pending_messages`
+    /// as the general session cache; still used for compilation dedup
+    /// and flush.
+    message_cache: DashMap<u16, Vec<String>>,
+    /// Map from message id string → (archive_id, index).
+    /// Lazily populated by `load_archive_into_cache`.
+    /// `Arc` so it can be shared with `ConstantDb` — inserts are visible
+    /// across all clones of ConstantDb.
+    pub(crate) message_ids: Arc<DashMap<String, (u16, u16)>>,
 }
 
 impl Workspace {
@@ -276,27 +279,98 @@ impl Workspace {
 
     /// Resolve message text by archive ID and zero-based message index.
     ///
-    /// Checks the global symbol cache first (populated during workspace init),
-    /// then falls back to disk.  The resolved path is cached in
-    /// `text_archive_paths` so subsequent calls for the same archive are O(1).
+    /// Checks `message_cache` first (fast path), then lazily loads the archive
+    /// from disk on miss. Returns `None` for out-of-range indices and
+    /// whitespace-only (garbage) slots.
     pub fn read_message(&self, archive_id: u16, msg_index: u16) -> Option<String> {
-        let path = self.cached_text_archive_path(archive_id)?;
-        let stem = path.file_stem()?.to_str()?;
-        self.symbols
-            .message_text(stem, msg_index as usize)
-            .map(str::to_string)
-            .or_else(|| read_message_from_path(&path, msg_index as usize))
+        if let Some(msgs) = self.message_cache.get(&archive_id) {
+            let text = msgs.get(msg_index as usize)?;
+            return if text.chars().all(char::is_whitespace) {
+                None
+            } else {
+                Some(text.clone())
+            };
+        }
+        self.load_archive_into_cache(archive_id).ok()?;
+        let msgs = self.message_cache.get(&archive_id)?;
+        let text = msgs.get(msg_index as usize)?;
+        if text.chars().all(char::is_whitespace) { None } else { Some(text.clone()) }
     }
 
     /// Return the cached path for `archive_id`, resolving and caching it on
     /// first access.
-    fn cached_text_archive_path(&self, archive_id: u16) -> Option<PathBuf> {
+    pub fn cached_text_archive_path(&self, archive_id: u16) -> Option<PathBuf> {
         if let Some(entry) = self.text_archive_paths.get(&archive_id) {
             return Some(entry.clone());
         }
         let path = self.find_text_archive_path(archive_id)?;
         self.text_archive_paths.insert(archive_id, path.clone());
         Some(path)
+    }
+
+    /// Load archive `archive_id` into `message_cache` and populate `message_ids`.
+    ///
+    /// No-op if the archive is already loaded. Texts are read via
+    /// `read_all_messages` (the single, tested locale-fallback implementation).
+    /// IDs are extracted in a separate lightweight pass over the `"id"` fields
+    /// (JSON archives only; GMM/binary archives have no id fields).
+    fn load_archive_into_cache(&self, archive_id: u16) -> std::io::Result<()> {
+        if self.message_cache.contains_key(&archive_id) {
+            return Ok(());
+        }
+        let path = self.cached_text_archive_path(archive_id).ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("no text archive found for ID {archive_id}"),
+            )
+        })?;
+
+        let messages = read_all_messages(&path, self.language)?;
+        self.message_cache.insert(archive_id, messages);
+
+        if path.extension().and_then(|e| e.to_str()) == Some("json") {
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(arr) = json["messages"].as_array() {
+                        for (idx, entry) in arr.iter().enumerate() {
+                            if let Some(id) = entry["id"].as_str() {
+                                self.message_ids
+                                    .insert(id.to_string(), (archive_id, idx as u16));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Ensure archive `archive_id` is loaded into the message cache.
+    ///
+    /// Callers that need the warm guarantee (e.g. the warm step in
+    /// `compile_file_internal`) use this instead of accessing `message_cache`
+    /// directly.
+    pub fn ensure_archive_loaded(&self, archive_id: u16) -> std::io::Result<()> {
+        self.load_archive_into_cache(archive_id)
+    }
+
+    /// Enumerate all message IDs for a specific archive, for use in completions.
+    pub fn message_ids_for_archive(&self, archive_id: u16) -> Vec<(String, u16)> {
+        self.message_ids
+            .iter()
+            .filter(|e| e.value().0 == archive_id)
+            .map(|e| (e.key().clone(), e.value().1))
+            .collect()
+    }
+
+    /// Look up a message id string, returning `(archive_id, msg_index)` if found.
+    pub fn resolve_message_id(&self, name: &str) -> Option<(u16, u16)> {
+        self.message_ids.get(name).map(|e| *e.value())
+    }
+
+    /// Return a clone of the shared message-ID Arc for wiring into `ConstantDb`.
+    pub fn shared_message_ids(&self) -> Arc<DashMap<String, (u16, u16)>> {
+        self.message_ids.clone()
     }
 
     /// Locate the on-disk file for `archive_id` without consulting the cache.
@@ -409,7 +483,8 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         }
     }
 
@@ -420,8 +495,8 @@ impl Workspace {
     /// list in memory only; call [`flush_pending_messages`] after compilation to
     /// persist them to disk.
     pub fn find_or_add_message(&self, archive_id: u16, text: &str) -> std::io::Result<u16> {
-        if !self.pending_messages.contains_key(&archive_id) {
-            let path = self.cached_text_archive_path(archive_id).ok_or_else(|| {
+        self.load_archive_into_cache(archive_id).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
                 std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     format!(
@@ -429,11 +504,11 @@ impl Workspace {
                          string literals require a project workspace"
                     ),
                 )
-            })?;
-            let messages = read_all_messages(&path, self.language)?;
-            self.pending_messages.entry(archive_id).or_insert(messages);
-        }
-        let mut entry = self.pending_messages.get_mut(&archive_id).unwrap();
+            } else {
+                e
+            }
+        })?;
+        let mut entry = self.message_cache.get_mut(&archive_id).unwrap();
         if let Some(pos) = entry.iter().position(|m| m == text) {
             return Ok(pos as u16);
         }
@@ -458,7 +533,7 @@ impl Workspace {
     /// for write-back). This should be called once after all files in a
     /// compilation batch have been lowered.
     pub fn flush_pending_messages(&self) -> std::io::Result<()> {
-        for kv in &self.pending_messages {
+        for kv in &self.message_cache {
             let archive_id = *kv.key();
             let all_messages = kv.value();
 
@@ -498,17 +573,8 @@ impl Workspace {
                 if pending.chars().all(char::is_whitespace) {
                     continue;
                 }
-                let on_disk_is_garbage = messages_arr[idx]
-                    .get(&lang_key)
-                    .map(|v| match v {
-                        serde_json::Value::String(s) => s.chars().all(char::is_whitespace),
-                        serde_json::Value::Array(lines) => lines.iter().all(|l| {
-                            l.as_str()
-                                .map_or(true, |s| s.chars().all(char::is_whitespace))
-                        }),
-                        _ => false,
-                    })
-                    .unwrap_or(false);
+                let on_disk_is_garbage =
+                    message_entry_is_garbage(&messages_arr[idx], lang_key);
                 if on_disk_is_garbage {
                     let content = split_message_into_lines(pending);
                     let content_value = if content.len() == 1 {
@@ -604,6 +670,40 @@ fn split_message_into_lines(text: &str) -> Vec<String> {
     lines
 }
 
+/// Returns true when a message archive entry has no meaningful text after the
+/// same locale fallback as [`read_all_messages`] (primary → `en_US` → `ja_JP` →
+/// any non-`id` key).
+fn pick_message_value<'a>(
+    obj: &'a serde_json::Map<String, serde_json::Value>,
+    primary_locale: &str,
+) -> Option<&'a serde_json::Value> {
+    obj.get(primary_locale)
+        .or_else(|| obj.get("en_US"))
+        .or_else(|| obj.get("ja_JP"))
+        .or_else(|| obj.iter().find(|(k, _)| *k != "id").map(|(_, v)| v))
+}
+
+/// Returns true when a message archive entry has no meaningful text after the
+/// same locale fallback as [`read_all_messages`] (primary → `en_US` → `ja_JP` →
+/// any non-`id` key).
+fn message_entry_is_garbage(entry: &serde_json::Value, primary_locale: &str) -> bool {
+    let Some(obj) = entry.as_object() else {
+        return true;
+    };
+    let value = pick_message_value(obj, primary_locale);
+
+    match value {
+        Some(serde_json::Value::String(s)) => s.chars().all(char::is_whitespace),
+        Some(serde_json::Value::Array(parts)) => parts
+            .iter()
+            .filter_map(|e| e.as_str())
+            .collect::<String>()
+            .chars()
+            .all(char::is_whitespace),
+        _ => true,
+    }
+}
+
 /// Read all message strings from a text archive file, dispatching by extension.
 fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec<String>> {
     if path.extension().and_then(|e| e.to_str()) == Some("json") {
@@ -619,26 +719,31 @@ fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec
         let lang_key = language.locale_key();
         Ok(arr
             .iter()
-            .filter_map(|entry| {
-                let obj = entry.as_object()?;
+            .map(|entry| {
+                // Every array element yields exactly one String, so the result
+                // stays index-aligned with the JSON `messages` array. Entries
+                // with no usable text (id-only placeholder slots, malformed
+                // objects) become empty strings rather than being dropped:
+                // `message_cache` and `flush_pending_messages` rely on this
+                // 1:1 correspondence (a shorter Vec panics the flush slice and
+                // misaligns its garbage-slot loop).
+                let Some(obj) = entry.as_object() else {
+                    return String::new();
+                };
                 // Try the workspace language first, then English, then Japanese,
                 // then whatever key is present — so every entry is counted regardless
                 // of which locale the archive was exported with.
-                let v = obj
-                    .get(lang_key)
-                    .or_else(|| obj.get("en_US"))
-                    .or_else(|| obj.get("ja_JP"))
-                    .or_else(|| obj.iter().find(|(k, _)| *k != "id").map(|(_, v)| v))?;
+                let value = pick_message_value(obj, lang_key);
 
                 // Messages are stored as either a plain string or an array of
                 // line segments (chatot multi-line format). Arrays are joined
                 // without a separator — chatot does the same when encoding.
-                if let Some(s) = v.as_str() {
-                    Some(s.to_string())
-                } else if let Some(arr) = v.as_array() {
-                    Some(arr.iter().filter_map(|e| e.as_str()).collect::<String>())
-                } else {
-                    None
+                match value {
+                    Some(serde_json::Value::String(s)) => s.clone(),
+                    Some(serde_json::Value::Array(parts)) => {
+                        parts.iter().filter_map(|e| e.as_str()).collect::<String>()
+                    }
+                    _ => String::new(),
                 }
             })
             .collect())
@@ -646,20 +751,6 @@ fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec
         let content = std::fs::read_to_string(path)?;
         crate::c_parser::SymbolTable::extract_gmm_messages(&content)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
-    }
-}
-
-/// Read a single message from a text archive file, dispatching by extension.
-fn read_message_from_path(path: &Path, msg_index: usize) -> Option<String> {
-    use crate::c_parser::SymbolTable;
-    if path.extension().and_then(|e| e.to_str()) == Some("json") {
-        SymbolTable::read_json_archive_message(path, msg_index)
-    } else {
-        let content = std::fs::read_to_string(path).ok()?;
-        SymbolTable::extract_gmm_messages(&content)
-            .ok()?
-            .into_iter()
-            .nth(msg_index)
     }
 }
 
@@ -808,7 +899,8 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         })
     }
 
@@ -912,7 +1004,8 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         })
     }
 
@@ -995,7 +1088,8 @@ impl Workspace {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         })
     }
 
@@ -1691,7 +1785,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         let result = ws.resolve_script_symbols("SetFlag FLAG_START");
@@ -1723,7 +1818,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         let result = ws.resolve_script_symbols("SetFlag 42");
@@ -1751,7 +1847,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         let result = ws.resolve_script_symbols("UnknownCmd UNKNOWN_FLAG");
@@ -1782,7 +1879,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         let mut file_symbols = SymbolTable::with_parent(ws.symbols.clone());
@@ -1965,7 +2063,8 @@ mod tests {
             location_names: None,
             internal_names: Some(vec!["D01R0101".to_string(), "D02R0102".to_string()]),
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         assert_eq!(ws.get_map_internal_name(0), Some("D01R0101".to_string()));
@@ -2000,7 +2099,8 @@ mod tests {
             ]),
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         assert_eq!(
@@ -2039,7 +2139,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         assert_eq!(ws.resolve_constant("TEST_CONST"), Some(12345));
@@ -2067,7 +2168,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         assert_eq!(ws.get_script_file_for_map(0), None);
@@ -2930,7 +3032,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         };
 
         // DSPRE scripts are named by NARC index ("0213" → file_id 213).
@@ -2958,7 +3061,8 @@ mod tests {
             location_names: None,
             internal_names: None,
             text_archive_paths: DashMap::new(),
-            pending_messages: DashMap::new(),
+            message_cache: DashMap::new(),
+            message_ids: Arc::new(DashMap::new()),
         }
     }
 
@@ -3041,6 +3145,30 @@ mod tests {
     }
 
     #[test]
+    fn flush_pending_messages_overwrites_garbage_slots_non_primary_locale() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        let archive_path = archives_dir.join("0004.json");
+        std::fs::write(
+            &archive_path,
+            r#"{"messages": [{"id": "msg_0004_00000", "en_US": "real"}, {"id": "msg_0004_00001", "ja_JP": "   "}]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        ws.find_or_add_message(4, "replacement").unwrap();
+        ws.flush_pending_messages().unwrap();
+
+        let content = std::fs::read_to_string(&archive_path).unwrap();
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        let messages = json["messages"].as_array().unwrap();
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0]["en_US"], "real");
+        assert_eq!(messages[1]["en_US"], "replacement");
+    }
+
+    #[test]
     fn flush_pending_messages_writes_new_entries_to_json() {
         let dir = tempfile::tempdir().unwrap();
         let archives_dir = dir.path().join("expanded/textArchives");
@@ -3069,5 +3197,70 @@ mod tests {
         // IDs should be zero-padded with the archive stem.
         assert_eq!(messages[1]["id"], "msg_0005_00001");
         assert_eq!(messages[2]["id"], "msg_0005_00002");
+    }
+
+    #[test]
+    fn read_message_lazy_populates_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        std::fs::write(
+            archives_dir.join("0199.json"),
+            r#"{"messages": [
+                {"id": "msg_0199_00000", "en_US": "Hello"},
+                {"id": "msg_0199_00001", "en_US": "World"},
+                {"id": "msg_0199_00002", "en_US": "Foo"}
+            ]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        assert!(!ws.message_cache.contains_key(&199));
+
+        let text = ws.read_message(199, 1).unwrap();
+        assert_eq!(text, "World");
+
+        assert!(ws.message_cache.contains_key(&199));
+        assert_eq!(ws.message_cache.get(&199).unwrap().len(), 3);
+    }
+
+    #[test]
+    fn read_message_returns_none_for_garbage_slot() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        std::fs::write(
+            archives_dir.join("0100.json"),
+            r#"{"messages": [
+                {"id": "msg_0100_00000", "en_US": "real text"},
+                {"id": "msg_0100_00001", "en_US": "   "}
+            ]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        assert_eq!(ws.read_message(100, 0), Some("real text".to_string()));
+        assert_eq!(ws.read_message(100, 1), None);
+    }
+
+    #[test]
+    fn load_archive_populates_message_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let archives_dir = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives_dir).unwrap();
+        std::fs::write(
+            archives_dir.join("0199.json"),
+            r#"{"messages": [
+                {"id": "msg_0199_00000", "en_US": "Hello"},
+                {"id": "msg_0199_00001", "en_US": "World"}
+            ]}"#,
+        )
+        .unwrap();
+
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        ws.ensure_archive_loaded(199).unwrap();
+
+        assert_eq!(ws.message_ids.get("msg_0199_00001").map(|e| *e.value()), Some((199, 1)));
+        assert_eq!(ws.message_cache.get(&199).unwrap().len(), 2);
     }
 }
