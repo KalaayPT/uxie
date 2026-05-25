@@ -33,6 +33,7 @@ categories = ["parser-implementations", "game-development"]
 [lib]
 name = "uxie"
 path = "src/lib.rs"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "uxie"

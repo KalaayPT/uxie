@@ -142,6 +142,7 @@ pub mod encounter_file;
 pub mod error;
 pub mod event_file;
 pub mod evolution_data;
+pub mod ffi;
 pub mod game;
 pub mod item_data;
 pub mod learnset_data;

@@ -81,6 +81,18 @@ fn main() {
         make.env("CC", "gcc");
     }
 
+    // binutils >= 2.44 emits malformed high-entropy-ASLR PE images for MinGW
+    // shared libs, which Windows rejects at load time with ERROR_BAD_EXE_FORMAT.
+    // Disable high-entropy VA / dynamicbase for the nitroarc DLL so it loads.
+    if cfg!(windows) {
+        let extra = "-Wl,--disable-high-entropy-va -Wl,--disable-dynamicbase";
+        let ldflags = match env::var("LDFLAGS") {
+            Ok(existing) if !existing.trim().is_empty() => format!("{existing} {extra}"),
+            _ => extra.to_string(),
+        };
+        make.env("LDFLAGS", ldflags);
+    }
+
     let status = make
         .status()
         .expect("failed to run `make ffi` in vendored nitroarc");
