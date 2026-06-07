@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::io;
 use std::path::{Path, PathBuf};
 
-pub use crate::event_file::BinaryEventFile;
+pub use crate::event_file::EventFile;
 
 fn from_yaml_file<T: DeserializeOwned>(path: impl AsRef<Path>) -> io::Result<T> {
     let content = std::fs::read_to_string(path)?;
@@ -120,10 +120,10 @@ impl DspreProject {
         self.event_files_dir().exists()
     }
 
-    pub fn load_event_file(&self, id: u32) -> io::Result<BinaryEventFile> {
+    pub fn load_event_file(&self, id: u32) -> io::Result<EventFile> {
         let path = self.event_files_dir().join(format!("{:04}", id));
         let mut file = std::fs::File::open(path)?;
-        BinaryEventFile::from_binary(&mut file)
+        EventFile::from_binary(&mut file)
     }
 
     pub fn load_script_file(&self, id: u16) -> io::Result<Vec<u8>> {

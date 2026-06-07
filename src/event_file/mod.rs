@@ -1,14 +1,19 @@
-//! Event file parsing for Pokemon Gen 4 maps
-//!
-//! Event files contain map-specific data like NPCs, warps, triggers, and signs.
-//! This module supports both binary and JSON formats.
-
 pub mod binary;
-pub mod json;
+pub mod hgss_json;
+pub mod platinum_json;
 #[cfg(test)]
 mod tests;
 
-pub use binary::{
-    BgEventBinary, BinaryEventFile, CoordEventBinary, ObjectEventBinary, WarpEventBinary,
+pub use binary::{BgEvent, CoordEvent, EventFile, ObjectEvent, WarpEvent};
+pub use hgss_json::HgssEventJson;
+pub use platinum_json::{
+    BgEventJson, CoordEventJson, ObjectEventJson, PlatinumEventJson, WarpEventJson,
 };
-pub use json::{BgEventJson, CoordEventJson, JsonEventFile, ObjectEventJson, WarpEventJson};
+
+/// Build an `InvalidData` error describing a bad field value.
+pub(crate) fn invalid_data(field: &str, message: impl std::fmt::Display) -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::InvalidData,
+        format!("invalid value for `{field}`: {message}"),
+    )
+}

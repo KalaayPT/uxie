@@ -1,5 +1,5 @@
 use uxie::encounter_file::json::WaterEncounterEntryJson;
-use uxie::{GameFamily, JsonEncounterFile, JsonEventFile, MapHeader, SymbolTable, Workspace};
+use uxie::{GameFamily, JsonEncounterFile, MapHeader, PlatinumEventJson, SymbolTable, Workspace};
 
 fn resolve_map_symbol(symbols: &SymbolTable, val: i64, prefix: &str) -> String {
     symbols
@@ -131,7 +131,7 @@ fn print_map_header_hgss(h: &uxie::map_header::MapHeaderHGSS, symbols: &SymbolTa
     println!("Flags:           0x{:02X}", h.flags);
 }
 
-pub fn print_event_file(event: &JsonEventFile, id: u32) {
+pub fn print_event_file(event: &PlatinumEventJson, id: u32) {
     println!("Event File {}", id);
     println!("============");
     println!("BG Events:      {}", event.bg_events.len());
@@ -149,7 +149,10 @@ pub fn print_event_file(event: &JsonEventFile, id: u32) {
                 bg.x,
                 bg.y,
                 bg.z,
-                bg.player_facing_dir.as_deref().unwrap_or("None")
+                bg.player_facing_dir
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "None".to_string())
             );
         }
     }
@@ -185,7 +188,11 @@ pub fn print_event_file(event: &JsonEventFile, id: u32) {
                 coord.width,
                 coord.length,
                 coord.y,
-                coord.var.as_deref().unwrap_or("None"),
+                coord
+                    .var
+                    .as_ref()
+                    .map(ToString::to_string)
+                    .unwrap_or_else(|| "None".to_string()),
                 coord.value
             );
         }

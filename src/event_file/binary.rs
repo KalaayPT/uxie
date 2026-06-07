@@ -1,12 +1,12 @@
-//! Binary event file structures matching pokeplatinum and DSPRE
-
+use crate::game::GameFamily;
 use binrw::{BinRead, BinWrite};
 use std::io::{self, Read, Seek, Write};
 
-/// Binary background/spawnable event (20 bytes)
+/// Background/spawnable event (20 bytes).
+/// The trailing 2 bytes after `player_facing_dir` are implicit C struct padding and always zero.
 #[derive(Debug, Clone, PartialEq, Eq, BinRead, BinWrite)]
 #[brw(little)]
-pub struct BgEventBinary {
+pub struct BgEvent {
     pub script: u16,
     pub event_type: u16,
     pub x: i32,
@@ -16,21 +16,10 @@ pub struct BgEventBinary {
     pub player_facing_dir: u16,
 }
 
-impl BgEventBinary {
-    pub fn read<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
-        Self::read_le(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-
-    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        self.write_le(writer)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-}
-
-/// Binary object event (32 bytes)
+/// Object/overworld event (32 bytes).
 #[derive(Debug, Clone, PartialEq, Eq, BinRead, BinWrite)]
 #[brw(little)]
-pub struct ObjectEventBinary {
+pub struct ObjectEvent {
     pub local_id: u16,
     pub graphics_id: u16,
     pub movement_type: u16,
@@ -46,46 +35,26 @@ pub struct ObjectEventBinary {
     pub y: i32,
 }
 
-impl ObjectEventBinary {
-    pub fn read<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
-        Self::read_le(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-
-    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        self.write_le(writer)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-}
-
-/// Binary warp event (12 bytes)
+/// Warp event (12 bytes).
+/// `height` is always 0 for Platinum/DP. HGSS stores height here.
 #[derive(Debug, Clone, PartialEq, Eq, BinRead, BinWrite)]
 #[brw(little)]
-pub struct WarpEventBinary {
+pub struct WarpEvent {
     pub x: u16,
     pub z: u16,
     pub dest_header_id: u16,
-    #[brw(pad_after = 4)]
     pub dest_warp_id: u16,
+    pub height: u32,
 }
 
-impl WarpEventBinary {
-    pub fn read<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
-        Self::read_le(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-
-    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        self.write_le(writer)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-}
-
-/// Binary coordinate event (16 bytes)
+/// Coordinate/trigger event (16 bytes).
+/// `x` and `z` are signed per the HGSS struct definition.
 #[derive(Debug, Clone, PartialEq, Eq, BinRead, BinWrite)]
 #[brw(little)]
-pub struct CoordEventBinary {
+pub struct CoordEvent {
     pub script: u16,
-    pub x: u16,
-    pub z: u16,
+    pub x: i16,
+    pub z: i16,
     pub width: u16,
     pub length: u16,
     pub y: u16,
@@ -93,48 +62,37 @@ pub struct CoordEventBinary {
     pub var: u16,
 }
 
-impl CoordEventBinary {
-    pub fn read<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
-        Self::read_le(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-
-    pub fn write<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        self.write_le(writer)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-    }
-}
-
-/// Binary event file container
+/// Event file container — the single in-memory representation for all formats.
 #[binrw::binrw]
 #[brw(little)]
-#[derive(Debug, Clone)]
-pub struct BinaryEventFile {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EventFile {
     #[br(temp)]
     #[bw(calc = bg_events.len() as u32)]
     bg_count: u32,
     #[br(count = bg_count)]
-    pub bg_events: Vec<BgEventBinary>,
+    pub bg_events: Vec<BgEvent>,
 
     #[br(temp)]
     #[bw(calc = object_events.len() as u32)]
     object_count: u32,
     #[br(count = object_count)]
-    pub object_events: Vec<ObjectEventBinary>,
+    pub object_events: Vec<ObjectEvent>,
 
     #[br(temp)]
     #[bw(calc = warp_events.len() as u32)]
     warp_count: u32,
     #[br(count = warp_count)]
-    pub warp_events: Vec<WarpEventBinary>,
+    pub warp_events: Vec<WarpEvent>,
 
     #[br(temp)]
     #[bw(calc = coord_events.len() as u32)]
     coord_count: u32,
     #[br(count = coord_count)]
-    pub coord_events: Vec<CoordEventBinary>,
+    pub coord_events: Vec<CoordEvent>,
 }
 
-impl BinaryEventFile {
+impl EventFile {
     pub fn from_binary<R: Read + Seek>(reader: &mut R) -> io::Result<Self> {
         Self::read_le(reader).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
     }
@@ -142,5 +100,28 @@ impl BinaryEventFile {
     pub fn to_binary<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
         self.write_le(writer)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    }
+
+    /// Write as binary, validating family-specific constraints.
+    /// For Platinum/DP, warp `height` must be zero.
+    pub fn to_binary_for<W: Write + Seek>(
+        &self,
+        writer: &mut W,
+        family: GameFamily,
+    ) -> io::Result<()> {
+        if family != GameFamily::HGSS {
+            for warp in &self.warp_events {
+                if warp.height != 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!(
+                            "warp height must be 0 for {:?}, got {}",
+                            family, warp.height
+                        ),
+                    ));
+                }
+            }
+        }
+        self.to_binary(writer)
     }
 }

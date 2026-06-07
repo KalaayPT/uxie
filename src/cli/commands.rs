@@ -103,14 +103,30 @@ pub fn cmd_event(
         let narc = Narc::open(&narc_path)
             .map_err(|e| format!("Event NARC not found at {}: {e}", narc_path.display()))?;
         let data = narc.member(id as usize)?;
-        uxie::BinaryEventFile::from_binary(&mut std::io::Cursor::new(data))?
+        uxie::EventFile::from_binary(&mut std::io::Cursor::new(data))?
     };
-    let event = uxie::JsonEventFile::from_binary(&bin_event, &ws.symbols);
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&event)?);
-    } else {
-        print_event_file(&event, id);
+    match ws.family {
+        GameFamily::HGSS => {
+            let event = bin_event.to_hgss_json(&ws.symbols, None);
+            if json {
+                println!("{}", serde_json::to_string_pretty(&event)?);
+            } else {
+                println!("Event File {}", id);
+                println!("============");
+                println!("BG Events:      {}", event.bgs.len());
+                println!("Object Events:  {}", event.objects.len());
+                println!("Warp Events:    {}", event.warps.len());
+                println!("Coord Events:   {}", event.coords.len());
+            }
+        }
+        GameFamily::DP | GameFamily::Platinum => {
+            let event = bin_event.to_platinum_json(&ws.symbols)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&event)?);
+            } else {
+                print_event_file(&event, id);
+            }
+        }
     }
     Ok(())
 }
