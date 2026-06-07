@@ -987,6 +987,10 @@ impl Workspace {
         }
 
         let sm = SourceManager::new();
+        let mut symbols = SymbolTable::with_source_manager(sm.clone());
+        if let Some(command_database) = Self::command_database_path(&path, family) {
+            symbols.load_database_var_flag_constants(command_database)?;
+        }
         Ok(Self {
             project_path: path,
             project_type: ProjectType::Dspre,
@@ -994,7 +998,7 @@ impl Workspace {
             family,
             language,
             provider: Box::new(Arm9Provider::new(arm9_path, offset, count, family)),
-            symbols: Arc::new(SymbolTable::with_source_manager(sm.clone())),
+            symbols: Arc::new(symbols),
             scripts,
             text_banks: TextBankTable::new(),
             game_strings,
@@ -2352,6 +2356,35 @@ mod tests {
         assert_eq!(ws.project_type, ProjectType::Dspre);
         assert_eq!(ws.game, Game::Platinum);
         assert_eq!(ws.family, GameFamily::Platinum);
+    }
+
+    #[test]
+    fn test_open_dspre_uses_command_database_as_var_flag_fallback() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("generic_dspre_project");
+
+        fs::create_dir_all(root.join("arm9")).unwrap();
+        write_test_header_bin(&root.join("header.bin"), "POKEMON PL", "CPUE");
+        fs::write(root.join("arm9/arm9.bin"), vec![0_u8; 4]).unwrap();
+        fs::create_dir_all(root.join(".rotom/command_database")).unwrap();
+        fs::write(
+            root.join(".rotom/command_database/platinum_v2.json"),
+            r#"{
+                "vars": {
+                    "VARS_END": { "id": 16672 }
+                },
+                "flags": {
+                    "FLAG_UNK_0x0001": { "id": 1 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Dspre);
+        assert_eq!(ws.resolve_constant("VARS_END"), Some(16672));
+        assert_eq!(ws.resolve_constant("FLAG_UNK_0x0001"), Some(1));
     }
 
     #[test]
