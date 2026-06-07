@@ -164,8 +164,8 @@ pub use egg_move_data::{EGG_MOVE_SPECIES_OFFSET, EGG_MOVE_TERMINATOR, EggMoveDat
 pub use encounter_file::{BinaryEncounterFile, JsonEncounterFile};
 pub use error::{Result, UxieError};
 pub use event_file::{
-    BgEventBinary, BgEventJson, BinaryEventFile, CoordEventBinary, CoordEventJson, JsonEventFile,
-    ObjectEventBinary, ObjectEventJson, WarpEventBinary, WarpEventJson,
+    BgEvent, BgEventJson, CoordEvent, CoordEventJson, EventFile, HgssEventJson, ObjectEvent,
+    ObjectEventJson, PlatinumEventJson, WarpEvent, WarpEventJson,
 };
 pub use evolution_data::{
     EVOLUTION_FILE_SIZE, EVOLUTIONS_PER_SPECIES, EvolutionData, EvolutionEntry, EvolutionMethod,

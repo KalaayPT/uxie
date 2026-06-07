@@ -686,7 +686,6 @@ mod tests {
         }
     }
 
-
     fn family_strategy() -> impl Strategy<Value = GameFamily> {
         prop_oneof![
             Just(GameFamily::DP),

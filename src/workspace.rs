@@ -294,7 +294,11 @@ impl Workspace {
         self.load_archive_into_cache(archive_id).ok()?;
         let msgs = self.message_cache.get(&archive_id)?;
         let text = msgs.get(msg_index as usize)?;
-        if text.chars().all(char::is_whitespace) { None } else { Some(text.clone()) }
+        if text.chars().all(char::is_whitespace) {
+            None
+        } else {
+            Some(text.clone())
+        }
     }
 
     /// Return the cached path for `archive_id`, resolving and caching it on
@@ -573,8 +577,7 @@ impl Workspace {
                 if pending.chars().all(char::is_whitespace) {
                     continue;
                 }
-                let on_disk_is_garbage =
-                    message_entry_is_garbage(&messages_arr[idx], lang_key);
+                let on_disk_is_garbage = message_entry_is_garbage(&messages_arr[idx], lang_key);
                 if on_disk_is_garbage {
                     let content = split_message_into_lines(pending);
                     let content_value = if content.len() == 1 {
@@ -3260,7 +3263,10 @@ mod tests {
         let ws = make_dspre_workspace(dir.path().to_path_buf());
         ws.ensure_archive_loaded(199).unwrap();
 
-        assert_eq!(ws.message_ids.get("msg_0199_00001").map(|e| *e.value()), Some((199, 1)));
+        assert_eq!(
+            ws.message_ids.get("msg_0199_00001").map(|e| *e.value()),
+            Some((199, 1))
+        );
         assert_eq!(ws.message_cache.get(&199).unwrap().len(), 2);
     }
 }

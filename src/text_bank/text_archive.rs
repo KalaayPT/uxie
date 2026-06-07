@@ -16,7 +16,10 @@ pub fn decode_text_archives(
             continue;
         }
 
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
         let json_path = output_dir.join(format!("{stem}.json"));
 
         let mut file = fs::File::open(&path)?;
@@ -58,7 +61,10 @@ pub fn encode_text_archives(
             continue;
         }
 
-        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("output");
+        let stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("output");
         let binary_path = output_dir.join(stem);
 
         let src = chatot::TextSource {
@@ -133,7 +139,9 @@ mod tests {
     #[test]
     fn test_read_gmm_file_messages_against_fixture() {
         // Read from the rotom test fixture
-        let fixture = Path::new("../rotom/tests/fixtures/decomp/pokeheartgold/files/msgdata/msg/msg_0115_D36R0101.gmm");
+        let fixture = Path::new(
+            "../rotom/tests/fixtures/decomp/pokeheartgold/files/msgdata/msg/msg_0115_D36R0101.gmm",
+        );
         if !fixture.exists() {
             eprintln!("Skipping fixture test: {} not found", fixture.display());
             return;
