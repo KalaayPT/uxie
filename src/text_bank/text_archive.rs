@@ -93,7 +93,7 @@ pub fn read_text_archive_bin(
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let charmap = chatot::get_default_charmap();
     let mut file = std::fs::File::open(path)?;
-    let archive = chatot::decode_archive(&charmap, &mut file, false)?;
+    let archive = chatot::decode_archive(charmap, &mut file, false)?;
     Ok(archive.messages)
 }
 

@@ -172,14 +172,10 @@ impl Workspace {
 
     fn load_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
         match self.project_type {
-            ProjectType::Dspre => self.load_dspre_location_names(),
+            ProjectType::Dspre => Ok(None),
             ProjectType::Decomp => self.load_decomp_location_names(),
             ProjectType::HgEngine => Ok(None),
         }
-    }
-
-    fn load_dspre_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
-        Ok(None)
     }
 
     fn load_decomp_location_names(&self) -> std::io::Result<Option<Vec<String>>> {
@@ -295,6 +291,7 @@ impl Workspace {
         let msgs = self.message_cache.get(&archive_id)?;
         let text = msgs.get(msg_index as usize)?;
         if text.chars().all(char::is_whitespace) {
+            drop(msgs);
             None
         } else {
             Some(text.clone())
@@ -450,7 +447,7 @@ impl Workspace {
                 Some(match family {
                     GameFamily::HGSS => 191,
                     GameFamily::DP => 321,
-                    _ => 361,
+                    GameFamily::Platinum => 361,
                 })
             }
             _ => None,
@@ -526,6 +523,7 @@ impl Workspace {
         }
         let idx = entry.len();
         entry.push(text.to_string());
+        drop(entry);
         Ok(idx as u16)
     }
 
@@ -541,9 +539,8 @@ impl Workspace {
             let archive_id = *kv.key();
             let all_messages = kv.value();
 
-            let path = match self.cached_text_archive_path(archive_id) {
-                Some(p) => p,
-                None => continue,
+            let Some(path) = self.cached_text_archive_path(archive_id) else {
+                continue;
             };
 
             if path.extension().and_then(|e| e.to_str()) != Some("json") {
@@ -608,8 +605,8 @@ impl Workspace {
                 }));
             }
 
-            let updated = serde_json::to_string_pretty(&json)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            let updated =
+                serde_json::to_string_pretty(&json).map_err(|e| std::io::Error::other(e))?;
             std::fs::write(&path, updated)?;
         }
         Ok(())
@@ -709,8 +706,8 @@ fn message_entry_is_garbage(entry: &serde_json::Value, primary_locale: &str) -> 
 
 /// Read all message strings from a text archive file, dispatching by extension.
 fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec<String>> {
+    let content = std::fs::read_to_string(path)?;
     if path.extension().and_then(|e| e.to_str()) == Some("json") {
-        let content = std::fs::read_to_string(path)?;
         let json: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
         let arr = json
@@ -751,7 +748,6 @@ fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec
             })
             .collect())
     } else {
-        let content = std::fs::read_to_string(path)?;
         crate::c_parser::SymbolTable::extract_gmm_messages(&content)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
     }

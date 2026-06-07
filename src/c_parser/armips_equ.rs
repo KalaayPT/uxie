@@ -30,18 +30,14 @@ struct PendingEqu {
 /// can reference previously-defined symbols.
 pub fn parse_armips_equ_file(path: &Path, symbols: &mut SymbolTable) -> std::io::Result<usize> {
     let content = std::fs::read_to_string(path)?;
-    parse_armips_equ_str(&content, path, symbols)
+    Ok(parse_armips_equ_str(&content, path, symbols))
 }
 
 /// Parse armips `.equ` / `equ` directives from a string (for testing).
 ///
 /// Uses multi-pass resolution to handle forward references (a constant defined
 /// later in the file referencing an earlier definition).
-pub fn parse_armips_equ_str(
-    content: &str,
-    source: &Path,
-    symbols: &mut SymbolTable,
-) -> std::io::Result<usize> {
+pub fn parse_armips_equ_str(content: &str, source: &Path, symbols: &mut SymbolTable) -> usize {
     let mut pending = Vec::new();
     collect_pending_from_str(content, source, symbols, &mut pending);
     resolve_all_pending(&mut pending, symbols)
@@ -75,7 +71,7 @@ pub fn parse_armips_equ_dirs(dirs: &[&Path], symbols: &mut SymbolTable) -> std::
         }
     }
 
-    resolve_all_pending(&mut all_pending, symbols)
+    Ok(resolve_all_pending(&mut all_pending, symbols))
 }
 
 /// Parse all armips `.equ` / `equ` directives from every file in a directory
@@ -129,12 +125,9 @@ fn collect_pending_from_str(
     }
 }
 
-fn resolve_all_pending(
-    pending: &mut Vec<PendingEqu>,
-    symbols: &mut SymbolTable,
-) -> std::io::Result<usize> {
+fn resolve_all_pending(pending: &mut Vec<PendingEqu>, symbols: &mut SymbolTable) -> usize {
     if pending.is_empty() {
-        return Ok(0);
+        return 0;
     }
 
     let mut resolved = 0;
@@ -144,15 +137,13 @@ fn resolve_all_pending(
             if symbols.resolve_constant(&entry.name).is_some() {
                 return false;
             }
-
-            match symbols.evaluate_expression(&entry.expr) {
-                Some(value) => {
+            symbols
+                .evaluate_expression(&entry.expr)
+                .is_none_or(|value| {
                     symbols.insert_define(entry.name.clone(), value);
                     resolved += 1;
                     false
-                }
-                None => true,
-            }
+                })
         });
 
         if resolved == before || pending.is_empty() {
@@ -171,7 +162,7 @@ fn resolve_all_pending(
         );
     }
 
-    Ok(resolved)
+    resolved
 }
 
 #[cfg(test)]
@@ -196,8 +187,7 @@ mod tests {
             ".equ FLAG_UNK, 0x3C3\n.equ VAR_TEMP, 42\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("FLAG_UNK"), Some(0x3C3));
         assert_eq!(table.resolve_constant("VAR_TEMP"), Some(42));
@@ -211,8 +201,7 @@ mod tests {
             "ITEM_MASTER_BALL equ 1\nITEM_POTION equ 17\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("ITEM_MASTER_BALL"), Some(1));
         assert_eq!(table.resolve_constant("ITEM_POTION"), Some(17));
@@ -226,8 +215,7 @@ mod tests {
             ".equ CONST_A, 100\nCONST_B equ 200\n.equ CONST_C, 300\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 3);
         assert_eq!(table.resolve_constant("CONST_A"), Some(100));
         assert_eq!(table.resolve_constant("CONST_B"), Some(200));
@@ -242,8 +230,7 @@ mod tests {
             "; this is a comment\n\n.equ FLAG_A, 1 ; inline comment\n\nFLAG_B equ 2\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("FLAG_A"), Some(1));
         assert_eq!(table.resolve_constant("FLAG_B"), Some(2));
@@ -260,8 +247,7 @@ mod tests {
             ".equ DERIVED, BASE + 50\n.equ SHIFTED, 1 << 3\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("DERIVED"), Some(150));
         assert_eq!(table.resolve_constant("SHIFTED"), Some(8));
@@ -273,7 +259,7 @@ mod tests {
         table.insert_define("ALREADY".to_string(), 999);
         let path = std::path::Path::new("test.s");
 
-        let n = parse_armips_equ_str(".equ ALREADY, 1\n.equ NEW, 2\n", path, &mut table).unwrap();
+        let n = parse_armips_equ_str(".equ ALREADY, 1\n.equ NEW, 2\n", path, &mut table);
         // Only NEW should be inserted; ALREADY is skipped.
         assert_eq!(n, 1);
         assert_eq!(table.resolve_constant("ALREADY"), Some(999));
@@ -286,9 +272,7 @@ mod tests {
         let path = std::path::Path::new("test.s");
         // UNDEFINED_SYMBOL has no definition anywhere, so it's skipped with a warning.
         let result = parse_armips_equ_str(".equ BAD, UNDEFINED_SYMBOL + 1\n", path, &mut table);
-        // Should NOT error — unresolvable constants are skipped with a warning.
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result, 0);
         assert_eq!(table.resolve_constant("BAD"), None);
     }
 
@@ -307,8 +291,7 @@ mod tests {
 ",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 4);
         assert_eq!(table.resolve_constant("BATTLER_TYPE_SOLO_PLAYER"), Some(1));
         assert_eq!(table.resolve_constant("BATTLER_TYPE_MAX"), Some(2));
@@ -321,9 +304,7 @@ mod tests {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
         let result = parse_armips_equ_str(".equ A, B + 1\n.equ B, A + 1\n", path, &mut table);
-        // Circular refs can't resolve — both are skipped with a warning.
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), 0);
+        assert_eq!(result, 0);
     }
 
     #[test]
@@ -376,8 +357,7 @@ mod tests {
             ".equ START_ADDRESS, 0x10\n.equ OVERLAY_ID, 0x81\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("START_ADDRESS"), Some(16));
         assert_eq!(table.resolve_constant("OVERLAY_ID"), Some(129));
@@ -387,8 +367,7 @@ mod tests {
     fn parse_armips_equ_negative_values() {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
-        let n = parse_armips_equ_str(".equ NEG_VAL, -1\n.equ NEG_HEX, -0x80\n", path, &mut table)
-            .unwrap();
+        let n = parse_armips_equ_str(".equ NEG_VAL, -1\n.equ NEG_HEX, -0x80\n", path, &mut table);
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("NEG_VAL"), Some(-1));
         assert_eq!(table.resolve_constant("NEG_HEX"), Some(-128));
@@ -404,8 +383,7 @@ mod tests {
             ".equ HEAP_ADDR, BASE_ADDR + 0x1000\n.equ STACK_ADDR, HEAP_ADDR + 0x800\n",
             path,
             &mut table,
-        )
-        .unwrap();
+        );
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("HEAP_ADDR"), Some(0x02001000));
         assert_eq!(table.resolve_constant("STACK_ADDR"), Some(0x02001800));
