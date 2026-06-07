@@ -1,16 +1,14 @@
+use regex::Regex;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
-use regex::Regex;
 
 use super::SymbolTable;
 
-static RE_GNU_EQU: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*\.equ\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(.+)$").unwrap()
-});
+static RE_GNU_EQU: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*\.equ\s+([A-Za-z_][A-Za-z0-9_]*)\s*,\s*(.+)$").unwrap());
 
-static RE_ARMIPS_EQU: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+equ\s+(.+)$").unwrap()
-});
+static RE_ARMIPS_EQU: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+equ\s+(.+)$").unwrap());
 
 struct PendingEqu {
     name: String,
@@ -30,10 +28,7 @@ struct PendingEqu {
 ///
 /// Values are evaluated through the symbol table's expression parser, so they
 /// can reference previously-defined symbols.
-pub fn parse_armips_equ_file(
-    path: &Path,
-    symbols: &mut SymbolTable,
-) -> std::io::Result<usize> {
+pub fn parse_armips_equ_file(path: &Path, symbols: &mut SymbolTable) -> std::io::Result<usize> {
     let content = std::fs::read_to_string(path)?;
     parse_armips_equ_str(&content, path, symbols)
 }
@@ -56,10 +51,7 @@ pub fn parse_armips_equ_str(
 /// directories (non-recursive). Files with extensions `.s` and `.inc` are
 /// processed. All definitions are resolved together in a single multi-pass so
 /// cross-file forward references work.
-pub fn parse_armips_equ_dirs(
-    dirs: &[&Path],
-    symbols: &mut SymbolTable,
-) -> std::io::Result<usize> {
+pub fn parse_armips_equ_dirs(dirs: &[&Path], symbols: &mut SymbolTable) -> std::io::Result<usize> {
     let mut all_pending: Vec<PendingEqu> = Vec::new();
 
     for dir in dirs {
@@ -73,10 +65,7 @@ pub fn parse_armips_equ_dirs(
                 continue;
             }
 
-            let ext = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if !matches!(ext.to_ascii_lowercase().as_str(), "s" | "inc") {
                 continue;
             }
@@ -92,10 +81,7 @@ pub fn parse_armips_equ_dirs(
 /// Parse all armips `.equ` / `equ` directives from every file in a directory
 /// (non-recursive). Files with extensions `.s` and `.inc` are processed.
 /// Returns the total number of constants inserted.
-pub fn parse_armips_equ_dir(
-    dir: &Path,
-    symbols: &mut SymbolTable,
-) -> std::io::Result<usize> {
+pub fn parse_armips_equ_dir(dir: &Path, symbols: &mut SymbolTable) -> std::io::Result<usize> {
     parse_armips_equ_dirs(&[dir], symbols)
 }
 
@@ -117,9 +103,15 @@ fn collect_pending_from_str(
         }
 
         let (name, expr) = if let Some(caps) = RE_GNU_EQU.captures(line) {
-            (caps.get(1).unwrap().as_str().to_string(), caps.get(2).unwrap().as_str().trim().to_string())
+            (
+                caps.get(1).unwrap().as_str().to_string(),
+                caps.get(2).unwrap().as_str().trim().to_string(),
+            )
         } else if let Some(caps) = RE_ARMIPS_EQU.captures(line) {
-            (caps.get(1).unwrap().as_str().to_string(), caps.get(2).unwrap().as_str().trim().to_string())
+            (
+                caps.get(1).unwrap().as_str().to_string(),
+                caps.get(2).unwrap().as_str().trim().to_string(),
+            )
         } else {
             continue;
         };
@@ -172,7 +164,10 @@ fn resolve_all_pending(
         eprintln!(
             "Warning: unresolved .equ at {}:{}: {} = '{}' \
              (referenced symbol not defined in project sources)",
-            entry.source.display(), entry.line_number, entry.name, entry.expr
+            entry.source.display(),
+            entry.line_number,
+            entry.name,
+            entry.expr
         );
     }
 
@@ -278,12 +273,7 @@ mod tests {
         table.insert_define("ALREADY".to_string(), 999);
         let path = std::path::Path::new("test.s");
 
-        let n = parse_armips_equ_str(
-            ".equ ALREADY, 1\n.equ NEW, 2\n",
-            path,
-            &mut table,
-        )
-        .unwrap();
+        let n = parse_armips_equ_str(".equ ALREADY, 1\n.equ NEW, 2\n", path, &mut table).unwrap();
         // Only NEW should be inserted; ALREADY is skipped.
         assert_eq!(n, 1);
         assert_eq!(table.resolve_constant("ALREADY"), Some(999));
@@ -295,11 +285,7 @@ mod tests {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
         // UNDEFINED_SYMBOL has no definition anywhere, so it's skipped with a warning.
-        let result = parse_armips_equ_str(
-            ".equ BAD, UNDEFINED_SYMBOL + 1\n",
-            path,
-            &mut table,
-        );
+        let result = parse_armips_equ_str(".equ BAD, UNDEFINED_SYMBOL + 1\n", path, &mut table);
         // Should NOT error — unresolvable constants are skipped with a warning.
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
@@ -334,11 +320,7 @@ mod tests {
     fn circular_dependency_is_skipped_with_warning() {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
-        let result = parse_armips_equ_str(
-            ".equ A, B + 1\n.equ B, A + 1\n",
-            path,
-            &mut table,
-        );
+        let result = parse_armips_equ_str(".equ A, B + 1\n.equ B, A + 1\n", path, &mut table);
         // Circular refs can't resolve — both are skipped with a warning.
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 0);
@@ -405,12 +387,8 @@ mod tests {
     fn parse_armips_equ_negative_values() {
         let mut table = SymbolTable::new();
         let path = std::path::Path::new("test.s");
-        let n = parse_armips_equ_str(
-            ".equ NEG_VAL, -1\n.equ NEG_HEX, -0x80\n",
-            path,
-            &mut table,
-        )
-        .unwrap();
+        let n = parse_armips_equ_str(".equ NEG_VAL, -1\n.equ NEG_HEX, -0x80\n", path, &mut table)
+            .unwrap();
         assert_eq!(n, 2);
         assert_eq!(table.resolve_constant("NEG_VAL"), Some(-1));
         assert_eq!(table.resolve_constant("NEG_HEX"), Some(-128));
@@ -464,9 +442,8 @@ mod tests {
 
     #[test]
     fn parse_actual_scriptmacros_s() {
-        let path = std::path::Path::new(
-            "/home/kalaay/dev/slop-engine/armips/include/scriptmacros.s",
-        );
+        let path =
+            std::path::Path::new("/home/kalaay/dev/slop-engine/armips/include/scriptmacros.s");
         if !path.exists() {
             eprintln!("skipping: slop-engine not found at {}", path.display());
             return;

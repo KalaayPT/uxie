@@ -515,6 +515,19 @@ metang_generators = {
 #define ITEM_MASTER_BALL 1
 #define TRAINER_RIVAL_BARRY_001 2
 #define TRAINER_CLASS_LEADER_ROARK 2
+#define TRAINER_TYPE_NORMAL 16
+#define MAP_HEADER_JUBILIFE_CITY 17
+#define OBJ_EVENT_GFX_PLAYER 18
+#define SPRITE_PCWOMAN3 19
+#define MOVEMENT_TYPE_LOOK_AROUND 20
+#define BG_EVENT_TYPE_SIGN 21
+#define BG_EVENT_DIR_NORTH 22
+#define MAP_ROUTE_30 23
+#define MAP_FOLLOWMODE_PREVENT 24
+#define MAP_TYPE_CITY_TOWN 25
+#define MAP_REGION_JOHTO 26
+#define MAP_WEATHER_DIAMOND_DUST 27
+#define MAP_TILES_COUNT_X 28
 #define LOCATION_JUBILIFE_CITY 3
 #define MAPSEC_JUBILIFE_CITY 4
 #define MOVE_TACKLE 5
@@ -547,6 +560,43 @@ metang_generators = {
         assert_eq!(
             table.constant_family("TRAINER_CLASS_LEADER_ROARK"),
             Some(ConstantFamily::TrainerClass)
+        );
+        assert_eq!(
+            table.constant_family("TRAINER_TYPE_NORMAL"),
+            Some(ConstantFamily::TrainerType)
+        );
+        assert_eq!(
+            table.constant_family("MAP_HEADER_JUBILIFE_CITY"),
+            Some(ConstantFamily::MapHeader)
+        );
+        assert_eq!(
+            table.constant_family("MAP_ROUTE_30"),
+            Some(ConstantFamily::MapHeader)
+        );
+        assert_eq!(table.constant_family("MAP_FOLLOWMODE_PREVENT"), None);
+        assert_eq!(table.constant_family("MAP_TYPE_CITY_TOWN"), None);
+        assert_eq!(table.constant_family("MAP_REGION_JOHTO"), None);
+        assert_eq!(table.constant_family("MAP_WEATHER_DIAMOND_DUST"), None);
+        assert_eq!(table.constant_family("MAP_TILES_COUNT_X"), None);
+        assert_eq!(
+            table.constant_family("OBJ_EVENT_GFX_PLAYER"),
+            Some(ConstantFamily::ObjectGraphics)
+        );
+        assert_eq!(
+            table.constant_family("SPRITE_PCWOMAN3"),
+            Some(ConstantFamily::ObjectGraphics)
+        );
+        assert_eq!(
+            table.constant_family("MOVEMENT_TYPE_LOOK_AROUND"),
+            Some(ConstantFamily::MovementType)
+        );
+        assert_eq!(
+            table.constant_family("BG_EVENT_TYPE_SIGN"),
+            Some(ConstantFamily::BgEventType)
+        );
+        assert_eq!(
+            table.constant_family("BG_EVENT_DIR_NORTH"),
+            Some(ConstantFamily::BgEventDir)
         );
         assert_eq!(
             table.constant_family("LOCATION_JUBILIFE_CITY"),
@@ -613,6 +663,34 @@ metang_generators = {
         assert_eq!(
             table.resolve_name_in_family(2, ConstantFamily::TrainerClass),
             Some("TRAINER_CLASS_LEADER_ROARK".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(17, ConstantFamily::MapHeader),
+            Some("MAP_HEADER_JUBILIFE_CITY".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(23, ConstantFamily::MapHeader),
+            Some("MAP_ROUTE_30".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(24, ConstantFamily::MapHeader),
+            None
+        );
+        assert_eq!(
+            table.resolve_name_in_family(18, ConstantFamily::ObjectGraphics),
+            Some("OBJ_EVENT_GFX_PLAYER".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(20, ConstantFamily::MovementType),
+            Some("MOVEMENT_TYPE_LOOK_AROUND".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(21, ConstantFamily::BgEventType),
+            Some("BG_EVENT_TYPE_SIGN".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(22, ConstantFamily::BgEventDir),
+            Some("BG_EVENT_DIR_NORTH".to_string())
         );
     }
 

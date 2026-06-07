@@ -51,6 +51,12 @@ pub enum ConstantFamily {
     Species,
     Move,
     Location,
+    MapHeader,
+    ObjectGraphics,
+    MovementType,
+    BgEventType,
+    BgEventDir,
+    TrainerType,
     Trainer,
     TrainerClass,
     Sound,
@@ -65,8 +71,27 @@ impl ConstantFamily {
     pub fn from_symbol_name(name: &str) -> Option<Self> {
         if name.starts_with("TRAINER_CLASS_") {
             Some(Self::TrainerClass)
+        } else if name.starts_with("TRAINER_TYPE_") {
+            Some(Self::TrainerType)
         } else if name.starts_with("TRAINER_") {
             Some(Self::Trainer)
+        } else if name.starts_with("MAP_HEADER_")
+            || (name.starts_with("MAP_")
+                && !name.starts_with("MAP_FOLLOWMODE_")
+                && !name.starts_with("MAP_REGION_")
+                && !name.starts_with("MAP_TILES_")
+                && !name.starts_with("MAP_TYPE_")
+                && !name.starts_with("MAP_WEATHER_"))
+        {
+            Some(Self::MapHeader)
+        } else if name.starts_with("OBJ_EVENT_GFX_") || name.starts_with("SPRITE_") {
+            Some(Self::ObjectGraphics)
+        } else if name.starts_with("MOVEMENT_TYPE_") {
+            Some(Self::MovementType)
+        } else if name.starts_with("BG_EVENT_TYPE_") {
+            Some(Self::BgEventType)
+        } else if name.starts_with("BG_EVENT_DIR_") {
+            Some(Self::BgEventDir)
         } else if name.starts_with("SPECIES_") {
             Some(Self::Species)
         } else if name.starts_with("ITEM_") {
@@ -1559,10 +1584,10 @@ impl SymbolTable {
         let texts: Vec<String> = messages
             .iter()
             .map(|msg| {
-                let value = msg
-                    .get("en_US")
-                    .or_else(|| msg.get("ja_JP"));
-                let Some(value) = value else { return String::new() };
+                let value = msg.get("en_US").or_else(|| msg.get("ja_JP"));
+                let Some(value) = value else {
+                    return String::new();
+                };
                 match value {
                     serde_json::Value::String(s) => s.clone(),
                     serde_json::Value::Array(parts) => {
@@ -1610,14 +1635,24 @@ impl SymbolTable {
             .or_else(|| entry.get("ja_JP"))
             .or_else(|| {
                 entry.as_object()?.iter().find_map(|(k, v)| {
-                    if k == "id" { None } else if v.is_string() || v.is_array() { Some(v) } else { None }
+                    if k == "id" {
+                        None
+                    } else if v.is_string() || v.is_array() {
+                        Some(v)
+                    } else {
+                        None
+                    }
                 })
             })?;
         match value {
             serde_json::Value::String(s) => Some(s.clone()),
             serde_json::Value::Array(parts) => {
                 let lines: Vec<&str> = parts.iter().filter_map(|p| p.as_str()).collect();
-                if lines.len() <= 1 { Some(lines.concat()) } else { Some(lines.join("  \n")) }
+                if lines.len() <= 1 {
+                    Some(lines.concat())
+                } else {
+                    Some(lines.join("  \n"))
+                }
             }
             _ => None,
         }
@@ -2033,8 +2068,8 @@ impl SymbolTable {
     /// so that consumers (e.g. the LSP) can read GMM files on demand.
     /// Extract English message text from GMM XML content.
     pub fn extract_gmm_messages(xml: &str) -> std::io::Result<Vec<String>> {
-        use quick_xml::events::Event;
         use quick_xml::Reader;
+        use quick_xml::events::Event;
 
         let mut reader = Reader::from_str(xml);
         let mut messages = Vec::new();
@@ -2051,7 +2086,8 @@ impl SymbolTable {
                     if tag == b"row" {
                         for attr in e.attributes().flatten() {
                             if attr.key.as_ref() == b"index" {
-                                if let Some(idx) = std::str::from_utf8(&attr.value).ok()
+                                if let Some(idx) = std::str::from_utf8(&attr.value)
+                                    .ok()
                                     .and_then(|s| s.parse::<usize>().ok())
                                 {
                                     current_index = Some(idx);
@@ -2063,9 +2099,7 @@ impl SymbolTable {
                         in_language = true;
                         is_english = false;
                         for attr in e.attributes().flatten() {
-                            if attr.key.as_ref() == b"name"
-                                && attr.value.as_ref() == b"English"
-                            {
+                            if attr.key.as_ref() == b"name" && attr.value.as_ref() == b"English" {
                                 is_english = true;
                             }
                         }

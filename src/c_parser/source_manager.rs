@@ -35,10 +35,7 @@ impl SourceManager {
         let bytes = std::fs::read(path).map_err(|err| {
             std::io::Error::new(
                 err.kind(),
-                format!(
-                    "Failed to read source file {}: {err}",
-                    path.display()
-                ),
+                format!("Failed to read source file {}: {err}", path.display()),
             )
         })?;
         let content = String::from_utf8_lossy(&bytes);
