@@ -1218,6 +1218,76 @@ metang_generators = {
     }
 
     #[test]
+    fn test_load_database_var_flag_constants_uses_db_fallback_symbols() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("hgss_v2.json");
+        std::fs::write(
+            &db_path,
+            r#"{
+                "vars": {
+                    "VARS_START": { "id": 16384 },
+                    "VARS_END": { "id": 16751 },
+                    "SPECIAL_VARS_START": { "id": 32768 },
+                    "SPECIAL_VARS_END": { "id": 32781 },
+                    "VAR_TEMP_x4000": { "id": 16384 }
+                },
+                "flags": {
+                    "FLAG_UNK_001": { "id": 1 },
+                    "FLAG_MAPTEMP_001": { "id": 2 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        let loaded = table.load_database_var_flag_constants(&db_path).unwrap();
+
+        assert_eq!(loaded, 7);
+        assert_eq!(table.resolve_constant("VARS_END"), Some(16751));
+        assert_eq!(table.resolve_constant("SPECIAL_VARS_START"), Some(32768));
+        assert_eq!(table.resolve_constant("VAR_TEMP_x4000"), Some(16384));
+        assert_eq!(table.resolve_constant("FLAG_UNK_001"), Some(1));
+        assert_eq!(
+            table.constant_family("SPECIAL_VARS_END"),
+            Some(ConstantFamily::Variable)
+        );
+        assert_eq!(
+            table.constant_family("FLAG_UNK_001"),
+            Some(ConstantFamily::Flag)
+        );
+    }
+
+    #[test]
+    fn test_load_database_var_flag_constants_skips_existing_var_and_flag_families() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("hgss_v2.json");
+        std::fs::write(
+            &db_path,
+            r#"{
+                "vars": {
+                    "VARS_END": { "id": 16751 }
+                },
+                "flags": {
+                    "FLAG_MAPTEMP_001": { "id": 2 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let mut table = SymbolTable::new();
+        table.insert_define("VAR_FROM_HEADER".to_string(), 16384);
+        table.insert_define("FLAG_FROM_HEADER".to_string(), 1);
+
+        let loaded = table.load_database_var_flag_constants(&db_path).unwrap();
+
+        assert_eq!(loaded, 0);
+        assert_eq!(table.resolve_constant("VAR_FROM_HEADER"), Some(16384));
+        assert_eq!(table.resolve_constant("FLAG_FROM_HEADER"), Some(1));
+        assert_eq!(table.resolve_constant("VARS_END"), None);
+        assert_eq!(table.resolve_constant("FLAG_MAPTEMP_001"), None);
+    }
+
+    #[test]
     fn test_load_from_url_http_404_returns_error() {
         if !curl_available() {
             eprintln!("Skipping: curl is not available");

@@ -110,6 +110,7 @@ impl ConstantFamily {
             Some(Self::Type)
         } else if name.starts_with("VAR_")
             || name.starts_with("VARS_")
+            || name.starts_with("SPECIAL_VAR")
             || name.starts_with("TEMP_")
             || name.starts_with("MAPTEMP_")
         {
@@ -744,6 +745,93 @@ impl SymbolTable {
             self.process_function_macro(function_macro, path, tag.clone());
         }
         Ok(())
+    }
+
+    /// Load vendored variable and flag constants from a script command database JSON file.
+    ///
+    /// These constants are a fallback: DB vars are loaded only when no variable
+    /// symbols are already known, and DB flags are loaded only when no flag
+    /// symbols are already known.
+    pub fn load_database_var_flag_constants(
+        &mut self,
+        path: impl AsRef<Path>,
+    ) -> std::io::Result<usize> {
+        let (needs_vars, needs_flags) = (
+            !self.has_family_constants(ConstantFamily::Variable),
+            !self.has_family_constants(ConstantFamily::Flag),
+        );
+        if !needs_vars && !needs_flags {
+            return Ok(0);
+        }
+        let path = path.as_ref();
+        let content = std::fs::read_to_string(path).map_err(|err| {
+            std::io::Error::new(
+                err.kind(),
+                format!(
+                    "Failed to read script command database {} as UTF-8: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        let json: serde_json::Value = serde_json::from_str(&content).map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Failed to parse script command database {}: {err}",
+                    path.display()
+                ),
+            )
+        })?;
+        let mut loaded = 0usize;
+        if needs_vars {
+            loaded += self.load_database_constant_object(&json, "vars", path)?;
+        }
+        if needs_flags {
+            loaded += self.load_database_constant_object(&json, "flags", path)?;
+        }
+        Ok(loaded)
+    }
+
+    fn has_family_constants(&self, family: ConstantFamily) -> bool {
+        self.symbol_to_family.values().any(|known| *known == family)
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.has_family_constants(family))
+    }
+
+    /// Load one top-level DB constant section, such as `vars` or `flags`.
+    fn load_database_constant_object(
+        &mut self,
+        json: &serde_json::Value,
+        key: &str,
+        path: &Path,
+    ) -> std::io::Result<usize> {
+        let Some(constants) = json.get(key) else {
+            return Ok(0);
+        };
+        let constants = constants.as_object().ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!(
+                    "Script command database {} has non-object '{}'",
+                    path.display(),
+                    key
+                ),
+            )
+        })?;
+
+        let mut loaded = 0usize;
+        for (name, entry) in constants {
+            let Some(value) = entry.get("id").and_then(serde_json::Value::as_i64) else {
+                continue;
+            };
+            self.register_symbol(name.clone(), value);
+            self.pending.insert(name.clone(), value.to_string());
+            self.record_symbol_origin(name, path, Some(&SymbolTag::Global));
+            loaded += 1;
+        }
+        Ok(loaded)
     }
 
     fn get_function_macro(&self, name: &str) -> Option<&crate::c_parser::defines::CFunctionMacro> {

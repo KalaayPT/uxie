@@ -1021,7 +1021,7 @@ impl Workspace {
         let mut symbols = SymbolTable::with_source_manager(sm.clone());
 
         // Broad recursive parse of the entire project
-        Self::load_project_symbols_broad(&root, &mut symbols)?;
+        Self::load_project_symbols_broad(&root, &mut symbols, family)?;
 
         let mut scripts = ScriptTable::new();
         let scripts_order = root.join("res/field/scripts/scripts.order");
@@ -1112,10 +1112,16 @@ impl Workspace {
             }
         ));
         let input_files = Self::collect_cached_symbol_inputs(project_root, include_roots)?;
+        let command_database = Self::command_database_path(project_root, game_family);
+        let mut cache_input_files = input_files.clone();
+        if let Some(command_database) = &command_database {
+            cache_input_files.push(command_database.clone());
+            cache_input_files.sort();
+        }
 
         if cache_path.is_file() {
             match ConstantCache::load(&cache_path) {
-                Ok(cache) if cache.is_current(project_root, game_family, &input_files)? => {
+                Ok(cache) if cache.is_current(project_root, game_family, &cache_input_files)? => {
                     return Ok((Arc::new(SymbolTable::from_snapshot(&cache.snapshot)), false));
                 }
                 Ok(_) => {}
@@ -1136,9 +1142,12 @@ impl Workspace {
         for path in &input_files {
             Self::load_cached_symbol_file(&mut symbols, path)?;
         }
+        if let Some(command_database) = &command_database {
+            symbols.load_database_var_flag_constants(command_database)?;
+        }
         symbols.resolve_all();
 
-        ConstantCache::from_symbols(project_root, game_family, &input_files, &symbols)?
+        ConstantCache::from_symbols(project_root, game_family, &cache_input_files, &symbols)?
             .save(&cache_path)?;
 
         Ok((Arc::new(symbols), true))
@@ -1178,6 +1187,17 @@ impl Workspace {
             }
         }
         Ok(inputs.into_iter().collect())
+    }
+
+    /// Returns the path to the command database for the given game family, if it exists in the current project.
+    fn command_database_path(project_root: &Path, game_family: GameFamily) -> Option<PathBuf> {
+        let file_name = match game_family {
+            GameFamily::DP => "diamond_pearl_v2.json",
+            GameFamily::Platinum => "platinum_v2.json",
+            GameFamily::HGSS => "hgss_v2.json",
+        };
+        let path = project_root.join(".rotom/command_database").join(file_name);
+        if path.is_file() { Some(path) } else { None }
     }
 
     fn collect_cached_symbol_root_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -1275,7 +1295,11 @@ impl Workspace {
         }
     }
 
-    fn load_project_symbols_broad(root: &Path, symbols: &mut SymbolTable) -> std::io::Result<()> {
+    fn load_project_symbols_broad(
+        root: &Path,
+        symbols: &mut SymbolTable,
+        family: GameFamily,
+    ) -> std::io::Result<()> {
         // 1. Load all constants from include/constants
         let include_constants = root.join("include/constants");
         if include_constants.exists() {
@@ -1356,6 +1380,10 @@ impl Workspace {
         // LOCALID_* definitions that conflict across maps. Each script should
         // load its own events header via #include resolution in
         // collect_constants_for_file() or collect_constants_for_source().
+
+        if let Some(command_database) = Self::command_database_path(root, family) {
+            symbols.load_database_var_flag_constants(command_database)?;
+        }
 
         Ok(())
     }
@@ -1620,6 +1648,25 @@ mod tests {
         Ok(None)
     }
 
+    fn write_command_database_var_flag_fixture(root: &Path) -> PathBuf {
+        let db_dir = root.join(".rotom/command_database");
+        fs::create_dir_all(&db_dir).unwrap();
+        let db_path = db_dir.join("hgss_v2.json");
+        fs::write(
+            &db_path,
+            r#"{
+                "vars": {
+                    "VARS_END": { "id": 16751 }
+                },
+                "flags": {
+                    "FLAG_MAPTEMP_001": { "id": 1 }
+                }
+            }"#,
+        )
+        .unwrap();
+        db_path
+    }
+
     #[test]
     fn test_load_cached_symbols_round_trips_and_reuses_valid_cache() {
         let dir = tempdir().unwrap();
@@ -1641,6 +1688,56 @@ mod tests {
             Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::Platinum).unwrap();
         assert!(!rebuilt);
         assert_eq!(symbols.resolve_constant("TEST_CONST"), Some(42));
+    }
+
+    #[test]
+    fn test_load_cached_symbols_uses_command_database_as_var_flag_fallback() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_command_database_var_flag_fixture(root);
+        let cache_dir = root.join(".rotom/cache");
+
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::HGSS).unwrap();
+
+        assert!(rebuilt);
+        assert_eq!(symbols.resolve_constant("VARS_END"), Some(16751));
+        assert_eq!(symbols.resolve_constant("FLAG_MAPTEMP_001"), Some(1));
+
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::HGSS).unwrap();
+
+        assert!(!rebuilt);
+        assert_eq!(symbols.resolve_constant("VARS_END"), Some(16751));
+        assert_eq!(symbols.resolve_constant("FLAG_MAPTEMP_001"), Some(1));
+    }
+
+    #[test]
+    fn test_load_cached_symbols_keeps_header_vars_and_flags_before_command_database_fallback() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::create_dir_all(root.join("include/constants")).unwrap();
+        fs::write(
+            root.join("include/constants/vars.h"),
+            "#define VAR_FROM_HEADER 16384\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("include/constants/flags.h"),
+            "#define FLAG_FROM_HEADER 1\n",
+        )
+        .unwrap();
+        write_command_database_var_flag_fixture(root);
+        let cache_dir = root.join(".rotom/cache");
+
+        let (symbols, rebuilt) =
+            Workspace::load_cached_symbols(&cache_dir, root, &[], GameFamily::HGSS).unwrap();
+
+        assert!(rebuilt);
+        assert_eq!(symbols.resolve_constant("VAR_FROM_HEADER"), Some(16384));
+        assert_eq!(symbols.resolve_constant("FLAG_FROM_HEADER"), Some(1));
+        assert_eq!(symbols.resolve_constant("VARS_END"), None);
+        assert_eq!(symbols.resolve_constant("FLAG_MAPTEMP_001"), None);
     }
 
     #[test]
@@ -2228,6 +2325,21 @@ mod tests {
         assert_eq!(ws.project_type, ProjectType::Decomp);
         assert_eq!(ws.game, Game::HeartGold);
         assert_eq!(ws.family, GameFamily::HGSS);
+    }
+
+    #[test]
+    fn test_open_decomp_uses_command_database_as_var_flag_fallback() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("totally_generic_project");
+
+        fs::create_dir_all(root.join("files/fielddata/script/scr_seq")).unwrap();
+        write_command_database_var_flag_fixture(&root);
+
+        let ws = Workspace::open_decomp(&root).unwrap();
+
+        assert_eq!(ws.family, GameFamily::HGSS);
+        assert_eq!(ws.resolve_constant("VARS_END"), Some(16751));
+        assert_eq!(ws.resolve_constant("FLAG_MAPTEMP_001"), Some(1));
     }
 
     #[test]
