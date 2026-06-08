@@ -2456,6 +2456,7 @@ impl SymbolTable {
     pub fn extend(&mut self, other: SymbolTable) {
         self.symbols.extend(other.symbols);
         self.pending.extend(other.pending);
+        self.function_macros.extend(other.function_macros);
         for (val, names) in other.value_to_names {
             self.value_to_names.entry(val).or_default().extend(names);
         }
