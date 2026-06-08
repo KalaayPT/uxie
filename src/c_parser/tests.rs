@@ -745,6 +745,38 @@ metang_generators = {
     }
 
     #[test]
+    fn test_localid_symbols_are_event_id_family() {
+        let mut table = SymbolTable::new();
+        table.insert_define("LOCALID_HIKER".to_string(), 29);
+
+        assert_eq!(
+            table.constant_family("LOCALID_HIKER"),
+            Some(ConstantFamily::EventId)
+        );
+        assert_eq!(
+            table.resolve_name_in_family(29, ConstantFamily::EventId),
+            Some("LOCALID_HIKER".to_string())
+        );
+    }
+
+    #[test]
+    fn test_new_symbol_table_has_global_local_ids() {
+        let table = SymbolTable::new();
+
+        assert_eq!(table.resolve_constant("LOCALID_CAMERA"), Some(0xF1));
+        assert_eq!(table.resolve_constant("LOCALID_FOLLOWER"), Some(0xF2));
+        assert_eq!(table.resolve_constant("LOCALID_PLAYER"), Some(0xFF));
+        assert_eq!(
+            table.constant_family("LOCALID_CAMERA"),
+            Some(ConstantFamily::EventId)
+        );
+        assert_eq!(
+            table.resolve_name_in_family(0xFF, ConstantFamily::EventId),
+            Some("LOCALID_PLAYER".to_string())
+        );
+    }
+
+    #[test]
     fn test_load_python_enum_str_allows_non_constant_assignments() {
         let mut table = SymbolTable::new();
         table

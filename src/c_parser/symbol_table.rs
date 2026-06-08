@@ -52,6 +52,7 @@ pub enum ConstantFamily {
     Move,
     Location,
     MapHeader,
+    EventId,
     ObjectGraphics,
     MovementType,
     BgEventType,
@@ -68,6 +69,7 @@ pub enum ConstantFamily {
 }
 
 impl ConstantFamily {
+    /// Infer the semantic family for a symbol name from its canonical prefix.
     pub fn from_symbol_name(name: &str) -> Option<Self> {
         if name.starts_with("TRAINER_CLASS_") {
             Some(Self::TrainerClass)
@@ -84,6 +86,8 @@ impl ConstantFamily {
                 && !name.starts_with("MAP_WEATHER_"))
         {
             Some(Self::MapHeader)
+        } else if name.starts_with("LOCALID_") {
+            Some(Self::EventId)
         } else if name.starts_with("OBJ_EVENT_GFX_") || name.starts_with("SPRITE_") {
             Some(Self::ObjectGraphics)
         } else if name.starts_with("MOVEMENT_TYPE_") {
@@ -286,14 +290,12 @@ fn family_name_rank(name: &str) -> (u8, usize) {
         || name.ends_with("_END")
     {
         2
-    } else if name
-        .rsplit('_')
-        .next()
-        .is_some_and(|suffix| suffix.starts_with("0x") || suffix.starts_with("0X"))
-    {
-        1
     } else {
-        0
+        u8::from(
+            name.rsplit('_')
+                .next()
+                .is_some_and(|suffix| suffix.starts_with("0x") || suffix.starts_with("0X")),
+        )
     };
 
     (category, name.len())
@@ -304,8 +306,10 @@ fn should_replace_family_name(candidate: &str, existing: &str) -> bool {
 }
 
 impl SymbolTable {
+    /// Create a symbol table with built-in constants available in every script.
     pub fn new() -> Self {
         let mut table = Self::default();
+        // std bools
         table.symbols.insert("TRUE".to_string(), 1);
         table.symbols.insert("FALSE".to_string(), 0);
         table
@@ -318,6 +322,16 @@ impl SymbolTable {
             .entry(0)
             .or_default()
             .push("FALSE".to_string());
+        // std localids
+        table.register_symbol("LOCALID_CAMERA".to_string(), 0xF1);
+        table.register_symbol("LOCALID_FOLLOWER".to_string(), 0xF2);
+        table.register_symbol("LOCALID_PLAYER".to_string(), 0xFF);
+        table.register_symbol("obj_photo_subject".to_string(), 249);
+        table.register_symbol("obj_daycare_poke_1".to_string(), 250);
+        table.register_symbol("obj_daycare_poke_2".to_string(), 251);
+        table.register_symbol("obj_apricorn".to_string(), 252);
+        table.register_symbol("obj_partner_poke".to_string(), 253);
+        table.register_symbol("obj_player".to_string(), 255);
         table
     }
 
