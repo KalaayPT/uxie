@@ -278,6 +278,31 @@ fn dspre_sound_constant_aliases(index: usize, row_count: usize) -> &'static [&'s
     }
 }
 
+fn family_name_rank(name: &str) -> (u8, usize) {
+    let category = if name.contains("VARS_")
+        || name.ends_with("_BASE")
+        || name.starts_with("NUM_")
+        || name.ends_with("_START")
+        || name.ends_with("_END")
+    {
+        2
+    } else if name
+        .rsplit('_')
+        .next()
+        .is_some_and(|suffix| suffix.starts_with("0x") || suffix.starts_with("0X"))
+    {
+        1
+    } else {
+        0
+    };
+
+    (category, name.len())
+}
+
+fn should_replace_family_name(candidate: &str, existing: &str) -> bool {
+    family_name_rank(candidate) < family_name_rank(existing)
+}
+
 impl SymbolTable {
     pub fn new() -> Self {
         let mut table = Self::default();
@@ -1133,15 +1158,21 @@ impl SymbolTable {
         })
     }
 
+    /// Resolve a numeric value to the best display name in a semantic constant family.
     pub fn resolve_name_in_family(&self, value: i64, family: ConstantFamily) -> Option<String> {
-        self.family_value_to_name
-            .get(&(family, value))
-            .cloned()
-            .or_else(|| {
-                self.parent
-                    .as_ref()
-                    .and_then(|parent| parent.resolve_name_in_family(value, family))
-            })
+        let local = self.family_value_to_name.get(&(family, value)).cloned();
+        let parent = self
+            .parent
+            .as_ref()
+            .and_then(|parent| parent.resolve_name_in_family(value, family));
+
+        match (local, parent) {
+            (Some(local), Some(parent)) if should_replace_family_name(&parent, &local) => {
+                Some(parent)
+            }
+            (Some(local), _) => Some(local),
+            (None, parent) => parent,
+        }
     }
 
     pub fn resolve_name_with_tag(
@@ -2407,6 +2438,7 @@ impl SymbolTable {
         HashMap::new()
     }
 
+    /// Merge another symbol table into this one.
     pub fn extend(&mut self, other: SymbolTable) {
         self.symbols.extend(other.symbols);
         self.pending.extend(other.pending);
@@ -2420,7 +2452,7 @@ impl SymbolTable {
             let should_insert = self
                 .family_value_to_name
                 .get(&key)
-                .map(|existing| name.len() < existing.len())
+                .map(|existing| should_replace_family_name(&name, existing))
                 .unwrap_or(true);
             if should_insert {
                 self.family_value_to_name.insert(key, name);
@@ -2581,8 +2613,8 @@ impl SymbolTable {
     /// Register a name → value mapping and update all reverse indexes.
     ///
     /// Populates `symbols`, `value_to_names`, `symbol_to_family`, and
-    /// `family_value_to_name` in one go.  When multiple names share the same
-    /// family and value, the shortest name wins in `family_value_to_name`.
+    /// `family_value_to_name` in one go. When multiple names share the same
+    /// family and value, semantic names beat generated and metadata aliases.
     fn register_symbol(&mut self, name: String, value: i64) {
         self.symbols.insert(name.clone(), value);
         self.value_to_names
@@ -2595,7 +2627,7 @@ impl SymbolTable {
             let should_insert = self
                 .family_value_to_name
                 .get(&key)
-                .map(|existing| name.len() < existing.len())
+                .map(|existing| should_replace_family_name(&name, existing))
                 .unwrap_or(true);
             if should_insert {
                 self.family_value_to_name.insert(key, name);

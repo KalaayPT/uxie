@@ -11,6 +11,7 @@ mod c_parser_tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
     use std::thread;
     use tempfile::tempdir;
 
@@ -691,6 +692,55 @@ metang_generators = {
         assert_eq!(
             table.resolve_name_in_family(22, ConstantFamily::BgEventDir),
             Some("BG_EVENT_DIR_NORTH".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_name_in_family_prefers_semantic_names() {
+        let mut table = SymbolTable::new();
+        table.insert_define("VAR_0x800C".to_string(), 0x800C);
+        table.insert_define("VARS_END".to_string(), 0x800C);
+        table.insert_define("VAR_RESULT".to_string(), 0x800C);
+        table.insert_define("FLAG_0x0123".to_string(), 0x123);
+        table.insert_define("FLAG_GOT_POKEDEX".to_string(), 0x123);
+
+        assert_eq!(
+            table.resolve_name_in_family(0x800C, ConstantFamily::Variable),
+            Some("VAR_RESULT".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(0x123, ConstantFamily::Flag),
+            Some("FLAG_GOT_POKEDEX".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extend_preserves_best_family_name() {
+        let mut table = SymbolTable::new();
+        table.insert_define("VAR_0x800C".to_string(), 0x800C);
+
+        let mut other = SymbolTable::new();
+        other.insert_define("VAR_RESULT".to_string(), 0x800C);
+
+        table.extend(other);
+
+        assert_eq!(
+            table.resolve_name_in_family(0x800C, ConstantFamily::Variable),
+            Some("VAR_RESULT".to_string())
+        );
+    }
+
+    #[test]
+    fn test_resolve_name_in_family_compares_parent_and_child_names() {
+        let mut parent = SymbolTable::new();
+        parent.insert_define("VAR_RESULT".to_string(), 0x800C);
+
+        let mut child = SymbolTable::with_parent(Arc::new(parent));
+        child.insert_define("VAR_0x800C".to_string(), 0x800C);
+
+        assert_eq!(
+            child.resolve_name_in_family(0x800C, ConstantFamily::Variable),
+            Some("VAR_RESULT".to_string())
         );
     }
 

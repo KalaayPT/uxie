@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub const CONSTANT_CACHE_VERSION: u32 = 4;
+pub const CONSTANT_CACHE_VERSION: u32 = 5;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, PartialEq, Eq)]
 pub struct ConstantCache {
