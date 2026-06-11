@@ -22,7 +22,6 @@
 //! - **Platinum binary**: Hardcoded (no clean table in binary)
 
 use crate::c_parser::SymbolTable;
-use crate::script_file::COMMON_SCRIPT_THRESHOLD;
 use byteorder::{LittleEndian, ReadBytesExt};
 use regex::Regex;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
@@ -82,11 +81,159 @@ fn resolve_value(s: &str, symbols: &SymbolTable) -> Option<i64> {
         .or_else(|| parse_hgss_narc_member_id(s))
 }
 
-/// Entry mapping a global script ID range to a script file.
-///
-/// Scripts with IDs >= `min_script_id` (and < the next entry's min_script_id)
-/// are loaded from `script_file_id` with text from `text_archive_id`.
+/// Semantic identity for a global script range.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlobalScriptRange {
+    ScratchOffCards,
+    BattleFrontierRecords,
+    PokemonCenterDailyTrainers,
+    CounterpartTalk,
+    MysteryGiftDeliveryman,
+    MysteryGift,
+    TvReporterInterviews,
+    TvBroadcast,
+    FieldMoves,
+    PokedexRatings,
+    CommonStrings9900,
+    Contests,
+    FollowerPartners,
+    InitNewGame,
+    DayCareCommon,
+    PoffinCommon,
+    GroupConnection,
+    PokemonCenterB1fAttendants,
+    CommunicationClub,
+    PokemonCenter2fAttendants,
+    PokeRadar,
+    VsSeeker,
+    RecordChatotCry,
+    SafariGame,
+    HiddenItems,
+    VisibleItems,
+    Trainer {
+        double_battle_id: u8,
+    },
+    BerryTreeInteractions,
+    BgEvents,
+    CommonScripts,
+    FrontierMoveTutor,
+    BugContest,
+    TrainerHouse,
+    Pokeathlon,
+    WiFiReception,
+    Colosseum,
+    CommunicationReception,
+    ApricornTree,
+    Bookshelves,
+    /// for script ranges that are undocumented in the decomps
+    ScriptBank(u16),
+}
+
+impl GlobalScriptRange {
+    pub fn display_name(self) -> String {
+        match self {
+            Self::ScratchOffCards => "Scratch-Off Cards".into(),
+            Self::BattleFrontierRecords => "Battle Frontier Records".into(),
+            Self::PokemonCenterDailyTrainers => "Pokemon Center Daily Trainers".into(),
+            Self::CounterpartTalk => "Counterpart Talk".into(),
+            Self::MysteryGiftDeliveryman => "Mystery Gift Deliveryman".into(),
+            Self::MysteryGift => "Mystery Gift".into(),
+            Self::TvReporterInterviews => "TV Reporter Interviews".into(),
+            Self::TvBroadcast => "TV Broadcast".into(),
+            Self::FieldMoves => "Field Moves".into(),
+            Self::PokedexRatings => "Pokedex Ratings".into(),
+            Self::CommonStrings9900 => "Common Strings (9900)".into(),
+            Self::Contests => "Contests".into(),
+            Self::FollowerPartners => "Follower Partners".into(),
+            Self::InitNewGame => "Init New Game".into(),
+            Self::DayCareCommon => "Day Care Common".into(),
+            Self::PoffinCommon => "Poffin Common".into(),
+            Self::GroupConnection => "Group Connection".into(),
+            Self::PokemonCenterB1fAttendants => "Pokemon Center B1F Attendants".into(),
+            Self::CommunicationClub => "Communication Club".into(),
+            Self::PokemonCenter2fAttendants => "Pokemon Center 2F Attendants".into(),
+            Self::PokeRadar => "Poke Radar".into(),
+            Self::VsSeeker => "Vs Seeker".into(),
+            Self::RecordChatotCry => "Record Chatot Cry".into(),
+            Self::SafariGame => "Safari Game".into(),
+            Self::HiddenItems => "Hidden Items".into(),
+            Self::VisibleItems => "Visible Items".into(),
+            Self::Trainer {
+                double_battle_id: 1,
+            } => "Single Battles".into(),
+            Self::Trainer {
+                double_battle_id: 2,
+            } => "Double Battles".into(),
+            Self::Trainer { double_battle_id } => format!("Trainer Battles ({double_battle_id})"),
+            Self::BerryTreeInteractions => "Berry Tree Interactions".into(),
+            Self::BgEvents => "BG Events".into(),
+            Self::CommonScripts => "Common Scripts".into(),
+            Self::FrontierMoveTutor => "Frontier Move Tutor".into(),
+            Self::BugContest => "Bug Contest".into(),
+            Self::TrainerHouse => "Trainer House".into(),
+            Self::Pokeathlon => "Pokeathlon".into(),
+            Self::WiFiReception => "Wi-Fi Reception".into(),
+            Self::Colosseum => "Colosseum".into(),
+            Self::CommunicationReception => "Communication Reception".into(),
+            Self::ApricornTree => "Apricorn Tree".into(),
+            Self::Bookshelves => "Bookshelves".into(),
+            Self::ScriptBank(min_script_id) => format!("Script Range {min_script_id}"),
+        }
+    }
+
+    fn from_display_name(name: &str, min_script_id: u16) -> Self {
+        match name {
+            "Scratch-Off Cards" => Self::ScratchOffCards,
+            "Battle Frontier Records" => Self::BattleFrontierRecords,
+            "Pokemon Center Daily Trainers" => Self::PokemonCenterDailyTrainers,
+            "Counterpart Talk" => Self::CounterpartTalk,
+            "Mystery Gift Deliveryman" => Self::MysteryGiftDeliveryman,
+            "Mystery Gift" => Self::MysteryGift,
+            "TV Reporter Interviews" => Self::TvReporterInterviews,
+            "TV Broadcast" => Self::TvBroadcast,
+            "Field Moves" => Self::FieldMoves,
+            "Pokedex Ratings" => Self::PokedexRatings,
+            "Common Strings (9900)" => Self::CommonStrings9900,
+            "Contests" => Self::Contests,
+            "Follower Partners" => Self::FollowerPartners,
+            "Init New Game" => Self::InitNewGame,
+            "Day Care Common" => Self::DayCareCommon,
+            "Poffin Common" => Self::PoffinCommon,
+            "Group Connection" => Self::GroupConnection,
+            "Pokemon Center B1F Attendants" => Self::PokemonCenterB1fAttendants,
+            "Communication Club" => Self::CommunicationClub,
+            "Pokemon Center 2F Attendants" => Self::PokemonCenter2fAttendants,
+            "Poke Radar" => Self::PokeRadar,
+            "Vs Seeker" => Self::VsSeeker,
+            "Record Chatot Cry" => Self::RecordChatotCry,
+            "Safari Game" => Self::SafariGame,
+            "Hidden Items" => Self::HiddenItems,
+            "Visible Items" => Self::VisibleItems,
+            "Single Battles" => Self::Trainer {
+                double_battle_id: 1,
+            },
+            "Double Battles" => Self::Trainer {
+                double_battle_id: 2,
+            },
+            "Berry Tree Interactions" => Self::BerryTreeInteractions,
+            "BG Events" => Self::BgEvents,
+            "Common Scripts" => Self::CommonScripts,
+            "Frontier Move Tutor" => Self::FrontierMoveTutor,
+            "Bug Contest" => Self::BugContest,
+            "Trainer House" => Self::TrainerHouse,
+            "Pokeathlon" => Self::Pokeathlon,
+            "Wi-Fi Reception" => Self::WiFiReception,
+            "Colosseum" => Self::Colosseum,
+            "Communication Reception" => Self::CommunicationReception,
+            "Apricorn Tree" => Self::ApricornTree,
+            "Bookshelves" => Self::Bookshelves,
+            _ => Self::ScriptBank(min_script_id),
+        }
+    }
+}
+
+/// Entry mapping a global script ID range to a script file.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlobalScriptEntry {
     /// Minimum global script ID for this range (inclusive)
     pub min_script_id: u16,
@@ -94,20 +241,43 @@ pub struct GlobalScriptEntry {
     pub script_file_id: u16,
     /// Text archive NARC index (in msgdata/msg)
     pub text_archive_id: u16,
+    /// Semantic range identity and display label.
+    pub range: GlobalScriptRange,
 }
 
 impl GlobalScriptEntry {
-    /// Create a new entry
-    pub const fn new(min_script_id: u16, script_file_id: u16, text_archive_id: u16) -> Self {
+    /// Create a new entry with a range name.
+    pub fn new(
+        min_script_id: u16,
+        script_file_id: u16,
+        text_archive_id: u16,
+        name: impl AsRef<str>,
+    ) -> Self {
         Self {
             min_script_id,
             script_file_id,
             text_archive_id,
+            range: GlobalScriptRange::from_display_name(name.as_ref(), min_script_id),
         }
     }
 
-    /// Read an entry from a reader (6 bytes, little-endian)
-    pub fn read_from<R: Read>(reader: &mut R) -> io::Result<Self> {
+    /// Create a new entry with an explicit semantic range.
+    pub fn with_range(
+        min_script_id: u16,
+        script_file_id: u16,
+        text_archive_id: u16,
+        range: GlobalScriptRange,
+    ) -> Self {
+        Self {
+            min_script_id,
+            script_file_id,
+            text_archive_id,
+            range,
+        }
+    }
+
+    /// Read an entry from HGSS arm9 binary (6 bytes, little-endian).
+    pub fn read_from_binary<R: Read>(reader: &mut R) -> io::Result<Self> {
         let min_script_id = reader.read_u16::<LittleEndian>()?;
         let script_file_id = reader.read_u16::<LittleEndian>()?;
         let text_archive_id = reader.read_u16::<LittleEndian>()?;
@@ -115,9 +285,161 @@ impl GlobalScriptEntry {
             min_script_id,
             script_file_id,
             text_archive_id,
+            range: GlobalScriptRange::ScriptBank(min_script_id),
         })
     }
 }
+
+fn entries_from_ids(
+    ranges: &[GlobalScriptRange],
+    ids: &[(u16, u16, u16)],
+) -> Vec<GlobalScriptEntry> {
+    assert_eq!(ranges.len(), ids.len());
+    ranges
+        .iter()
+        .zip(ids.iter())
+        .map(|(range, (min, script, text))| {
+            GlobalScriptEntry::with_range(*min, *script, *text, *range)
+        })
+        .collect()
+}
+
+// These range identities are intentionally hand-maintained labels for decomp
+// script-bank rows. Refresh them if pokeplatinum/pokeheartgold grow official
+// names for `SCRIPT_RANGE_TABLE` / `sScriptBankMapping`.
+const PLATINUM_RANGES: &[GlobalScriptRange] = &[
+    GlobalScriptRange::ScratchOffCards,
+    GlobalScriptRange::BattleFrontierRecords,
+    GlobalScriptRange::PokemonCenterDailyTrainers,
+    GlobalScriptRange::CounterpartTalk,
+    GlobalScriptRange::MysteryGiftDeliveryman,
+    GlobalScriptRange::TvReporterInterviews,
+    GlobalScriptRange::TvBroadcast,
+    GlobalScriptRange::FieldMoves,
+    GlobalScriptRange::PokedexRatings,
+    GlobalScriptRange::CommonStrings9900,
+    GlobalScriptRange::Contests,
+    GlobalScriptRange::FollowerPartners,
+    GlobalScriptRange::InitNewGame,
+    GlobalScriptRange::DayCareCommon,
+    GlobalScriptRange::PoffinCommon,
+    GlobalScriptRange::GroupConnection,
+    GlobalScriptRange::PokemonCenterB1fAttendants,
+    GlobalScriptRange::CommunicationClub,
+    GlobalScriptRange::PokemonCenter2fAttendants,
+    GlobalScriptRange::PokeRadar,
+    GlobalScriptRange::VsSeeker,
+    GlobalScriptRange::RecordChatotCry,
+    GlobalScriptRange::SafariGame,
+    GlobalScriptRange::HiddenItems,
+    GlobalScriptRange::VisibleItems,
+    GlobalScriptRange::Trainer {
+        double_battle_id: 2,
+    },
+    GlobalScriptRange::Trainer {
+        double_battle_id: 1,
+    },
+    GlobalScriptRange::BerryTreeInteractions,
+    GlobalScriptRange::BgEvents,
+    GlobalScriptRange::CommonScripts,
+];
+
+const HGSS_RANGES: &[GlobalScriptRange] = &[
+    GlobalScriptRange::ScratchOffCards,
+    GlobalScriptRange::BattleFrontierRecords,
+    GlobalScriptRange::FrontierMoveTutor,
+    GlobalScriptRange::BugContest,
+    GlobalScriptRange::TrainerHouse,
+    GlobalScriptRange::ScriptBank(10300),
+    GlobalScriptRange::MysteryGift,
+    GlobalScriptRange::ScriptBank(10150),
+    GlobalScriptRange::TvBroadcast,
+    GlobalScriptRange::FieldMoves,
+    GlobalScriptRange::PokedexRatings,
+    GlobalScriptRange::CommonStrings9900,
+    GlobalScriptRange::Pokeathlon,
+    GlobalScriptRange::ScriptBank(9800),
+    GlobalScriptRange::FollowerPartners,
+    GlobalScriptRange::InitNewGame,
+    GlobalScriptRange::DayCareCommon,
+    GlobalScriptRange::GroupConnection,
+    GlobalScriptRange::WiFiReception,
+    GlobalScriptRange::Colosseum,
+    GlobalScriptRange::CommunicationReception,
+    GlobalScriptRange::RecordChatotCry,
+    GlobalScriptRange::SafariGame,
+    GlobalScriptRange::HiddenItems,
+    GlobalScriptRange::VisibleItems,
+    GlobalScriptRange::Trainer {
+        double_battle_id: 2,
+    },
+    GlobalScriptRange::Trainer {
+        double_battle_id: 1,
+    },
+    GlobalScriptRange::ApricornTree,
+    GlobalScriptRange::Bookshelves,
+    GlobalScriptRange::CommonScripts,
+];
+
+const DP_RANGES: &[GlobalScriptRange] = &[
+    GlobalScriptRange::CounterpartTalk,
+    GlobalScriptRange::MysteryGiftDeliveryman,
+    GlobalScriptRange::TvReporterInterviews,
+    GlobalScriptRange::TvBroadcast,
+    GlobalScriptRange::FieldMoves,
+    GlobalScriptRange::PokedexRatings,
+    GlobalScriptRange::CommonStrings9900,
+    GlobalScriptRange::Contests,
+    GlobalScriptRange::FollowerPartners,
+    GlobalScriptRange::DayCareCommon,
+    GlobalScriptRange::PoffinCommon,
+    GlobalScriptRange::PokemonCenterB1fAttendants,
+    GlobalScriptRange::CommunicationClub,
+    GlobalScriptRange::PokemonCenter2fAttendants,
+    GlobalScriptRange::PokeRadar,
+    GlobalScriptRange::VsSeeker,
+    GlobalScriptRange::RecordChatotCry,
+    GlobalScriptRange::SafariGame,
+    GlobalScriptRange::HiddenItems,
+    GlobalScriptRange::VisibleItems,
+    GlobalScriptRange::Trainer {
+        double_battle_id: 2,
+    },
+    GlobalScriptRange::Trainer {
+        double_battle_id: 1,
+    },
+    GlobalScriptRange::BerryTreeInteractions,
+    GlobalScriptRange::BgEvents,
+    GlobalScriptRange::CommonScripts,
+];
+
+const DP_WESTERN_SCRIPT_IDS: &[(u16, u16, u16)] = &[
+    (10300, 977, 496),
+    (10200, 373, 332),
+    (10150, 1042, 562),
+    (10100, 1041, 563),
+    (10000, 375, 334),
+    (9950, 376, 335),
+    (9900, 365, 199),
+    (9800, 206, 203),
+    (9700, 387, 378),
+    (9500, 464, 464),
+    (9400, 391, 381),
+    (9200, 388, 379),
+    (9100, 0, 9),
+    (9000, 207, 207),
+    (8970, 390, 7),
+    (8950, 463, 463),
+    (8900, 389, 380),
+    (8800, 462, 462),
+    (8000, 374, 333),
+    (7000, 370, 325),
+    (5000, 1040, 199),
+    (3000, 1040, 199),
+    (2800, 378, 350),
+    (2500, 1, 13),
+    (2000, 205, 199),
+];
 
 /// Table mapping global script IDs to script files and text banks.
 ///
@@ -153,8 +475,13 @@ impl GlobalScriptTable {
 
         reader.seek(SeekFrom::Start(table_offset))?;
         let mut entries = Vec::with_capacity(HGSS_TABLE_ENTRY_COUNT);
-        for _ in 0..HGSS_TABLE_ENTRY_COUNT {
-            entries.push(GlobalScriptEntry::read_from(reader)?);
+        for index in 0..HGSS_TABLE_ENTRY_COUNT {
+            let mut entry = GlobalScriptEntry::read_from_binary(reader)?;
+            entry.range = HGSS_RANGES
+                .get(index)
+                .copied()
+                .unwrap_or(GlobalScriptRange::ScriptBank(entry.min_script_id));
+            entries.push(entry);
         }
 
         Ok(Self::from_entries(entries))
@@ -192,8 +519,13 @@ impl GlobalScriptTable {
         let table_offset = table_addr.saturating_sub(HGSS_MEMORY_BASE) as u64;
         cursor.seek(SeekFrom::Start(table_offset))?;
         let mut entries = Vec::with_capacity(HGSS_TABLE_ENTRY_COUNT);
-        for _ in 0..HGSS_TABLE_ENTRY_COUNT {
-            entries.push(GlobalScriptEntry::read_from(&mut cursor)?);
+        for index in 0..HGSS_TABLE_ENTRY_COUNT {
+            let mut entry = GlobalScriptEntry::read_from_binary(&mut cursor)?;
+            entry.range = HGSS_RANGES
+                .get(index)
+                .copied()
+                .unwrap_or(GlobalScriptRange::ScriptBank(entry.min_script_id));
+            entries.push(entry);
         }
         Ok(Self::from_entries(entries))
     }
@@ -209,7 +541,7 @@ impl GlobalScriptTable {
         let block = &content[start + block_start..];
 
         let mut entries = Vec::new();
-        for caps in RE_HGSS_ENTRY.captures_iter(block) {
+        for (index, caps) in RE_HGSS_ENTRY.captures_iter(block).enumerate() {
             let script_id_sym = caps.get(1)?.as_str();
             let script_file_sym = caps.get(2)?.as_str();
             let text_archive_sym = caps.get(3)?.as_str();
@@ -218,10 +550,14 @@ impl GlobalScriptTable {
             let script_file_id = resolve_value(script_file_sym, symbols)? as u16;
             let text_archive_id = resolve_value(text_archive_sym, symbols)? as u16;
 
-            entries.push(GlobalScriptEntry::new(
+            entries.push(GlobalScriptEntry::with_range(
                 min_script_id,
                 script_file_id,
                 text_archive_id,
+                HGSS_RANGES
+                    .get(index)
+                    .copied()
+                    .unwrap_or(GlobalScriptRange::ScriptBank(min_script_id)),
             ));
         }
 
@@ -262,7 +598,7 @@ impl GlobalScriptTable {
         let block = &content[start + block_start..];
 
         let mut entries = Vec::new();
-        for caps in RE_PLATINUM_TABLE_ENTRY.captures_iter(block) {
+        for (index, caps) in RE_PLATINUM_TABLE_ENTRY.captures_iter(block).enumerate() {
             let script_id_sym = caps.get(1)?.as_str();
             let script_file_sym = caps.get(2)?.as_str();
             let text_archive_sym = caps.get(3)?.as_str();
@@ -271,10 +607,14 @@ impl GlobalScriptTable {
             let script_file_id = resolve_value(script_file_sym, symbols)? as u16;
             let text_archive_id = resolve_value(text_archive_sym, symbols)? as u16;
 
-            entries.push(GlobalScriptEntry::new(
+            entries.push(GlobalScriptEntry::with_range(
                 min_script_id,
                 script_file_id,
                 text_archive_id,
+                PLATINUM_RANGES
+                    .get(index)
+                    .copied()
+                    .unwrap_or(GlobalScriptRange::ScriptBank(min_script_id)),
             ));
         }
 
@@ -302,229 +642,243 @@ impl GlobalScriptTable {
     /// Hardcoded table for Platinum Western (US/EU/DE/FR/IT/ES).
     ///
     /// Extracted from `ScriptContext_LoadAndOffsetID` in arm9 (func 0x3EB20, pool 0x3EE08).
-    /// Source: `~/dev/gen4-test-roms/research/offsets_research.md`.
     pub fn platinum_hardcoded() -> Self {
         Self::platinum_western_hardcoded()
     }
 
     /// Hardcoded table for Platinum Western (US/EU/DE/FR/IT/ES).
     pub fn platinum_western_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10490, 499, 499),
-            GlobalScriptEntry::new(10450, 500, 16),
-            GlobalScriptEntry::new(10400, 400, 203),
-            GlobalScriptEntry::new(10300, 1051, 552),
-            GlobalScriptEntry::new(10200, 407, 379),
-            GlobalScriptEntry::new(10150, 1116, 621),
-            GlobalScriptEntry::new(10100, 1115, 622),
-            GlobalScriptEntry::new(10000, 409, 381),
-            GlobalScriptEntry::new(9950, 411, 383),
-            GlobalScriptEntry::new(9900, 397, 213),
-            GlobalScriptEntry::new(9800, 212, 217),
-            GlobalScriptEntry::new(9700, 422, 422),
-            GlobalScriptEntry::new(9600, 412, 213),
-            GlobalScriptEntry::new(9500, 501, 501),
-            GlobalScriptEntry::new(9400, 426, 426),
-            GlobalScriptEntry::new(9300, 406, 374),
-            GlobalScriptEntry::new(9200, 423, 423),
-            GlobalScriptEntry::new(9100, 0, 11),
-            GlobalScriptEntry::new(9000, 213, 221),
-            GlobalScriptEntry::new(8970, 425, 7),
-            GlobalScriptEntry::new(8950, 498, 498),
-            GlobalScriptEntry::new(8900, 424, 424),
-            GlobalScriptEntry::new(8800, 497, 497),
-            GlobalScriptEntry::new(8000, 408, 380),
-            GlobalScriptEntry::new(7000, 404, 369),
-            GlobalScriptEntry::new(5000, 1114, 213),
-            GlobalScriptEntry::new(3000, 1114, 213),
-            GlobalScriptEntry::new(2800, 413, 397),
-            GlobalScriptEntry::new(2500, 1, 17),
-            GlobalScriptEntry::new(2000, 211, 213),
-        ];
-        Self::from_entries(entries)
+        Self::from_entries(entries_from_ids(
+            PLATINUM_RANGES,
+            &[
+                (10490, 499, 499),
+                (10450, 500, 16),
+                (10400, 400, 203),
+                (10300, 1051, 552),
+                (10200, 407, 379),
+                (10150, 1116, 621),
+                (10100, 1115, 622),
+                (10000, 409, 381),
+                (9950, 411, 383),
+                (9900, 397, 213),
+                (9800, 212, 217),
+                (9700, 422, 422),
+                (9600, 412, 213),
+                (9500, 501, 501),
+                (9400, 426, 426),
+                (9300, 406, 374),
+                (9200, 423, 423),
+                (9100, 0, 11),
+                (9000, 213, 221),
+                (8970, 425, 7),
+                (8950, 498, 498),
+                (8900, 424, 424),
+                (8800, 497, 497),
+                (8000, 408, 380),
+                (7000, 404, 369),
+                (5000, 1114, 213),
+                (3000, 1114, 213),
+                (2800, 413, 397),
+                (2500, 1, 17),
+                (2000, 211, 213),
+            ],
+        ))
     }
 
     /// Hardcoded table for Platinum Japanese.
     ///
     /// Extracted from arm9 func 0x3E6D8, pool 0x3E9C0.
     pub fn platinum_japanese_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10490, 499, 499),
-            GlobalScriptEntry::new(10450, 500, 15),
-            GlobalScriptEntry::new(10400, 400, 202),
-            GlobalScriptEntry::new(10300, 1051, 546),
-            GlobalScriptEntry::new(10200, 407, 378),
-            GlobalScriptEntry::new(10150, 1116, 613),
-            GlobalScriptEntry::new(10100, 1115, 614),
-            GlobalScriptEntry::new(10000, 409, 380),
-            GlobalScriptEntry::new(9950, 411, 382),
-            GlobalScriptEntry::new(9900, 397, 212),
-            GlobalScriptEntry::new(9800, 212, 216),
-            GlobalScriptEntry::new(9700, 422, 422),
-            GlobalScriptEntry::new(9600, 412, 212),
-            GlobalScriptEntry::new(9500, 501, 501),
-            GlobalScriptEntry::new(9400, 426, 426),
-            GlobalScriptEntry::new(9300, 406, 373),
-            GlobalScriptEntry::new(9200, 423, 423),
-            GlobalScriptEntry::new(9100, 0, 11),
-            GlobalScriptEntry::new(9000, 213, 220),
-            GlobalScriptEntry::new(8970, 425, 7),
-            GlobalScriptEntry::new(8950, 498, 498),
-            GlobalScriptEntry::new(8900, 424, 424),
-            GlobalScriptEntry::new(8800, 497, 497),
-            GlobalScriptEntry::new(8000, 408, 379),
-            GlobalScriptEntry::new(7000, 404, 368),
-            GlobalScriptEntry::new(5000, 1114, 212),
-            GlobalScriptEntry::new(3000, 1114, 212),
-            GlobalScriptEntry::new(2800, 413, 393),
-            GlobalScriptEntry::new(2500, 1, 16),
-            GlobalScriptEntry::new(2000, 211, 212),
-        ];
-        Self::from_entries(entries)
+        Self::from_entries(entries_from_ids(
+            PLATINUM_RANGES,
+            &[
+                (10490, 499, 499),
+                (10450, 500, 15),
+                (10400, 400, 202),
+                (10300, 1051, 546),
+                (10200, 407, 378),
+                (10150, 1116, 613),
+                (10100, 1115, 614),
+                (10000, 409, 380),
+                (9950, 411, 382),
+                (9900, 397, 212),
+                (9800, 212, 216),
+                (9700, 422, 422),
+                (9600, 412, 212),
+                (9500, 501, 501),
+                (9400, 426, 426),
+                (9300, 406, 373),
+                (9200, 423, 423),
+                (9100, 0, 11),
+                (9000, 213, 220),
+                (8970, 425, 7),
+                (8950, 498, 498),
+                (8900, 424, 424),
+                (8800, 497, 497),
+                (8000, 408, 379),
+                (7000, 404, 368),
+                (5000, 1114, 212),
+                (3000, 1114, 212),
+                (2800, 413, 393),
+                (2500, 1, 16),
+                (2000, 211, 212),
+            ],
+        ))
     }
 
     /// Hardcoded table for Platinum Korean (Giratina build).
     ///
     /// Extracted from arm9 func 0x3F00C, pool 0x3F2F4.
     pub fn platinum_korean_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10490, 499, 499),
-            GlobalScriptEntry::new(10450, 500, 15),
-            GlobalScriptEntry::new(10400, 400, 202),
-            GlobalScriptEntry::new(10300, 1051, 547),
-            GlobalScriptEntry::new(10200, 407, 378),
-            GlobalScriptEntry::new(10150, 1116, 614),
-            GlobalScriptEntry::new(10100, 1115, 615),
-            GlobalScriptEntry::new(10000, 409, 380),
-            GlobalScriptEntry::new(9950, 411, 382),
-            GlobalScriptEntry::new(9900, 397, 212),
-            GlobalScriptEntry::new(9800, 212, 216),
-            GlobalScriptEntry::new(9700, 422, 422),
-            GlobalScriptEntry::new(9600, 412, 212),
-            GlobalScriptEntry::new(9500, 501, 501),
-            GlobalScriptEntry::new(9400, 426, 426),
-            GlobalScriptEntry::new(9300, 406, 373),
-            GlobalScriptEntry::new(9200, 423, 423),
-            GlobalScriptEntry::new(9100, 0, 11),
-            GlobalScriptEntry::new(9000, 213, 220),
-            GlobalScriptEntry::new(8970, 425, 7),
-            GlobalScriptEntry::new(8950, 498, 498),
-            GlobalScriptEntry::new(8900, 424, 424),
-            GlobalScriptEntry::new(8800, 497, 497),
-            GlobalScriptEntry::new(8000, 408, 379),
-            GlobalScriptEntry::new(7000, 404, 368),
-            GlobalScriptEntry::new(5000, 1114, 212),
-            GlobalScriptEntry::new(3000, 1114, 212),
-            GlobalScriptEntry::new(2800, 413, 393),
-            GlobalScriptEntry::new(2500, 1, 16),
-            GlobalScriptEntry::new(2000, 211, 212),
-        ];
-        Self::from_entries(entries)
+        Self::from_entries(entries_from_ids(
+            PLATINUM_RANGES,
+            &[
+                (10490, 499, 499),
+                (10450, 500, 15),
+                (10400, 400, 202),
+                (10300, 1051, 547),
+                (10200, 407, 378),
+                (10150, 1116, 614),
+                (10100, 1115, 615),
+                (10000, 409, 380),
+                (9950, 411, 382),
+                (9900, 397, 212),
+                (9800, 212, 216),
+                (9700, 422, 422),
+                (9600, 412, 212),
+                (9500, 501, 501),
+                (9400, 426, 426),
+                (9300, 406, 373),
+                (9200, 423, 423),
+                (9100, 0, 11),
+                (9000, 213, 220),
+                (8970, 425, 7),
+                (8950, 498, 498),
+                (8900, 424, 424),
+                (8800, 497, 497),
+                (8000, 408, 379),
+                (7000, 404, 368),
+                (5000, 1114, 212),
+                (3000, 1114, 212),
+                (2800, 413, 393),
+                (2500, 1, 16),
+                (2000, 211, 212),
+            ],
+        ))
     }
 
     /// Hardcoded table for Diamond/Pearl Western (US/EU Rev 5).
     ///
     /// Extracted from `LoadScriptsAndMessagesByMapId` in arm9 (func 0x38F18, pool 0x39210).
-    /// Source: `~/dev/gen4-test-roms/research/offsets_research.md`.
     pub fn dp_western_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10300, 977, 496),
-            GlobalScriptEntry::new(10200, 373, 332),
-            GlobalScriptEntry::new(10150, 1042, 562),
-            GlobalScriptEntry::new(10100, 1041, 563),
-            GlobalScriptEntry::new(10000, 375, 334),
-            GlobalScriptEntry::new(9950, 376, 335),
-            GlobalScriptEntry::new(9900, 365, 199),
-            GlobalScriptEntry::new(9800, 206, 203),
-            GlobalScriptEntry::new(9700, 387, 378),
-            GlobalScriptEntry::new(9500, 464, 464),
-            GlobalScriptEntry::new(9400, 391, 381),
-            GlobalScriptEntry::new(9200, 388, 379),
-            GlobalScriptEntry::new(9100, 0, 9),
-            GlobalScriptEntry::new(9000, 207, 207),
-            GlobalScriptEntry::new(8970, 390, 7),
-            GlobalScriptEntry::new(8950, 463, 463),
-            GlobalScriptEntry::new(8900, 389, 380),
-            GlobalScriptEntry::new(8800, 462, 462),
-            GlobalScriptEntry::new(8000, 374, 333),
-            GlobalScriptEntry::new(7000, 370, 325),
-            GlobalScriptEntry::new(5000, 1040, 199),
-            GlobalScriptEntry::new(3000, 1040, 199),
-            GlobalScriptEntry::new(2800, 378, 350),
-            GlobalScriptEntry::new(2500, 1, 13),
-            GlobalScriptEntry::new(2000, 205, 199),
-        ];
-        Self::from_entries(entries)
+        Self::from_entries(entries_from_ids(DP_RANGES, DP_WESTERN_SCRIPT_IDS))
     }
 
     /// Hardcoded table for Diamond/Pearl Japanese.
     ///
-    /// Extracted from arm9 func 0x3B6B0, pool 0x3B95C.
+    /// Extracted from arm9 func 0x3B6B0, pool 0x3B95C. Includes two extra script
+    /// banks at 9600 and 9300 not present in western DP; those use generic range names.
     pub fn dp_japanese_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10300, 977, 488),
-            GlobalScriptEntry::new(10200, 373, 330),
-            GlobalScriptEntry::new(10150, 1042, 552),
-            GlobalScriptEntry::new(10100, 1041, 553),
-            GlobalScriptEntry::new(10000, 375, 332),
-            GlobalScriptEntry::new(9950, 376, 333),
-            GlobalScriptEntry::new(9900, 365, 198),
-            GlobalScriptEntry::new(9800, 206, 202),
-            GlobalScriptEntry::new(9700, 387, 370),
-            GlobalScriptEntry::new(9600, 377, 198),
-            GlobalScriptEntry::new(9500, 464, 484),
-            GlobalScriptEntry::new(9400, 391, 373),
-            GlobalScriptEntry::new(9300, 372, 327),
-            GlobalScriptEntry::new(9200, 388, 371),
-            GlobalScriptEntry::new(9100, 0, 9),
-            GlobalScriptEntry::new(9000, 207, 206),
-            GlobalScriptEntry::new(8970, 390, 7),
-            GlobalScriptEntry::new(8950, 463, 478),
-            GlobalScriptEntry::new(8900, 389, 372),
-            GlobalScriptEntry::new(8800, 462, 477),
-            GlobalScriptEntry::new(8000, 374, 331),
-            GlobalScriptEntry::new(7000, 370, 323),
-            GlobalScriptEntry::new(5000, 1040, 198),
-            GlobalScriptEntry::new(3000, 1040, 198),
-            GlobalScriptEntry::new(2800, 378, 344),
-            GlobalScriptEntry::new(2500, 1, 12),
-            GlobalScriptEntry::new(2000, 205, 198),
-        ];
-        Self::from_entries(entries)
+        Self::from_entries(entries_from_ids(
+            &[
+                GlobalScriptRange::CounterpartTalk,
+                GlobalScriptRange::MysteryGiftDeliveryman,
+                GlobalScriptRange::TvReporterInterviews,
+                GlobalScriptRange::TvBroadcast,
+                GlobalScriptRange::FieldMoves,
+                GlobalScriptRange::PokedexRatings,
+                GlobalScriptRange::CommonStrings9900,
+                GlobalScriptRange::Contests,
+                GlobalScriptRange::FollowerPartners,
+                GlobalScriptRange::ScriptBank(9600),
+                GlobalScriptRange::DayCareCommon,
+                GlobalScriptRange::PoffinCommon,
+                GlobalScriptRange::ScriptBank(9300),
+                GlobalScriptRange::PokemonCenterB1fAttendants,
+                GlobalScriptRange::CommunicationClub,
+                GlobalScriptRange::PokemonCenter2fAttendants,
+                GlobalScriptRange::PokeRadar,
+                GlobalScriptRange::VsSeeker,
+                GlobalScriptRange::RecordChatotCry,
+                GlobalScriptRange::SafariGame,
+                GlobalScriptRange::HiddenItems,
+                GlobalScriptRange::VisibleItems,
+                GlobalScriptRange::Trainer {
+                    double_battle_id: 2,
+                },
+                GlobalScriptRange::Trainer {
+                    double_battle_id: 1,
+                },
+                GlobalScriptRange::BerryTreeInteractions,
+                GlobalScriptRange::BgEvents,
+                GlobalScriptRange::CommonScripts,
+            ],
+            &[
+                (10300, 977, 488),
+                (10200, 373, 330),
+                (10150, 1042, 552),
+                (10100, 1041, 553),
+                (10000, 375, 332),
+                (9950, 376, 333),
+                (9900, 365, 198),
+                (9800, 206, 202),
+                (9700, 387, 370),
+                (9600, 377, 198),
+                (9500, 464, 484),
+                (9400, 391, 373),
+                (9300, 372, 327),
+                (9200, 388, 371),
+                (9100, 0, 9),
+                (9000, 207, 206),
+                (8970, 390, 7),
+                (8950, 463, 478),
+                (8900, 389, 372),
+                (8800, 462, 477),
+                (8000, 374, 331),
+                (7000, 370, 323),
+                (5000, 1040, 198),
+                (3000, 1040, 198),
+                (2800, 378, 344),
+                (2500, 1, 12),
+                (2000, 205, 198),
+            ],
+        ))
     }
 
     /// Hardcoded table for Diamond/Pearl Korean.
     ///
     /// Extracted from arm9 func 0x39388, pool 0x3967C.
     pub fn dp_korean_hardcoded() -> Self {
-        let entries = vec![
-            GlobalScriptEntry::new(10300, 977, 490),
-            GlobalScriptEntry::new(10200, 373, 331),
-            GlobalScriptEntry::new(10150, 1042, 554),
-            GlobalScriptEntry::new(10100, 1041, 555),
-            GlobalScriptEntry::new(10000, 375, 333),
-            GlobalScriptEntry::new(9950, 376, 334),
-            GlobalScriptEntry::new(9900, 365, 198),
-            GlobalScriptEntry::new(9800, 206, 202),
-            GlobalScriptEntry::new(9700, 387, 372),
-            GlobalScriptEntry::new(9500, 464, 464),
-            GlobalScriptEntry::new(9400, 391, 375),
-            GlobalScriptEntry::new(9200, 388, 373),
-            GlobalScriptEntry::new(9100, 0, 9),
-            GlobalScriptEntry::new(9000, 207, 206),
-            GlobalScriptEntry::new(8970, 390, 7),
-            GlobalScriptEntry::new(8950, 463, 463),
-            GlobalScriptEntry::new(8900, 389, 374),
-            GlobalScriptEntry::new(8800, 462, 462),
-            GlobalScriptEntry::new(8000, 374, 332),
-            GlobalScriptEntry::new(7000, 370, 324),
-            GlobalScriptEntry::new(5000, 1040, 198),
-            GlobalScriptEntry::new(3000, 1040, 198),
-            GlobalScriptEntry::new(2800, 378, 345),
-            GlobalScriptEntry::new(2500, 1, 12),
-            GlobalScriptEntry::new(2000, 205, 198),
-        ];
-        Self::from_entries(entries)
+        Self::from_entries(entries_from_ids(
+            DP_RANGES,
+            &[
+                (10300, 977, 490),
+                (10200, 373, 331),
+                (10150, 1042, 554),
+                (10100, 1041, 555),
+                (10000, 375, 333),
+                (9950, 376, 334),
+                (9900, 365, 198),
+                (9800, 206, 202),
+                (9700, 387, 372),
+                (9500, 464, 464),
+                (9400, 391, 375),
+                (9200, 388, 373),
+                (9100, 0, 9),
+                (9000, 207, 206),
+                (8970, 390, 7),
+                (8950, 463, 463),
+                (8900, 389, 374),
+                (8800, 462, 462),
+                (8000, 374, 332),
+                (7000, 370, 324),
+                (5000, 1040, 198),
+                (3000, 1040, 198),
+                (2800, 378, 345),
+                (2500, 1, 12),
+                (2000, 205, 198),
+            ],
+        ))
     }
 
     /// Look up the entry for a global script ID.
@@ -534,11 +888,14 @@ impl GlobalScriptTable {
         self.entries.iter().find(|e| script_id >= e.min_script_id)
     }
 
-    /// Check if a script ID is a global/common script (not a map script).
-    ///
-    /// Map scripts use IDs 1-1999, global scripts use 2000+.
+    /// Lowest global script ID in this table (map scripts are below this).
+    pub fn min_global_script_id(&self) -> Option<u16> {
+        self.entries.iter().map(|e| e.min_script_id).min()
+    }
+
+    /// Check if a script ID falls in a global script range from this table.
     pub fn is_global_script(&self, script_id: u16) -> bool {
-        script_id >= COMMON_SCRIPT_THRESHOLD
+        self.lookup(script_id).is_some()
     }
 
     /// Get all entries in the table.
@@ -582,6 +939,7 @@ mod tests {
         assert_eq!(entry.min_script_id, 2000);
         assert_eq!(entry.script_file_id, 211);
         assert_eq!(entry.text_archive_id, 213);
+        assert_eq!(entry.range, GlobalScriptRange::CommonScripts);
 
         let entry = table.lookup(2050).unwrap();
         assert_eq!(entry.min_script_id, 2000);
@@ -590,6 +948,35 @@ mod tests {
         assert_eq!(entry.min_script_id, 3000);
         assert_eq!(entry.script_file_id, 1114);
         assert_eq!(entry.text_archive_id, 213);
+        assert_eq!(
+            entry.range,
+            GlobalScriptRange::Trainer {
+                double_battle_id: 1
+            }
+        );
+        assert_eq!(
+            table.lookup(5500).unwrap().range,
+            GlobalScriptRange::Trainer {
+                double_battle_id: 2
+            }
+        );
+    }
+
+    #[test]
+    fn test_dp_japanese_extra_banks_use_generic_names() {
+        let table = GlobalScriptTable::dp_japanese_hardcoded();
+        assert_eq!(
+            table.lookup(9600).unwrap().range,
+            GlobalScriptRange::ScriptBank(9600)
+        );
+        assert_eq!(
+            table.lookup(9300).unwrap().range,
+            GlobalScriptRange::ScriptBank(9300)
+        );
+        assert_eq!(
+            table.lookup(3000).unwrap().range.display_name(),
+            "Single Battles"
+        );
     }
 
     #[test]
@@ -605,6 +992,12 @@ mod tests {
         let entry = table.lookup(3500).unwrap();
         assert_eq!(entry.min_script_id, 3000);
         assert_eq!(entry.script_file_id, 1040);
+        assert_eq!(
+            entry.range,
+            GlobalScriptRange::Trainer {
+                double_battle_id: 1
+            }
+        );
     }
 
     #[test]
@@ -620,10 +1013,51 @@ mod tests {
     fn test_entry_read() {
         let data: [u8; 6] = [0xD0, 0x07, 0xD3, 0x00, 0xD5, 0x00];
         let mut cursor = Cursor::new(data);
-        let entry = GlobalScriptEntry::read_from(&mut cursor).unwrap();
+        let entry = GlobalScriptEntry::read_from_binary(&mut cursor).unwrap();
         assert_eq!(entry.min_script_id, 2000);
         assert_eq!(entry.script_file_id, 211);
         assert_eq!(entry.text_archive_id, 213);
+    }
+
+    #[test]
+    fn test_hgss_binary_assigns_semantic_ranges() {
+        let table_offset = 0x40200usize;
+        let mut data = vec![0; table_offset + HGSS_TABLE_ENTRY_COUNT * 6];
+        (&mut data[HGSS_TABLE_POINTER_OFFSET as usize..])
+            .write_u32::<LittleEndian>(HGSS_MEMORY_BASE + table_offset as u32)
+            .unwrap();
+
+        let min_script_ids = [
+            10500, 10400, 10350, 10300, 10250, 10200, 10175, 10150, 10100, 10000, 9950, 9900,
+            9850, 9800, 9700, 9600, 9500, 9400, 9300, 9200, 9100, 9000, 8970, 8950, 8900, 5000,
+            3000, 2800, 2500, 2000,
+        ];
+
+        for (index, min_script_id) in min_script_ids.into_iter().enumerate() {
+            let start = table_offset + index * 6;
+            let mut entry = &mut data[start..start + 6];
+            entry.write_u16::<LittleEndian>(min_script_id).unwrap();
+            entry.write_u16::<LittleEndian>(index as u16).unwrap();
+            entry
+                .write_u16::<LittleEndian>((index as u16).saturating_add(100))
+                .unwrap();
+        }
+
+        let table = GlobalScriptTable::from_hgss_binary(&mut Cursor::new(data)).unwrap();
+
+        assert_eq!(
+            table.lookup(5000).unwrap().range,
+            GlobalScriptRange::Trainer {
+                double_battle_id: 2
+            }
+        );
+        assert_eq!(
+            table.lookup(3000).unwrap().range,
+            GlobalScriptRange::Trainer {
+                double_battle_id: 1
+            }
+        );
+        assert_eq!(table.lookup(2000).unwrap().range, GlobalScriptRange::CommonScripts);
     }
 
     #[test]
@@ -819,7 +1253,12 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
         assert_eq!(hardcoded_table.len(), PLATINUM_TABLE_ENTRY_COUNT);
 
         for entry in hardcoded_table.entries() {
-            assert_eq!(decomp_table.lookup(entry.min_script_id), Some(entry));
+            let decomp = decomp_table
+                .lookup(entry.min_script_id)
+                .expect("missing decomp range");
+            assert_eq!(decomp.min_script_id, entry.min_script_id);
+            assert_eq!(decomp.script_file_id, entry.script_file_id);
+            assert_eq!(decomp.text_archive_id, entry.text_archive_id);
         }
     }
 
@@ -829,7 +1268,12 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
                 mapping
                     .into_iter()
                     .map(|(min_script_id, (script_file_id, text_archive_id))| {
-                        GlobalScriptEntry::new(min_script_id, script_file_id, text_archive_id)
+                        GlobalScriptEntry::new(
+                            min_script_id,
+                            script_file_id,
+                            text_archive_id,
+                            format!("Script Range {min_script_id}"),
+                        )
                     })
                     .collect()
             },
@@ -857,19 +1301,19 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
             let expected = expected_entries
                 .iter()
                 .find(|e| script_id >= e.min_script_id)
-                .copied();
+                .cloned();
 
             let table = GlobalScriptTable::from_entries(entries);
-            let actual = table.lookup(script_id).copied();
+            let actual = table.lookup(script_id).cloned();
             prop_assert_eq!(actual, expected);
         }
 
         #[test]
-        fn prop_is_global_script_threshold(script_id in any::<u16>()) {
-            let table = GlobalScriptTable::new();
+        fn prop_is_global_script_matches_lookup(script_id in any::<u16>()) {
+            let table = GlobalScriptTable::platinum_western_hardcoded();
             prop_assert_eq!(
                 table.is_global_script(script_id),
-                script_id >= COMMON_SCRIPT_THRESHOLD
+                table.lookup(script_id).is_some()
             );
         }
 
@@ -885,7 +1329,7 @@ const struct ScriptBankMapping sScriptBankMapping[30] = {
             bytes.write_u16::<LittleEndian>(text_archive_id).unwrap();
 
             let mut cursor = Cursor::new(bytes);
-            let parsed = GlobalScriptEntry::read_from(&mut cursor).unwrap();
+            let parsed = GlobalScriptEntry::read_from_binary(&mut cursor).unwrap();
             prop_assert_eq!(parsed.min_script_id, min_script_id);
             prop_assert_eq!(parsed.script_file_id, script_file_id);
             prop_assert_eq!(parsed.text_archive_id, text_archive_id);

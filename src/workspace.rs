@@ -8,9 +8,7 @@ use crate::c_parser::{SourceManager, SymbolTable};
 use crate::game::{Game, GameFamily, GameLanguage};
 use crate::provider::{Arm9Provider, DataProvider, DecompProvider};
 use crate::rom_header::RomHeader;
-use crate::script_file::{
-    GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable, is_common_script_id,
-};
+use crate::script_file::{GlobalScriptTable, MapScriptInfo, ScriptResolution, ScriptTable};
 use crate::text_bank::{GameStrings, TextBankTable};
 use dashmap::DashMap;
 use std::collections::BTreeSet;
@@ -817,7 +815,7 @@ impl Workspace {
     }
 
     pub fn resolve_script_id_to_name(&self, script_id: u16) -> Option<String> {
-        if is_common_script_id(script_id) {
+        if self.global_script_table.is_global_script(script_id) {
             self.symbols.resolve_name(script_id as i64, "CommonScript_")
         } else {
             self.symbols.resolve_name(script_id as i64, "")

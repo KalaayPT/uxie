@@ -2,17 +2,11 @@
 //!
 //! This module resolves script IDs to their containing files and associated
 //! metadata (text archives, event files, etc.). It handles both local scripts
-//! (ID 0-1999) that belong to specific maps and common/global scripts (ID 2000+)
-//! that are shared across the game.
+//! that belong to specific maps and global scripts resolved via [`GlobalScriptTable`].
 
 use crate::error::Result;
 use crate::provider::DataProvider;
 use crate::script_file::GlobalScriptTable;
-
-/// Script IDs at or above this threshold are common/global scripts.
-///
-/// Local scripts use IDs 0-1999, while common scripts use 2000+.
-pub const COMMON_SCRIPT_THRESHOLD: u16 = 2000;
 
 /// Basic information about a script file.
 ///
@@ -48,7 +42,7 @@ pub struct MapScriptInfo {
 /// or map-specific scripts that belong to a particular location.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ScriptResolution {
-    /// A common/global script (ID >= 2000).
+    /// A global script resolved from [`GlobalScriptTable`].
     CommonScript {
         /// The original script ID that was resolved.
         script_id: u16,
@@ -120,15 +114,9 @@ impl ScriptResolution {
     }
 }
 
-/// Returns `true` if the script ID is a common/global script (>= 2000).
-pub fn is_common_script_id(script_id: u16) -> bool {
-    script_id >= COMMON_SCRIPT_THRESHOLD
-}
-
 /// Resolves a script ID to its file and metadata.
 ///
-/// Use this when you know the current map ID. For common scripts (ID >= 2000),
-/// the map_id is ignored and resolution uses the global table.
+/// Global scripts are resolved from `global_table`; map scripts need `map_id`.
 ///
 /// Returns `None` if:
 /// - The script is a common script not found in the global table
@@ -139,7 +127,7 @@ pub fn resolve_script_id(
     global_table: &GlobalScriptTable,
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
-    if is_common_script_id(script_id) {
+    if global_table.is_global_script(script_id) {
         Ok(resolve_common_script(script_id, global_table))
     } else {
         resolve_map_script(script_id, map_id, provider)
@@ -160,7 +148,7 @@ pub fn resolve_script_id_by_file(
     global_table: &GlobalScriptTable,
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
-    if is_common_script_id(script_id) {
+    if global_table.is_global_script(script_id) {
         Ok(resolve_common_script(script_id, global_table))
     } else {
         let map_id = first_map_for_script_file(script_file_id, provider)?;
@@ -183,7 +171,7 @@ pub fn resolve_script_id_by_level_script_file(
     global_table: &GlobalScriptTable,
     provider: &dyn DataProvider,
 ) -> Result<Option<ScriptResolution>> {
-    if is_common_script_id(script_id) {
+    if global_table.is_global_script(script_id) {
         Ok(resolve_common_script(script_id, global_table))
     } else {
         let map_id = first_map_for_level_script_file(level_script_file_id, provider)?;
@@ -255,7 +243,7 @@ pub fn resolve_level_script(
     let header = provider.get_map_header(map_id)?;
     let level_script_id = header.level_script_id();
 
-    if is_common_script_id(level_script_id) {
+    if global_table.is_global_script(level_script_id) {
         Ok(resolve_common_script(level_script_id, global_table))
     } else {
         Ok(Some(ScriptResolution::MapScript {
@@ -309,7 +297,7 @@ pub fn get_common_script_info(
     script_id: u16,
     global_table: &GlobalScriptTable,
 ) -> Option<ScriptFileInfo> {
-    if !is_common_script_id(script_id) {
+    if !global_table.is_global_script(script_id) {
         return None;
     }
 
@@ -433,20 +421,21 @@ mod tests {
     }
 
     #[test]
-    fn test_is_common_script_id() {
-        assert!(!is_common_script_id(0));
-        assert!(!is_common_script_id(1));
-        assert!(!is_common_script_id(1999));
-        assert!(is_common_script_id(2000));
-        assert!(is_common_script_id(2001));
-        assert!(is_common_script_id(10000));
+    fn test_is_global_script() {
+        let table = GlobalScriptTable::platinum_western_hardcoded();
+        assert!(!table.is_global_script(0));
+        assert!(!table.is_global_script(1));
+        assert!(!table.is_global_script(1999));
+        assert!(table.is_global_script(2000));
+        assert!(table.is_global_script(2001));
+        assert!(table.is_global_script(10000));
     }
 
     #[test]
     fn test_resolve_common_script() {
         let table = GlobalScriptTable::from_entries(vec![
-            GlobalScriptEntry::new(2000, 211, 213),
-            GlobalScriptEntry::new(2500, 212, 214),
+            GlobalScriptEntry::new(2000, 211, 213, "Common Scripts"),
+            GlobalScriptEntry::new(2500, 212, 214, "BG Events"),
         ]);
 
         let result = resolve_common_script(2018, &table);
@@ -487,7 +476,12 @@ mod tests {
 
     #[test]
     fn test_resolve_script_id_routes_correctly() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2000, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2000,
+            211,
+            213,
+            "Common Scripts",
+        )]);
         let provider = MockProvider {
             headers: vec![create_pt_header(100, 200, 50, 1)],
         };
@@ -547,7 +541,12 @@ mod tests {
 
     #[test]
     fn test_get_common_script_info() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2000, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2000,
+            211,
+            213,
+            "Common Scripts",
+        )]);
 
         let info = get_common_script_info(2050, &table);
         assert!(info.is_some());
@@ -561,7 +560,12 @@ mod tests {
 
     #[test]
     fn test_resolve_level_script_common() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2000, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2000,
+            211,
+            213,
+            "Common Scripts",
+        )]);
         let provider = MockProvider {
             headers: vec![MapHeader::Pt(MapHeaderPt {
                 script_file_id: 100,
@@ -603,7 +607,12 @@ mod tests {
 
     #[test]
     fn test_resolve_script_id_by_file_common() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2000, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2000,
+            211,
+            213,
+            "Common Scripts",
+        )]);
         let provider = MockProvider {
             headers: vec![create_pt_header(100, 200, 50, 1)],
         };
@@ -651,7 +660,12 @@ mod tests {
 
     #[test]
     fn test_resolve_level_script_by_file_common() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2050, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2050,
+            211,
+            213,
+            "Common Scripts",
+        )]);
         let provider = MockProvider {
             headers: vec![MapHeader::Pt(MapHeaderPt {
                 script_file_id: 100,
@@ -712,7 +726,12 @@ mod tests {
 
     #[test]
     fn test_resolve_level_script_by_file_level_script_is_common() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2050, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2050,
+            211,
+            213,
+            "Common Scripts",
+        )]);
         let provider = MockProvider {
             headers: vec![MapHeader::Pt(MapHeaderPt {
                 script_file_id: 100,
@@ -733,7 +752,12 @@ mod tests {
 
     #[test]
     fn test_resolve_script_id_by_level_script_file_common() {
-        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(2050, 211, 213)]);
+        let table = GlobalScriptTable::from_entries(vec![GlobalScriptEntry::new(
+            2050,
+            211,
+            213,
+            "Common Scripts",
+        )]);
         let provider = MockProvider {
             headers: vec![MapHeader::Pt(MapHeaderPt {
                 script_file_id: 100,
@@ -807,19 +831,20 @@ mod tests {
     }
 
     fn global_entries_strategy() -> impl Strategy<Value = Vec<GlobalScriptEntry>> {
-        prop::collection::btree_map(
-            COMMON_SCRIPT_THRESHOLD..=u16::MAX,
-            (any::<u16>(), any::<u16>()),
-            0..32,
-        )
-        .prop_map(|mapping| {
-            mapping
-                .into_iter()
-                .map(|(min_script_id, (script_file_id, text_archive_id))| {
-                    GlobalScriptEntry::new(min_script_id, script_file_id, text_archive_id)
-                })
-                .collect()
-        })
+        prop::collection::btree_map(2000u16..=u16::MAX, (any::<u16>(), any::<u16>()), 0..32)
+            .prop_map(|mapping| {
+                mapping
+                    .into_iter()
+                    .map(|(min_script_id, (script_file_id, text_archive_id))| {
+                        GlobalScriptEntry::new(
+                            min_script_id,
+                            script_file_id,
+                            text_archive_id,
+                            format!("Script Range {min_script_id}"),
+                        )
+                    })
+                    .collect()
+            })
     }
 
     proptest! {
@@ -866,7 +891,7 @@ mod tests {
         fn prop_common_resolution_apis_consistent(
             headers in headers_strategy(),
             entries in global_entries_strategy(),
-            common_script_id in COMMON_SCRIPT_THRESHOLD..=u16::MAX,
+            common_script_id in 2000u16..=u16::MAX,
             script_file_id in any::<u16>(),
             level_script_file_id in any::<u16>()
         ) {
@@ -892,7 +917,7 @@ mod tests {
         fn prop_local_resolution_by_file_matches_direct_map_resolution(
             headers in headers_strategy(),
             entries in global_entries_strategy(),
-            local_script_id in 0u16..COMMON_SCRIPT_THRESHOLD,
+            local_script_id in 0u16..2000u16,
             script_file_id in any::<u16>()
         ) {
             let table = GlobalScriptTable::from_entries(entries);
@@ -911,7 +936,7 @@ mod tests {
         fn prop_local_resolution_by_level_file_matches_direct_map_resolution(
             headers in headers_strategy(),
             entries in global_entries_strategy(),
-            local_script_id in 0u16..COMMON_SCRIPT_THRESHOLD,
+            local_script_id in 0u16..2000u16,
             level_script_file_id in any::<u16>()
         ) {
             let table = GlobalScriptTable::from_entries(entries);

@@ -488,7 +488,7 @@ metang_generators = {
                             );
                         }
                     }
-                }
+            }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {
@@ -773,6 +773,59 @@ metang_generators = {
         assert_eq!(
             table.resolve_name_in_family(0xFF, ConstantFamily::EventId),
             Some("LOCALID_PLAYER".to_string())
+        );
+    }
+
+    #[test]
+    fn test_event_constant_families() {
+        let mut table = SymbolTable::new();
+        table
+            .load_header_str(
+                "\
+#define LOCALID_PLAYER 0
+#define obj_D47PC0102_wifisf 1
+#define OBJ_EVENT_GFX_Boy_1 2
+#define SPRITE_RIVAL 3
+#define MOVEMENT_TYPE_LOOK_AROUND 4
+#define TRAINER_TYPE_NORMAL 5
+#define MAP_HEADER_JUBILIFE 6
+#define MAP_D47R0101 7
+#define BG_EVENT_DIR_NORTH 8
+",
+            )
+            .unwrap();
+
+        assert_eq!(
+            table.constant_family("LOCALID_PLAYER"),
+            Some(ConstantFamily::LocalObject)
+        );
+        assert_eq!(
+            table.constant_family("obj_D47PC0102_wifisf"),
+            Some(ConstantFamily::LocalObject)
+        );
+        assert_eq!(
+            table.constant_family("TRAINER_TYPE_NORMAL"),
+            Some(ConstantFamily::TrainerType)
+        );
+        assert_eq!(
+            table.resolve_name_in_family(1, ConstantFamily::LocalObject),
+            Some("obj_D47PC0102_wifisf".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(2, ConstantFamily::ObjectGfx),
+            Some("OBJ_EVENT_GFX_Boy_1".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(6, ConstantFamily::MapHeader),
+            Some("MAP_HEADER_JUBILIFE".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(3, ConstantFamily::Sprite),
+            Some("SPRITE_RIVAL".to_string())
+        );
+        assert_eq!(
+            table.resolve_name_in_family(7, ConstantFamily::Map),
+            Some("MAP_D47R0101".to_string())
         );
     }
 

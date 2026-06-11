@@ -423,7 +423,7 @@ mod tests {
         let path =
             std::path::Path::new("/home/kalaay/dev/slop-engine/armips/include/scriptmacros.s");
         if !path.exists() {
-            eprintln!("skipping: slop-engine not found at {}", path.display());
+            eprintln!("skipping: fixture not found at {}", path.display());
             return;
         }
 

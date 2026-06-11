@@ -41,10 +41,9 @@ pub enum SymbolTag {
 
 /// Semantic constant families tracked by the symbol table.
 ///
-/// This metadata is currently inferred from symbol prefixes at insert time
-/// (for example `ITEM_`, `MOVE_`, `SPECIES_`, `SEQ_`). Loader paths do not yet
-/// attach families explicitly, so prefix inference remains the source of truth
-/// until loader-level classification is implemented.
+/// Inferred from symbol prefixes at insert time (for example `ITEM_`, `LOCALID_`,
+/// `obj_`). Loader paths that register symbols with non-standard spellings rely
+/// on the same prefix rules in [`ConstantFamily::from_symbol_name`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Encode, Decode)]
 pub enum ConstantFamily {
     Item,
@@ -60,12 +59,21 @@ pub enum ConstantFamily {
     TrainerType,
     Trainer,
     TrainerClass,
+    TrainerType,
     Sound,
     Variable,
     Flag,
     Ability,
     Type,
     Battle,
+    LocalObject,
+    ObjectGfx,
+    Sprite,
+    MovementType,
+    MapHeader,
+    Map,
+    BgEventDir,
+    MapLocalVariable,
 }
 
 impl ConstantFamily {
@@ -75,7 +83,14 @@ impl ConstantFamily {
             Some(Self::TrainerClass)
         } else if name.starts_with("TRAINER_TYPE_") {
             Some(Self::TrainerType)
-        } else if name.starts_with("TRAINER_") {
+        } else if name.starts_with("TRAINER_")
+            && !name.starts_with("TRAINER_CARD_")
+            && !name.starts_with("TRAINER_APPEARANCE_")
+            && !name.starts_with("TRAINER_MON_")
+            && !name.starts_with("TRAINER_CASE_")
+            && !name.starts_with("TRAINER_NAME_")
+            && !name.starts_with("TRAINER_SCORE_")
+        {
             Some(Self::Trainer)
         } else if name.starts_with("MAP_HEADER_")
             || (name.starts_with("MAP_")
@@ -112,6 +127,8 @@ impl ConstantFamily {
             Some(Self::Battle)
         } else if name.starts_with("TYPE_") {
             Some(Self::Type)
+        } else if name.starts_with("VAR_MAP_LOCAL_") {
+            Some(Self::MapLocalVariable)
         } else if name.starts_with("VAR_")
             || name.starts_with("VARS_")
             || name.starts_with("SPECIAL_VAR")
@@ -1257,6 +1274,24 @@ impl SymbolTable {
         let mut res: Vec<_> = matches.into_iter().collect();
         res.sort_by_key(|n| n.len());
         res
+    }
+
+    pub fn symbol_names_with_prefix(&self, prefix: &str) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .symbols
+            .keys()
+            .filter(|name| name.starts_with(prefix))
+            .cloned()
+            .collect();
+        if let Some(parent) = &self.parent {
+            for name in parent.symbol_names_with_prefix(prefix) {
+                if !names.iter().any(|existing| existing == &name) {
+                    names.push(name);
+                }
+            }
+        }
+        names.sort();
+        names
     }
 
     pub fn load_list_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
