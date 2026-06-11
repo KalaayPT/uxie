@@ -9,7 +9,7 @@
 //! The [`RomHeader`] struct automatically detects the source format and provides
 //! a unified interface for accessing header data.
 
-use crate::game::{Game, GameFamily, GameLanguage};
+use crate::game::{Game, GameFamily, GameLanguage, RomIdentity};
 use byteorder::{LittleEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::fs::File;
@@ -371,22 +371,14 @@ impl RomHeader {
     /// # Ok::<(), std::io::Error>(())
     /// ```
     pub fn detect_game(&self) -> Option<Game> {
+        // Gen 4 Pokémon game codes. Note: European English releases share
+        // the US -E code; other EU languages use S/I/F/D.
         match self.game_code.as_str() {
-            "ADAE" | "ADAJ" | "ADAP" | "ADAS" | "ADAK" | "ADAD" | "ADAF" | "ADAI" => {
-                Some(Game::Diamond)
-            }
-            "APAE" | "APAJ" | "APAP" | "APAS" | "APAK" | "APAD" | "APAF" | "APAI" => {
-                Some(Game::Pearl)
-            }
-            "CPUE" | "CPUJ" | "CPUP" | "CPUS" | "CPUK" | "CPUD" | "CPUF" | "CPUI" => {
-                Some(Game::Platinum)
-            }
-            "IPKE" | "IPKJ" | "IPKP" | "IPKS" | "IPKK" | "IPKD" | "IPKF" | "IPKI" => {
-                Some(Game::HeartGold)
-            }
-            "IPGE" | "IPGJ" | "IPGP" | "IPGS" | "IPGK" | "IPGD" | "IPGF" | "IPGI" => {
-                Some(Game::SoulSilver)
-            }
+            "ADAE" | "ADAJ" | "ADAS" | "ADAK" | "ADAD" | "ADAF" | "ADAI" => Some(Game::Diamond),
+            "APAE" | "APAJ" | "APAS" | "APAK" | "APAD" | "APAF" | "APAI" => Some(Game::Pearl),
+            "CPUE" | "CPUJ" | "CPUS" | "CPUK" | "CPUD" | "CPUF" | "CPUI" => Some(Game::Platinum),
+            "IPKE" | "IPKJ" | "IPKS" | "IPKK" | "IPKD" | "IPKF" | "IPKI" => Some(Game::HeartGold),
+            "IPGE" | "IPGJ" | "IPGS" | "IPGK" | "IPGD" | "IPGF" | "IPGI" => Some(Game::SoulSilver),
             _ => None,
         }
     }
@@ -433,6 +425,24 @@ impl RomHeader {
     }
 }
 
+impl RomIdentity {
+    /// Derive the semantic identity from a parsed [`RomHeader`].
+    ///
+    /// Returns `None` when the header's game code is not a recognized Gen 4
+    /// Pokémon game.
+    pub fn from_header(header: &RomHeader) -> Option<RomIdentity> {
+        let game = header.detect_game()?;
+        Some(RomIdentity {
+            game_code: header.game_code.clone(),
+            game,
+            family: game.family(),
+            region: header.region().map(str::to_string),
+            language: header.detect_language(),
+            rom_version: header.rom_version,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,27 +478,22 @@ mod tests {
         vec![
             ("ADAE", Game::Diamond),
             ("ADAJ", Game::Diamond),
-            ("ADAP", Game::Diamond),
             ("ADAS", Game::Diamond),
             ("ADAK", Game::Diamond),
             ("APAE", Game::Pearl),
             ("APAJ", Game::Pearl),
-            ("APAP", Game::Pearl),
             ("APAS", Game::Pearl),
             ("APAK", Game::Pearl),
             ("CPUE", Game::Platinum),
             ("CPUJ", Game::Platinum),
-            ("CPUP", Game::Platinum),
             ("CPUS", Game::Platinum),
             ("CPUK", Game::Platinum),
             ("IPKE", Game::HeartGold),
             ("IPKJ", Game::HeartGold),
-            ("IPKP", Game::HeartGold),
             ("IPKS", Game::HeartGold),
             ("IPKK", Game::HeartGold),
             ("IPGE", Game::SoulSilver),
             ("IPGJ", Game::SoulSilver),
-            ("IPGP", Game::SoulSilver),
             ("IPGS", Game::SoulSilver),
             ("IPGK", Game::SoulSilver),
         ]
@@ -510,6 +515,40 @@ mod tests {
             'I' => Some("Italy"),
             _ => None,
         }
+    }
+
+    #[test]
+    fn romidentity_from_header_known_code() {
+        let mut header = header_with_code("CPUE".into());
+        header.rom_version = 3;
+
+        let id = RomIdentity::from_header(&header).unwrap();
+        assert_eq!(id.game_code, "CPUE");
+        assert_eq!(id.game, Game::Platinum);
+        assert_eq!(id.family, GameFamily::Platinum);
+        assert_eq!(id.region.as_deref(), Some("USA"));
+        assert_eq!(id.language, GameLanguage::English);
+        assert_eq!(id.rom_version, 3);
+    }
+
+    #[test]
+    fn romidentity_from_header_unknown_code_is_none() {
+        let header = header_with_code("ZZZZ".into());
+        assert!(RomIdentity::from_header(&header).is_none());
+    }
+
+    #[test]
+    fn romidentity_serializes_to_contract_json() {
+        let header = header_with_code("CPUE".into());
+        let id = RomIdentity::from_header(&header).unwrap();
+
+        let json = serde_json::to_value(&id).unwrap();
+        assert_eq!(json["game_code"], "CPUE");
+        assert_eq!(json["game"], "Platinum");
+        assert_eq!(json["family"], "Platinum");
+        assert_eq!(json["region"], "USA");
+        assert_eq!(json["language"], "English");
+        assert_eq!(json["rom_version"], 0);
     }
 
     #[test]

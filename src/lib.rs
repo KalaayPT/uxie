@@ -171,7 +171,7 @@ pub use event_file::{
 pub use evolution_data::{
     EVOLUTION_FILE_SIZE, EVOLUTIONS_PER_SPECIES, EvolutionData, EvolutionEntry, EvolutionMethod,
 };
-pub use game::{Game, GameFamily, GameLanguage};
+pub use game::{Game, GameFamily, GameLanguage, RomIdentity};
 pub use item_data::{BattlePocket, FieldPocket, ITEM_DATA_SIZE, ItemData, ItemPartyUseParam};
 pub use learnset_data::{LEARNSET_TERMINATOR, LearnsetData, LearnsetEntry};
 pub use map_header::{MapHeader, MapHeaderJson};

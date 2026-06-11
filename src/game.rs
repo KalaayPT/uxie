@@ -22,6 +22,21 @@ pub enum GameLanguage {
     Korean,
 }
 
+/// Semantic identity of a ROM, derived from its [`crate::rom_header::RomHeader`].
+///
+/// `RomHeader` carries the raw header bytes; `RomIdentity` is the resolved
+/// game / family / region / language that consumers (DSPRE, decomp tooling)
+/// actually need. This is the stable contract that crosses the FFI boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RomIdentity {
+    pub game_code: String,
+    pub game: Game,
+    pub family: GameFamily,
+    pub region: Option<String>,
+    pub language: GameLanguage,
+    pub rom_version: u8,
+}
+
 /// Game family grouping
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum GameFamily {
