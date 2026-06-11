@@ -322,16 +322,25 @@ impl SymbolTable {
             .entry(0)
             .or_default()
             .push("FALSE".to_string());
-        // std localids
-        table.register_symbol("LOCALID_CAMERA".to_string(), 0xF1);
-        table.register_symbol("LOCALID_FOLLOWER".to_string(), 0xF2);
-        table.register_symbol("LOCALID_PLAYER".to_string(), 0xFF);
-        table.register_symbol("obj_photo_subject".to_string(), 249);
-        table.register_symbol("obj_daycare_poke_1".to_string(), 250);
-        table.register_symbol("obj_daycare_poke_2".to_string(), 251);
-        table.register_symbol("obj_apricorn".to_string(), 252);
-        table.register_symbol("obj_partner_poke".to_string(), 253);
-        table.register_symbol("obj_player".to_string(), 255);
+        // builtins and overrides
+        table.register_symbols(&[
+            // global localids (for ApplyMovement etc)
+            ("LOCALID_CAMERA".to_string(), 0xF1),
+            ("LOCALID_FOLLOWER".to_string(), 0xF2),
+            ("LOCALID_PLAYER".to_string(), 0xFF),
+            ("obj_photo_subject".to_string(), 249),
+            ("obj_daycare_poke_1".to_string(), 250),
+            ("obj_daycare_poke_2".to_string(), 251),
+            ("obj_apricorn".to_string(), 252),
+            ("obj_partner_poke".to_string(), 253),
+            ("obj_player".to_string(), 255),
+            // menu options (like ShowYesNoMenu)
+            ("MENU_YES".to_string(), 0),
+            ("MENU_NO".to_string(), 1),
+            ("MENU_NOTHING_CHOSEN".to_string(), -1),
+            ("MENU_CANCEL".to_string(), -2),
+            ("MENU_HEADER".to_string(), -3),
+        ]);
         table
     }
 
@@ -2647,6 +2656,12 @@ impl SymbolTable {
             if should_insert {
                 self.family_value_to_name.insert(key, name);
             }
+        }
+    }
+
+    fn register_symbols(&mut self, symbols: &[(String, i64)]) {
+        for (name, value) in symbols {
+            self.register_symbol(name.clone(), *value);
         }
     }
 }
