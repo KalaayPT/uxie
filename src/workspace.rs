@@ -755,30 +755,26 @@ fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec
 
 /// Return the arm9 map-header table offset and header count for a DSPRE project.
 ///
-/// Offsets are per-language, sourced from DSPRE `RomInfo.cs SetHeaderTableOffset`.
-/// Falls back to the English offset for unknown language codes.
+/// Per-language arm9 map-header table offsets.
 fn map_header_table_offset(
     family: crate::game::GameFamily,
     language: crate::game::GameLanguage,
-    game_code: &str,
+    game: crate::game::Game,
 ) -> (u64, usize) {
-    use crate::game::{GameFamily, GameLanguage};
+    use crate::game::{Game, GameFamily, GameLanguage};
     let offset: u64 = match family {
         GameFamily::DP => match language {
-            GameLanguage::Japanese => {
-                // Diamond vs Pearl differ by 4 bytes
-                if game_code.starts_with("ADAJ") {
-                    0xF0D68
-                } else {
-                    0xF0D6C
-                }
-            }
+            GameLanguage::Japanese => match game {
+                Game::Diamond => 0xF0D68,
+                Game::Pearl => 0xF0D6C,
+                _ => 0xF0D6C,
+            },
             GameLanguage::English => 0xEEDBC,
             GameLanguage::French => 0xEEDFC,
             GameLanguage::German => 0xEEDCC,
             GameLanguage::Italian => 0xEED70,
             GameLanguage::Spanish => 0xEEE08,
-            GameLanguage::Korean => 0xEEDBC,
+            GameLanguage::Korean => 0xEA408,
         },
         GameFamily::Platinum => match language {
             GameLanguage::Japanese => 0xE56F0,
@@ -787,7 +783,7 @@ fn map_header_table_offset(
             GameLanguage::German => 0xE6074,
             GameLanguage::Italian => 0xE6038,
             GameLanguage::Spanish => 0xE60B0,
-            GameLanguage::Korean => 0xE601C,
+            GameLanguage::Korean => 0xE6DD4,
         },
         GameFamily::HGSS => match language {
             GameLanguage::Japanese => 0xF6390,
@@ -795,15 +791,16 @@ fn map_header_table_offset(
             GameLanguage::French => 0xF6BC4,
             GameLanguage::German => 0xF6B94,
             GameLanguage::Italian => 0xF6B58,
-            GameLanguage::Spanish => {
-                // HG (IPKx) and SS (IPGx) differ
-                if game_code.starts_with("IPK") {
-                    0xF6BC8
-                } else {
-                    0xF6BD0
-                }
-            }
-            GameLanguage::Korean => 0xF6BE0,
+            GameLanguage::Spanish => match game {
+                Game::HeartGold => 0xF6BC8,
+                Game::SoulSilver => 0xF6BD0,
+                _ => 0xF6BD0,
+            },
+            GameLanguage::Korean => match game {
+                Game::HeartGold => 0xF728C,
+                Game::SoulSilver => 0xF7284,
+                _ => 0xF7284,
+            },
         },
     };
     let count = match family {
@@ -957,7 +954,7 @@ impl Workspace {
         }
 
         let language = header.detect_language();
-        let (offset, count) = map_header_table_offset(family, language, &header.game_code);
+        let (offset, count) = map_header_table_offset(family, language, game);
 
         let game_strings = GameStrings::load_from_dspre(&path, family, language)?;
 
