@@ -1186,13 +1186,37 @@ impl Workspace {
 
     /// Returns the path to the command database for the given game family, if it exists in the current project.
     fn command_database_path(project_root: &Path, game_family: GameFamily) -> Option<PathBuf> {
-        let file_name = match game_family {
-            GameFamily::DP => "diamond_pearl_v2.json",
-            GameFamily::Platinum => "platinum_v2.json",
-            GameFamily::HGSS => "hgss_v2.json",
+        let (file_name, family_hint) = match game_family {
+            GameFamily::DP => ("diamond_pearl_v2.json", "diamond_pearl"),
+            GameFamily::Platinum => ("platinum_v2.json", "platinum"),
+            GameFamily::HGSS => ("hgss_v2.json", "hgss"),
         };
-        let path = project_root.join(".rotom/command_database").join(file_name);
-        if path.is_file() { Some(path) } else { None }
+        let database_dir = project_root.join(".rotom/command_database");
+        let path = database_dir.join(file_name);
+        if path.is_file() {
+            return Some(path);
+        }
+
+        let mut variants: Vec<PathBuf> = std::fs::read_dir(database_dir)
+            .ok()?
+            .filter_map(std::result::Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .extension()
+                        .is_some_and(|extension| extension == "json")
+                    && path
+                        .file_stem()
+                        .and_then(|stem| stem.to_str())
+                        .is_some_and(|stem| {
+                            let stem = stem.to_ascii_lowercase();
+                            stem.contains(family_hint) && stem.contains("_v2")
+                        })
+            })
+            .collect();
+        variants.sort();
+        variants.into_iter().next()
     }
 
     fn collect_cached_symbol_root_files(root: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -2380,6 +2404,35 @@ mod tests {
         assert_eq!(ws.project_type, ProjectType::Dspre);
         assert_eq!(ws.resolve_constant("VARS_END"), Some(16672));
         assert_eq!(ws.resolve_constant("FLAG_UNK_0x0001"), Some(1));
+    }
+
+    #[test]
+    fn test_open_dspre_uses_family_database_variant_as_var_flag_fallback() {
+        let dir = tempdir().unwrap();
+        let root = dir.path().join("generic_dspre_project");
+
+        fs::create_dir_all(root.join("arm9")).unwrap();
+        write_test_header_bin(&root.join("header.bin"), "POKEMON PL", "CPUE");
+        fs::write(root.join("arm9/arm9.bin"), vec![0_u8; 4]).unwrap();
+        fs::create_dir_all(root.join(".rotom/command_database")).unwrap();
+        fs::write(
+            root.join(".rotom/command_database/following_platinum_v2.json"),
+            r#"{
+                "vars": {
+                    "VAR_STORY": { "id": 16620 }
+                },
+                "flags": {
+                    "FLAG_FOLLOWING": { "id": 1 }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let ws = Workspace::open(&root).unwrap();
+
+        assert_eq!(ws.project_type, ProjectType::Dspre);
+        assert_eq!(ws.resolve_constant("VAR_STORY"), Some(16620));
+        assert_eq!(ws.resolve_constant("FLAG_FOLLOWING"), Some(1));
     }
 
     #[test]

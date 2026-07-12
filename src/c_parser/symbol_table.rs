@@ -59,7 +59,6 @@ pub enum ConstantFamily {
     TrainerType,
     Trainer,
     TrainerClass,
-    TrainerType,
     Sound,
     Variable,
     Flag,
@@ -69,10 +68,7 @@ pub enum ConstantFamily {
     LocalObject,
     ObjectGfx,
     Sprite,
-    MovementType,
-    MapHeader,
     Map,
-    BgEventDir,
     MapLocalVariable,
 }
 
