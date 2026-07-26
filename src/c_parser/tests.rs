@@ -453,42 +453,43 @@ metang_generators = {
         assert_eq!(table.resolve_constant("PLAYER_TRANSITION_SURFING"), Some(2));
     }
 
+    #[rustfmt::skip]
     proptest! {
-                    #[test]
-                    fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
-                        let dir = tempdir().unwrap();
-                        let generated_dir = dir.path().join("generated");
-                        std::fs::create_dir_all(&generated_dir).unwrap();
+        #[test]
+        fn prop_load_headers_from_dir_generated_mask_values_follow_bit_positions(entry_count in 1usize..=20) {
+            let dir = tempdir().unwrap();
+            let generated_dir = dir.path().join("generated");
+            std::fs::create_dir_all(&generated_dir).unwrap();
 
-                        std::fs::write(
-                            generated_dir.join("meson.build"),
-                            r"
+            std::fs::write(
+                generated_dir.join("meson.build"),
+                r"
 metang_generators = {
     'player_transitions': { 'type': 'mask', 'tag': 'PlayerTransition' },
 }
 ",
-                        )
-                        .unwrap();
+            )
+            .unwrap();
 
-                        let mut content = String::new();
-                        for i in 0..entry_count {
-                            use std::fmt::Write as _;
-                            writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
-                        }
-                        std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
-
-                        let mut table = SymbolTable::new();
-                        table.load_headers_from_dir(&generated_dir).unwrap();
-
-                        for i in 0..entry_count {
-                            let expected = 1_i64 << i;
-                            prop_assert_eq!(
-                                table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
-                                Some(expected)
-                            );
-                        }
-                    }
+            let mut content = String::new();
+            for i in 0..entry_count {
+                use std::fmt::Write as _;
+                writeln!(&mut content, "PLAYER_TRANSITION_{i}").unwrap();
             }
+            std::fs::write(generated_dir.join("player_transitions.txt"), content).unwrap();
+
+            let mut table = SymbolTable::new();
+            table.load_headers_from_dir(&generated_dir).unwrap();
+
+            for i in 0..entry_count {
+                let expected = 1_i64 << i;
+                prop_assert_eq!(
+                    table.resolve_constant(&format!("PLAYER_TRANSITION_{i}")),
+                    Some(expected)
+                );
+            }
+        }
+    }
 
     #[test]
     fn test_load_python_enum_str_propagates_assignment_eval_errors() {
@@ -572,7 +573,7 @@ metang_generators = {
         );
         assert_eq!(
             table.constant_family("MAP_ROUTE_30"),
-            Some(ConstantFamily::MapHeader)
+            Some(ConstantFamily::Map)
         );
         assert_eq!(table.constant_family("MAP_FOLLOWMODE_PREVENT"), None);
         assert_eq!(table.constant_family("MAP_TYPE_CITY_TOWN"), None);
@@ -581,11 +582,11 @@ metang_generators = {
         assert_eq!(table.constant_family("MAP_TILES_COUNT_X"), None);
         assert_eq!(
             table.constant_family("OBJ_EVENT_GFX_PLAYER"),
-            Some(ConstantFamily::ObjectGraphics)
+            Some(ConstantFamily::ObjectGfx)
         );
         assert_eq!(
             table.constant_family("SPRITE_PCWOMAN3"),
-            Some(ConstantFamily::ObjectGraphics)
+            Some(ConstantFamily::Sprite)
         );
         assert_eq!(
             table.constant_family("MOVEMENT_TYPE_LOOK_AROUND"),
@@ -670,7 +671,7 @@ metang_generators = {
             Some("MAP_HEADER_JUBILIFE_CITY".to_string())
         );
         assert_eq!(
-            table.resolve_name_in_family(23, ConstantFamily::MapHeader),
+            table.resolve_name_in_family(23, ConstantFamily::Map),
             Some("MAP_ROUTE_30".to_string())
         );
         assert_eq!(
@@ -678,7 +679,7 @@ metang_generators = {
             None
         );
         assert_eq!(
-            table.resolve_name_in_family(18, ConstantFamily::ObjectGraphics),
+            table.resolve_name_in_family(18, ConstantFamily::ObjectGfx),
             Some("OBJ_EVENT_GFX_PLAYER".to_string())
         );
         assert_eq!(
@@ -797,7 +798,7 @@ metang_generators = {
 
         assert_eq!(
             table.constant_family("LOCALID_PLAYER"),
-            Some(ConstantFamily::LocalObject)
+            Some(ConstantFamily::EventId)
         );
         assert_eq!(
             table.constant_family("obj_D47PC0102_wifisf"),

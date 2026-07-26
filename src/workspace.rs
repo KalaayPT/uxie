@@ -271,6 +271,45 @@ impl Workspace {
             .map(|e| e.text_archive_id)
     }
 
+    /// Returns the on-disk source path for a script file ID.
+    ///
+    /// Covers scripts enumerated from a directory (DSPRE `expanded/scripts`,
+    /// HGSS `files/fielddata/script`) and `scripts.order` names that matched a
+    /// source file in the order file's directory (decomp). Returns `None` for
+    /// IDs absent from the table or names with no matching source file.
+    pub fn script_source_path(&self, script_file_id: u16) -> Option<std::path::PathBuf> {
+        self.scripts
+            .get_path(usize::from(script_file_id))
+            .map(std::path::Path::to_path_buf)
+    }
+
+    /// Returns the project path that can define the global script range table.
+    ///
+    /// Platinum and HGSS decomps define the table in engine source. HGSS
+    /// DSPRE projects read it from ARM9; other supported ROMs use built-in
+    /// tables and therefore have no project-local input. A decomp path is
+    /// returned even when absent because creating it replaces the fallback table.
+    pub fn global_script_table_source_path(&self) -> Option<PathBuf> {
+        match (self.project_type, self.family) {
+            (ProjectType::Decomp, GameFamily::Platinum) => {
+                Some(self.project_path.join("src/script_manager.c"))
+            }
+            (ProjectType::Decomp, GameFamily::HGSS) => {
+                Some(self.project_path.join("src/fieldmap.c"))
+            }
+            (ProjectType::Dspre, GameFamily::HGSS) => {
+                let nested = self.project_path.join("arm9/arm9.bin");
+                let flat = self.project_path.join("arm9.bin");
+                Some(if nested.is_file() || !flat.is_file() {
+                    nested
+                } else {
+                    flat
+                })
+            }
+            _ => None,
+        }
+    }
+
     /// Resolve message text by archive ID and zero-based message index.
     ///
     /// Checks `message_cache` first (fast path), then lazily loads the archive
@@ -2449,6 +2488,32 @@ mod tests {
         assert_eq!(ws.project_type, ProjectType::Dspre);
         assert_eq!(ws.game, Game::Platinum);
         assert_eq!(ws.family, GameFamily::Platinum);
+    }
+
+    #[test]
+    fn global_script_table_source_path_matches_workspace_layout() {
+        let decomp = tempdir().unwrap();
+        fs::create_dir_all(decomp.path().join("include/constants")).unwrap();
+        fs::create_dir_all(decomp.path().join("src")).unwrap();
+        let script_manager = decomp.path().join("src/script_manager.c");
+        fs::write(&script_manager, "").unwrap();
+        let workspace = Workspace::new(decomp.path().to_path_buf(), Game::Platinum);
+        assert_eq!(
+            workspace.global_script_table_source_path(),
+            Some(script_manager)
+        );
+        fs::remove_file(decomp.path().join("src/script_manager.c")).unwrap();
+        assert_eq!(
+            workspace.global_script_table_source_path(),
+            Some(decomp.path().join("src/script_manager.c"))
+        );
+
+        let dspre = tempdir().unwrap();
+        fs::create_dir_all(dspre.path().join("arm9")).unwrap();
+        let arm9 = dspre.path().join("arm9/arm9.bin");
+        fs::write(&arm9, []).unwrap();
+        let workspace = Workspace::new(dspre.path().to_path_buf(), Game::HeartGold);
+        assert_eq!(workspace.global_script_table_source_path(), Some(arm9));
     }
 
     #[test]

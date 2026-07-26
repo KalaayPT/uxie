@@ -10,7 +10,7 @@
 
 use rustc_hash::FxHashMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Mapping between script names and their file IDs.
 ///
@@ -34,6 +34,16 @@ pub struct ScriptTable {
     pub(crate) names: Vec<String>,
     pub(crate) name_to_id: FxHashMap<String, usize>,
     pub(crate) sparse_names: FxHashMap<usize, String>,
+    /// Order file (scripts.order) used to populate the dense script-name table.
+    order_path: Option<PathBuf>,
+    /// On-disk source paths observed while loading, keyed by file ID.
+    ///
+    /// Populated by the directory-enumerating loaders
+    /// ([`load_dspre_script_dir`](Self::load_dspre_script_dir) and
+    /// [`load_hgss_script_dir`](Self::load_hgss_script_dir)) and by
+    /// [`load_order_file`](Self::load_order_file) for `scripts.order` names
+    /// that have a matching source file in the same directory.
+    pub(crate) paths: FxHashMap<usize, PathBuf>,
 }
 
 impl ScriptTable {
@@ -46,7 +56,10 @@ impl ScriptTable {
     ///
     /// Each line in the file becomes a script name, with its line number
     /// (0-indexed) as the file ID. Empty lines and lines starting with `#`
-    /// are skipped.
+    /// are skipped. Script sources are expected alongside the order file
+    /// (`<name>.s` / `<name>.rotom` in the same directory); the path of any
+    /// such file found is recorded for [`get_path`](Self::get_path). Having
+    /// both formats for one script is rejected as malformed project state.
     pub fn load_order_file(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
         let path = path.as_ref();
         let content = std::fs::read_to_string(path).map_err(|err| {
@@ -58,7 +71,40 @@ impl ScriptTable {
                 ),
             )
         })?;
-        self.load_order_str(&content)
+        let start = self.names.len();
+        self.load_order_str(&content)?;
+        self.order_path = Some(path.to_path_buf());
+
+        if let Some(dir) = path.parent() {
+            let found: Vec<(usize, PathBuf)> = self.names[start..]
+                .iter()
+                .enumerate()
+                .map(|(i, name)| {
+                    let native = dir.join(format!("{name}.rotom"));
+                    let legacy = dir.join(format!("{name}.s"));
+                    match (native.is_file(), legacy.is_file()) {
+                        (true, true) => Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "Multiple source files found for script '{name}': {} and {}",
+                                native.display(),
+                                legacy.display()
+                            ),
+                        )),
+                        (true, false) => Ok(Some((start + i, native))),
+                        (false, true) => Ok(Some((start + i, legacy))),
+                        (false, false) => Ok(None),
+                    }
+                })
+                .collect::<io::Result<Vec<_>>>()?
+                .into_iter()
+                .flatten()
+                .collect();
+            for (id, p) in found {
+                self.paths.insert(id, p);
+            }
+        }
+        Ok(())
     }
 
     /// Loads script names from a string containing `scripts.order` content.
@@ -80,10 +126,10 @@ impl ScriptTable {
 
     /// Loads HGSS script names from an ID-based script directory.
     ///
-    /// The expected filename format is `scr_seq_XXXX*.s`, where `XXXX` is the
-    /// script file ID in decimal. IDs are used directly as table indices.
+    /// The expected filename format is `scr_seq_XXXX*.(s|rotom)`, where `XXXX`
+    /// is the script file ID in decimal. IDs are used directly as table indices.
     pub fn load_hgss_script_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<()> {
-        let mut parsed = Vec::new();
+        let mut parsed: Vec<(usize, String, PathBuf)> = Vec::new();
         let dir = dir.as_ref();
 
         for entry in std::fs::read_dir(dir)? {
@@ -92,7 +138,12 @@ impl ScriptTable {
                 continue;
             }
 
-            let Some(file_name) = entry.file_name().to_str().map(str::to_string) else {
+            let path = entry.path();
+            let Some(file_name) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(str::to_string)
+            else {
                 continue;
             };
 
@@ -108,13 +159,24 @@ impl ScriptTable {
                     )
                 })?
             {
-                parsed.push((id, script_name));
+                parsed.push((id, script_name, path));
             }
         }
 
-        parsed.sort_by_key(|(id, _)| *id);
+        parsed.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.2.cmp(&right.2)));
+        if let Some(duplicate) = parsed.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Multiple source files found for script ID {}: {} and {}",
+                    duplicate[0].0,
+                    duplicate[0].2.display(),
+                    duplicate[1].2.display()
+                ),
+            ));
+        }
 
-        for (id, script_name) in parsed {
+        for (id, script_name, path) in parsed {
             if let Some(old_name) = self.sparse_names.get(&id) {
                 if old_name != &script_name {
                     self.name_to_id.remove(old_name);
@@ -131,6 +193,7 @@ impl ScriptTable {
                 }
             }
             self.name_to_id.insert(script_name, id);
+            self.paths.insert(id, path);
         }
 
         Ok(())
@@ -140,9 +203,10 @@ impl ScriptTable {
     ///
     /// DSPRE names each script file by its NARC index (`0213.script` /
     /// `0213.rotom`), so the stem is both the name and the ID.  Non-numeric
-    /// stems and non-`.script`/`.rotom` files are silently skipped.
+    /// stems and non-`.script`/`.rotom` files are silently skipped. Having
+    /// both formats for one script ID is rejected as malformed project state.
     pub fn load_dspre_script_dir(&mut self, dir: impl AsRef<Path>) -> std::io::Result<()> {
-        let mut parsed: Vec<(usize, String)> = Vec::new();
+        let mut parsed: Vec<(usize, String, PathBuf)> = Vec::new();
 
         for entry in std::fs::read_dir(dir.as_ref())? {
             let entry = entry?;
@@ -160,18 +224,30 @@ impl ScriptTable {
             let Ok(id) = stem.parse::<usize>() else {
                 continue;
             };
-            parsed.push((id, stem.to_string()));
+            parsed.push((id, stem.to_string(), path));
         }
 
-        parsed.sort_by_key(|(id, _)| *id);
+        parsed.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.2.cmp(&right.2)));
+        if let Some(duplicate) = parsed.windows(2).find(|pair| pair[0].0 == pair[1].0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "Multiple source files found for script ID {}: {} and {}",
+                    duplicate[0].0,
+                    duplicate[0].2.display(),
+                    duplicate[1].2.display()
+                ),
+            ));
+        }
 
-        for (id, name) in parsed {
+        for (id, name, path) in parsed {
             if let Some(old) = self.sparse_names.insert(id, name.clone()) {
                 if old != name {
                     self.name_to_id.remove(&old);
                 }
             }
             self.name_to_id.insert(name, id);
+            self.paths.insert(id, path);
         }
 
         Ok(())
@@ -194,6 +270,22 @@ impl ScriptTable {
         self.name_to_id.get(name).copied()
     }
 
+    /// Returns the on-disk source path for a given file ID, if one was
+    /// observed while loading the table.
+    ///
+    /// Covers directory-enumerated entries (DSPRE and HGSS loaders) and
+    /// `scripts.order` names that matched a source file in the order file's
+    /// directory. Returns `None` for IDs not in the table or names with no
+    /// matching source file.
+    pub fn get_path(&self, id: usize) -> Option<&Path> {
+        self.paths.get(&id).map(PathBuf::as_path)
+    }
+
+    /// Returns the `scripts.order` file used to load this table, if any.
+    pub fn order_path(&self) -> Option<&Path> {
+        self.order_path.as_deref()
+    }
+
     /// Returns all script names in order by file ID.
     pub fn get_all_names(&self) -> &[String] {
         &self.names
@@ -201,17 +293,16 @@ impl ScriptTable {
 }
 
 fn parse_hgss_script_filename(file_name: &str) -> Result<Option<(usize, String)>, String> {
-    if !file_name.ends_with(".s") {
-        return Ok(None);
-    }
-
     if !file_name.starts_with("scr_seq_") {
         return Ok(None);
     }
 
     let stem = file_name
         .strip_suffix(".s")
-        .ok_or_else(|| format!("missing '.s' extension in filename '{}'", file_name))?;
+        .or_else(|| file_name.strip_suffix(".rotom"));
+    let Some(stem) = stem else {
+        return Ok(None);
+    };
     let mut parts = stem.split('_');
 
     if parts.next() != Some("scr") || parts.next() != Some("seq") {
@@ -314,6 +405,79 @@ mod tests {
         let err = table.load_hgss_script_dir(dir.path()).unwrap_err();
         assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
         assert!(err.to_string().contains("invalid script id"));
+    }
+
+    #[test]
+    fn test_get_path_for_dir_enumerated_loaders() {
+        // HGSS loader rejects multiple source formats for one script ID.
+        let hgss = tempdir().unwrap();
+        fs::write(hgss.path().join("scr_seq_0003_D01R0101.s"), "").unwrap();
+        fs::write(hgss.path().join("scr_seq_0003_D01R0101.rotom"), "").unwrap();
+        let mut table = ScriptTable::new();
+        let error = table.load_hgss_script_dir(hgss.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("Multiple source files"));
+        fs::remove_file(hgss.path().join("scr_seq_0003_D01R0101.s")).unwrap();
+        let mut table = ScriptTable::new();
+        table.load_hgss_script_dir(hgss.path()).unwrap();
+        assert_eq!(
+            table.get_path(3),
+            Some(hgss.path().join("scr_seq_0003_D01R0101.rotom").as_path())
+        );
+        assert_eq!(table.get_path(4), None);
+
+        // DSPRE loader applies the same duplicate-source rule.
+        let dspre = tempdir().unwrap();
+        fs::write(dspre.path().join("0211.script"), "").unwrap();
+        fs::write(dspre.path().join("0211.rotom"), "").unwrap();
+        let mut table = ScriptTable::new();
+        let error = table.load_dspre_script_dir(dspre.path()).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("Multiple source files"));
+        fs::remove_file(dspre.path().join("0211.script")).unwrap();
+        let mut table = ScriptTable::new();
+        table.load_dspre_script_dir(dspre.path()).unwrap();
+        assert_eq!(
+            table.get_path(211),
+            Some(dspre.path().join("0211.rotom").as_path())
+        );
+    }
+
+    #[test]
+    fn test_get_path_for_order_file_reconstructs_source_path() {
+        // A `scripts.order` name resolves to the source file in the same dir.
+        let dir = tempdir().unwrap();
+        fs::write(
+            dir.path().join("scripts.order"),
+            "scripts_common\nscripts_jubilife_city\n",
+        )
+        .unwrap();
+        fs::write(dir.path().join("scripts_common.s"), "").unwrap();
+        fs::write(dir.path().join("scripts_common.rotom"), "").unwrap();
+        // scripts_jubilife_city has no source file on disk -> no path.
+
+        let mut table = ScriptTable::new();
+        let error = table
+            .load_order_file(dir.path().join("scripts.order"))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("Multiple source files"));
+        fs::remove_file(dir.path().join("scripts_common.s")).unwrap();
+
+        let mut table = ScriptTable::new();
+        table
+            .load_order_file(dir.path().join("scripts.order"))
+            .unwrap();
+
+        assert_eq!(
+            table.get_path(0),
+            Some(dir.path().join("scripts_common.rotom").as_path())
+        );
+        assert_eq!(table.get_path(1), None);
+        assert_eq!(
+            table.order_path(),
+            Some(dir.path().join("scripts.order").as_path())
+        );
     }
 
     fn parse_scripts_order_entries(path: &Path) -> std::io::Result<Vec<String>> {

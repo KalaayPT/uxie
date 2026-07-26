@@ -355,11 +355,7 @@ fn emit_object_event(
 
     Ok(ObjectEventJson {
         id: format!("OBJ_{}", obj.local_id),
-        graphics_id: family_symbol_or_number(
-            obj.graphics_id,
-            symbols,
-            ConstantFamily::ObjectGraphics,
-        ),
+        graphics_id: family_symbol_or_number(obj.graphics_id, symbols, ConstantFamily::ObjectGfx),
         movement_type: family_symbol_or_number(
             obj.movement_type,
             symbols,
@@ -385,7 +381,7 @@ fn emit_object_event(
 }
 
 fn emit_platinum_script(script: u16, symbols: &SymbolTable) -> (Value, Option<u8>) {
-    for (base, double_battle_id) in [(5000u16, Some(2)), (3000u16, None)] {
+    for (base, double_battle_id) in [(5000u16, Some(2)), (3000u16, Some(1))] {
         let Some(offset) = script.checked_sub(base) else {
             continue;
         };

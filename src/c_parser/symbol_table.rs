@@ -88,19 +88,24 @@ impl ConstantFamily {
             && !name.starts_with("TRAINER_SCORE_")
         {
             Some(Self::Trainer)
-        } else if name.starts_with("MAP_HEADER_")
-            || (name.starts_with("MAP_")
-                && !name.starts_with("MAP_FOLLOWMODE_")
-                && !name.starts_with("MAP_REGION_")
-                && !name.starts_with("MAP_TILES_")
-                && !name.starts_with("MAP_TYPE_")
-                && !name.starts_with("MAP_WEATHER_"))
-        {
+        } else if name.starts_with("MAP_HEADER_") {
             Some(Self::MapHeader)
+        } else if name.starts_with("MAP_")
+            && !name.starts_with("MAP_FOLLOWMODE_")
+            && !name.starts_with("MAP_REGION_")
+            && !name.starts_with("MAP_TILES_")
+            && !name.starts_with("MAP_TYPE_")
+            && !name.starts_with("MAP_WEATHER_")
+        {
+            Some(Self::Map)
         } else if name.starts_with("LOCALID_") {
             Some(Self::EventId)
-        } else if name.starts_with("OBJ_EVENT_GFX_") || name.starts_with("SPRITE_") {
-            Some(Self::ObjectGraphics)
+        } else if name.starts_with("obj_") {
+            Some(Self::LocalObject)
+        } else if name.starts_with("OBJ_EVENT_GFX_") {
+            Some(Self::ObjectGfx)
+        } else if name.starts_with("SPRITE_") {
+            Some(Self::Sprite)
         } else if name.starts_with("MOVEMENT_TYPE_") {
             Some(Self::MovementType)
         } else if name.starts_with("BG_EVENT_TYPE_") {

@@ -5,7 +5,7 @@
 use crate::game::RomIdentity;
 use crate::rom_header::RomHeader;
 use std::cell::RefCell;
-use std::ffi::{c_char, c_int, CStr, CString};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::path::PathBuf;
 
 pub const UXIE_OK: c_int = 0;
@@ -132,7 +132,10 @@ mod tests {
         let err = uxie_last_error();
         assert!(!err.is_null());
         let msg = unsafe { CStr::from_ptr(err) }.to_str().unwrap();
-        assert!(msg.contains("ZZZZ"), "error should mention the bad code: {msg}");
+        assert!(
+            msg.contains("ZZZZ"),
+            "error should mention the bad code: {msg}"
+        );
     }
 
     #[test]
@@ -182,7 +185,9 @@ pub unsafe extern "C" fn uxie_identify_rom(path: *const c_char) -> *mut c_char {
     match serde_json::to_string(&identity) {
         Ok(json) => string_to_c(json),
         Err(e) => {
-            set_last_error(format!("uxie_identify_rom: failed to serialize identity: {e}"));
+            set_last_error(format!(
+                "uxie_identify_rom: failed to serialize identity: {e}"
+            ));
             std::ptr::null_mut()
         }
     }

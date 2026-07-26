@@ -130,6 +130,63 @@ pub enum GlobalScriptRange {
 }
 
 impl GlobalScriptRange {
+    /// Returns the stable PascalCase module name used in script source.
+    ///
+    /// This is intentionally separate from [`Self::display_name`], which is
+    /// human-readable UI text. Trainer ranges preserve their event-domain
+    /// `double_battle_id` payload while exposing the canonical
+    /// `SingleBattles` / `DoubleBattles` modules.
+    pub fn module_name(self) -> String {
+        match self {
+            Self::ScratchOffCards => "ScratchOffCards".into(),
+            Self::BattleFrontierRecords => "BattleFrontierRecords".into(),
+            Self::PokemonCenterDailyTrainers => "PokemonCenterDailyTrainers".into(),
+            Self::CounterpartTalk => "CounterpartTalk".into(),
+            Self::MysteryGiftDeliveryman => "MysteryGiftDeliveryman".into(),
+            Self::MysteryGift => "MysteryGift".into(),
+            Self::TvReporterInterviews => "TvReporterInterviews".into(),
+            Self::TvBroadcast => "TvBroadcast".into(),
+            Self::FieldMoves => "FieldMoves".into(),
+            Self::PokedexRatings => "PokedexRatings".into(),
+            Self::CommonStrings9900 => "CommonStrings9900".into(),
+            Self::Contests => "Contests".into(),
+            Self::FollowerPartners => "FollowerPartners".into(),
+            Self::InitNewGame => "InitNewGame".into(),
+            Self::DayCareCommon => "DayCareCommon".into(),
+            Self::PoffinCommon => "PoffinCommon".into(),
+            Self::GroupConnection => "GroupConnection".into(),
+            Self::PokemonCenterB1fAttendants => "PokemonCenterB1fAttendants".into(),
+            Self::CommunicationClub => "CommunicationClub".into(),
+            Self::PokemonCenter2fAttendants => "PokemonCenter2fAttendants".into(),
+            Self::PokeRadar => "PokeRadar".into(),
+            Self::VsSeeker => "VsSeeker".into(),
+            Self::RecordChatotCry => "RecordChatotCry".into(),
+            Self::SafariGame => "SafariGame".into(),
+            Self::HiddenItems => "HiddenItems".into(),
+            Self::VisibleItems => "VisibleItems".into(),
+            Self::Trainer {
+                double_battle_id: 1,
+            } => "SingleBattles".into(),
+            Self::Trainer {
+                double_battle_id: 2,
+            } => "DoubleBattles".into(),
+            Self::Trainer { double_battle_id } => format!("Trainer{double_battle_id}"),
+            Self::BerryTreeInteractions => "BerryTreeInteractions".into(),
+            Self::BgEvents => "BgEvents".into(),
+            Self::CommonScripts => "CommonScripts".into(),
+            Self::FrontierMoveTutor => "FrontierMoveTutor".into(),
+            Self::BugContest => "BugContest".into(),
+            Self::TrainerHouse => "TrainerHouse".into(),
+            Self::Pokeathlon => "Pokeathlon".into(),
+            Self::WiFiReception => "WiFiReception".into(),
+            Self::Colosseum => "Colosseum".into(),
+            Self::CommunicationReception => "CommunicationReception".into(),
+            Self::ApricornTree => "ApricornTree".into(),
+            Self::Bookshelves => "Bookshelves".into(),
+            Self::ScriptBank(min_script_id) => format!("ScriptBank{min_script_id}"),
+        }
+    }
+
     pub fn display_name(self) -> String {
         match self {
             Self::ScratchOffCards => "Scratch-Off Cards".into(),
@@ -922,6 +979,27 @@ impl GlobalScriptTable {
             .iter()
             .find(|e| e.script_file_id == script_file_id)
     }
+
+    /// Returns every global range backed by the given script file.
+    ///
+    /// Most files belong to one range, but trainer script files are shared by
+    /// the single- and double-battle ranges. Callers resolving filename-module
+    /// aliases must therefore handle multiple entries explicitly.
+    pub fn entries_for_script_file_id(
+        &self,
+        script_file_id: u16,
+    ) -> impl Iterator<Item = &GlobalScriptEntry> {
+        self.entries
+            .iter()
+            .filter(move |entry| entry.script_file_id == script_file_id)
+    }
+
+    /// Finds the entry with the given canonical source module name.
+    pub fn find_by_module_name(&self, module: &str) -> Option<&GlobalScriptEntry> {
+        self.entries
+            .iter()
+            .find(|entry| entry.range.module_name() == module)
+    }
 }
 
 #[cfg(test)]
@@ -1010,6 +1088,51 @@ mod tests {
     }
 
     #[test]
+    fn test_module_names_are_stable_source_identifiers() {
+        assert_eq!(
+            GlobalScriptRange::CommonScripts.module_name(),
+            "CommonScripts"
+        );
+        assert_eq!(
+            GlobalScriptRange::Trainer {
+                double_battle_id: 1
+            }
+            .module_name(),
+            "SingleBattles"
+        );
+        assert_eq!(
+            GlobalScriptRange::Trainer {
+                double_battle_id: 2
+            }
+            .module_name(),
+            "DoubleBattles"
+        );
+        assert_eq!(
+            GlobalScriptRange::ScriptBank(10300).module_name(),
+            "ScriptBank10300"
+        );
+    }
+
+    #[test]
+    fn test_module_and_shared_file_lookup() {
+        let table = GlobalScriptTable::platinum_western_hardcoded();
+
+        let single = table.find_by_module_name("SingleBattles").unwrap();
+        let double = table.find_by_module_name("DoubleBattles").unwrap();
+        assert_eq!(single.min_script_id, 3000);
+        assert_eq!(double.min_script_id, 5000);
+        assert_eq!(single.script_file_id, 1114);
+        assert_eq!(double.script_file_id, 1114);
+
+        let mins: Vec<u16> = table
+            .entries_for_script_file_id(1114)
+            .map(|entry| entry.min_script_id)
+            .collect();
+        assert_eq!(mins, vec![5000, 3000]);
+        assert!(table.find_by_module_name("scripts_battles").is_none());
+    }
+
+    #[test]
     fn test_entry_read() {
         let data: [u8; 6] = [0xD0, 0x07, 0xD3, 0x00, 0xD5, 0x00];
         let mut cursor = Cursor::new(data);
@@ -1028,9 +1151,9 @@ mod tests {
             .unwrap();
 
         let min_script_ids = [
-            10500, 10400, 10350, 10300, 10250, 10200, 10175, 10150, 10100, 10000, 9950, 9900,
-            9850, 9800, 9700, 9600, 9500, 9400, 9300, 9200, 9100, 9000, 8970, 8950, 8900, 5000,
-            3000, 2800, 2500, 2000,
+            10500, 10400, 10350, 10300, 10250, 10200, 10175, 10150, 10100, 10000, 9950, 9900, 9850,
+            9800, 9700, 9600, 9500, 9400, 9300, 9200, 9100, 9000, 8970, 8950, 8900, 5000, 3000,
+            2800, 2500, 2000,
         ];
 
         for (index, min_script_id) in min_script_ids.into_iter().enumerate() {
@@ -1057,7 +1180,10 @@ mod tests {
                 double_battle_id: 1
             }
         );
-        assert_eq!(table.lookup(2000).unwrap().range, GlobalScriptRange::CommonScripts);
+        assert_eq!(
+            table.lookup(2000).unwrap().range,
+            GlobalScriptRange::CommonScripts
+        );
     }
 
     #[test]

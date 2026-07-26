@@ -435,11 +435,7 @@ fn emit_hgss_bg(bg: &BgEvent, _symbols: &SymbolTable) -> HgssBgEventJson {
 fn emit_hgss_object(obj: &ObjectEvent, symbols: &SymbolTable) -> HgssObjectEventJson {
     HgssObjectEventJson {
         id: Value::from(obj.local_id),
-        sprite_id: family_symbol_or_number(
-            obj.graphics_id,
-            symbols,
-            ConstantFamily::ObjectGraphics,
-        ),
+        sprite_id: family_symbol_or_number(obj.graphics_id, symbols, ConstantFamily::Sprite),
         movement: Value::from(obj.movement_type),
         event_type: Value::from(obj.trainer_type),
         event_flag: family_symbol_or_number(obj.hidden_flag, symbols, ConstantFamily::Flag),
@@ -460,7 +456,7 @@ fn emit_hgss_warp(warp: &WarpEvent, symbols: &SymbolTable) -> HgssWarpEventJson 
     HgssWarpEventJson {
         x: Value::from(warp.x),
         z: Value::from(warp.z),
-        header: family_symbol_or_number(warp.dest_header_id, symbols, ConstantFamily::MapHeader),
+        header: family_symbol_or_number(warp.dest_header_id, symbols, ConstantFamily::Map),
         anchor: Value::from(warp.dest_warp_id),
         y: Value::from(warp.height),
     }

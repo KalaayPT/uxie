@@ -434,7 +434,7 @@ mod event_file_tests {
             emitted.object_events[0].script,
             serde_json::json!("TRAINER_RIVAL_1")
         );
-        assert_eq!(emitted.object_events[0].double_battle_id, None);
+        assert_eq!(emitted.object_events[0].double_battle_id, Some(1));
         assert_eq!(
             emitted.object_events[1].script,
             serde_json::json!("TRAINER_RIVAL_1")
