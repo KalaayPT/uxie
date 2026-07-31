@@ -12,7 +12,7 @@ use crate::map_header::{
 };
 use std::fs::File;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock};
 
 /// Trait for accessing ROM data regardless of source format
 ///
@@ -80,8 +80,9 @@ pub struct Arm9Provider {
     header_table_offset: u64,
     header_count: usize,
     game_family: GameFamily,
-    headers_cache: OnceLock<Arc<Vec<MapHeader>>>,
-    headers_init_lock: Mutex<()>,
+    /// Parsed header table, memoized on first use. Failures are cached too so a
+    /// project whose table cannot be parsed is not re-parsed on every lookup.
+    headers_cache: OnceLock<std::result::Result<Arc<Vec<MapHeader>>, String>>,
 }
 
 impl Arm9Provider {
@@ -105,7 +106,6 @@ impl Arm9Provider {
             header_count,
             game_family,
             headers_cache: OnceLock::new(),
-            headers_init_lock: Mutex::new(()),
         }
     }
 
@@ -127,23 +127,14 @@ impl Arm9Provider {
     }
 
     fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
-        if let Some(headers) = self.headers_cache.get() {
-            return Ok(headers.clone());
-        }
-
-        let init_guard = self
-            .headers_init_lock
-            .lock()
-            .map_err(|_| UxieError::invalid_format("Arm9 header init lock poisoned"))?;
-        if let Some(headers) = self.headers_cache.get() {
-            return Ok(headers.clone());
-        }
-
-        let parsed = Arc::new(self.parse_all_headers()?);
-        let _ = self.headers_cache.set(parsed.clone());
-        drop(init_guard);
-
-        Ok(parsed)
+        self.headers_cache
+            .get_or_init(|| {
+                self.parse_all_headers()
+                    .map(Arc::new)
+                    .map_err(|err| err.to_string())
+            })
+            .clone()
+            .map_err(UxieError::invalid_format)
     }
 }
 
@@ -201,8 +192,10 @@ pub struct DecompProvider {
     pub root: PathBuf,
     pub symbols: crate::c_parser::SymbolTable,
     pub family: GameFamily,
-    headers_cache: OnceLock<Arc<Vec<MapHeader>>>,
-    headers_init_lock: Mutex<()>,
+    /// Parsed header table, memoized on first use. A decomp whose headers
+    /// reference symbols the project does not define fails every time, so the
+    /// failure is cached as well; otherwise every lookup re-parses the file.
+    headers_cache: OnceLock<std::result::Result<Arc<Vec<MapHeader>>, String>>,
 }
 
 impl DecompProvider {
@@ -222,7 +215,6 @@ impl DecompProvider {
             symbols,
             family,
             headers_cache: OnceLock::new(),
-            headers_init_lock: Mutex::new(()),
         }
     }
 
@@ -265,33 +257,26 @@ impl DecompProvider {
     }
 
     fn count_headers(&self) -> Result<usize> {
-        if let Some(headers) = self.headers_cache.get() {
+        if let Some(Ok(headers)) = self.headers_cache.get() {
             return Ok(headers.len());
         }
 
+        // The table can still be counted when a field failed to resolve: the
+        // entries parse fine, only the typed conversion does not.
         let path = self.map_headers_path();
         let content = std::fs::read_to_string(path)?;
         Ok(crate::map_header::parse_map_headers_from_c(&content).len())
     }
 
     fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
-        if let Some(headers) = self.headers_cache.get() {
-            return Ok(headers.clone());
-        }
-
-        let init_guard = self
-            .headers_init_lock
-            .lock()
-            .map_err(|_| UxieError::invalid_format("Decomp header init lock poisoned"))?;
-        if let Some(headers) = self.headers_cache.get() {
-            return Ok(headers.clone());
-        }
-
-        let parsed = Arc::new(self.parse_all_headers()?);
-        let _ = self.headers_cache.set(parsed.clone());
-        drop(init_guard);
-
-        Ok(parsed)
+        self.headers_cache
+            .get_or_init(|| {
+                self.parse_all_headers()
+                    .map(Arc::new)
+                    .map_err(|err| err.to_string())
+            })
+            .clone()
+            .map_err(UxieError::invalid_format)
     }
 }
 
