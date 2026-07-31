@@ -15,6 +15,11 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+/// `#define ENCDATA_ROUTE_29   ENCDATA(_00000001)` -> name and member index.
+static RE_ENCDATA_ENTRY: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+    regex::Regex::new(r"#define\s+(ENCDATA_[A-Za-z0-9_]+)\s+ENCDATA\(\s*_(\d+)\s*\)").unwrap()
+});
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectType {
     /// ds-rom project (config.yaml or header.bin, arm9.bin).
@@ -1433,6 +1438,60 @@ impl Workspace {
             }
         }
 
+        // 8. Platinum NARC index constants used as map header field values. The
+        // decomp build generates a `.naix` header from each `.order` list, but
+        // that artifact is not checked in, so read the list directly: line N
+        // names NARC member N. Without these, `area_data_*`, `events_*`,
+        // `map_matrix_*` and `encounters_*` cannot be resolved and the whole
+        // header table fails to parse.
+        let narc_index_lists = [
+            root.join("res/field/area_data/area_data.order"),
+            root.join("res/field/events/zone_event.order"),
+            root.join("res/field/matrices/map_matrices.order"),
+            root.join("res/field/encounters/encounters.order"),
+        ];
+        for list in narc_index_lists {
+            if list.exists() {
+                symbols.load_list_file(list)?;
+            }
+        }
+
+        // 9. HGSS NARC index constants. HGSS has no `.order` lists; each
+        // archive is a directory of numbered members that `nitroarc` packs in
+        // byte order. See `load_narc_member_constants` for why the index comes
+        // from the member name instead of its position.
+        let hgss_narc_dirs = [
+            ("zone_event", root.join("files/fielddata/eventdata/zone_event"), "json"),
+            ("map_matrix", root.join("files/fielddata/mapmatrix/map_matrix"), "bin"),
+            ("scr_seq", root.join("files/fielddata/script/scr_seq"), "s"),
+            ("msg", root.join("files/msgdata/msg"), "gmm"),
+        ];
+        for (archive, dir, source_ext) in hgss_narc_dirs {
+            Self::load_narc_member_constants(symbols, &dir, archive, source_ext)?;
+        }
+
+        // 10. Constants declared alongside the map header table itself:
+        // `ENCOUNTERS_NONE` in `map_header.h`, the `MapLabelWindowID` enum
+        // inside the table's own header, and the HGSS `ENCDATA_*` table.
+        let map_header_defs = [
+            root.join("include/map_header.h"),
+            root.join("include/encounter_tables_narc.h"),
+            root.join("include/data/map_headers.h"),
+            root.join("src/data/map_headers.h"),
+        ];
+        for path in map_header_defs {
+            if path.exists() {
+                symbols.load_header(path)?;
+            }
+        }
+
+        // 11. HGSS wild-encounter banks. `ENCDATA_<map>` is defined as
+        // `ENCDATA(_NNNNNNNN)`, a token paste onto the encounter archive's
+        // member symbol. That archive is built by splitting one JSON, so it has
+        // no member files to enumerate and the pasted suffix is the only
+        // manifest — it is the member index.
+        Self::load_encdata_constants(symbols, &root.join("include/encounter_tables_narc.h"))?;
+
         // NOTE: We intentionally do NOT load res/field/events or
         // build/res/field/events headers here. Those contain per-map
         // LOCALID_* definitions that conflict across maps. Each script should
@@ -1441,6 +1500,84 @@ impl Workspace {
 
         if let Some(command_database) = Self::command_database_path(root, family) {
             symbols.load_database_var_flag_constants(command_database)?;
+        }
+
+        Ok(())
+    }
+
+    /// Define the `NARC_<archive>_<member>_bin` constants that the decomp build
+    /// would generate into `<archive>.naix`.
+    ///
+    /// An HGSS archive is a directory of numbered source files that the build
+    /// compiles to `.bin` members; `nitroarc` then packs them in byte order and
+    /// emits one define per member holding its position.
+    ///
+    /// The index is taken from the number in the member name rather than from
+    /// its position in the directory, because some members are produced by the
+    /// build and are absent from a source checkout — `msg_0729.gmm` is
+    /// generated from `trainers.json` — and counting positions would shift
+    /// every later member. The two agree wherever the archive is complete.
+    fn load_narc_member_constants(
+        symbols: &mut SymbolTable,
+        dir: &Path,
+        archive: &str,
+        source_ext: &str,
+    ) -> std::io::Result<()> {
+        if !dir.is_dir() {
+            return Ok(());
+        }
+
+        for entry in std::fs::read_dir(dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some(source_ext) {
+                continue;
+            }
+            let Some(member) = path.file_stem().and_then(|stem| stem.to_str()) else {
+                continue;
+            };
+            if let Some(index) = Self::narc_member_index(member) {
+                symbols.insert_define(format!("NARC_{archive}_{member}_bin"), index);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// The archive index encoded in a NARC member name: its first run of three
+    /// or more digits (`scr_seq_0139_EVERYWHERE` -> 139, `000_DUMMY` -> 0).
+    fn narc_member_index(member: &str) -> Option<i64> {
+        let mut rest = member;
+        loop {
+            let start = rest.find(|c: char| c.is_ascii_digit())?;
+            let digits = &rest[start..];
+            let end = digits
+                .find(|c: char| !c.is_ascii_digit())
+                .unwrap_or(digits.len());
+            if end >= 3 {
+                return digits[..end].parse().ok();
+            }
+            rest = &digits[end..];
+        }
+    }
+
+    /// Define `ENCDATA_<map>` wild-encounter bank constants from HGSS's
+    /// `encounter_tables_narc.h`.
+    ///
+    /// Each entry reads `#define ENCDATA_<map> ENCDATA(_NNNNNNNN)`, where the
+    /// suffix is the encounter archive member index. Resolving it through the
+    /// `ENCDATA(suff)` macro would need `##` token pasting plus a member list
+    /// the checkout does not contain, so read the index straight off the
+    /// invocation.
+    fn load_encdata_constants(symbols: &mut SymbolTable, header: &Path) -> std::io::Result<()> {
+        if !header.is_file() {
+            return Ok(());
+        }
+
+        let content = std::fs::read_to_string(header)?;
+        for caps in RE_ENCDATA_ENTRY.captures_iter(&content) {
+            if let Ok(index) = caps[2].parse::<i64>() {
+                symbols.insert_define(caps[1].to_string(), index);
+            }
         }
 
         Ok(())
