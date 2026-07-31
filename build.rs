@@ -65,7 +65,8 @@ fn main() {
         });
     }
 
-    copy_dir_recursive(&nitroarc_src_dir, &nitroarc_work_dir).unwrap_or_else(|err| {
+    // Skip `bin`: it is make's output dir, not source (see copy_dir_recursive).
+    copy_dir_recursive(&nitroarc_src_dir, &nitroarc_work_dir, &["bin"]).unwrap_or_else(|err| {
         panic!(
             "failed to copy nitroarc sources from {} to {}: {err}",
             nitroarc_src_dir.display(),
@@ -132,17 +133,28 @@ fn main() {
     stage_runtime_artifacts(&out_dir, &nitroarc_shared_lib);
 }
 
-fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
+/// Copy `src` into `dst`, skipping top-level entries named in `skip`.
+///
+/// `skip` exists for `nitroarc/bin`: that is make's output directory, and a
+/// local checkout can still hold objects from an earlier build (including
+/// MinGW COFF ones). Copying them in makes `make` link the stale output
+/// instead of rebuilding. Published crates never ship it; see `include` in
+/// `Cargo.toml`.
+fn copy_dir_recursive(src: &Path, dst: &Path, skip: &[&str]) -> io::Result<()> {
     fs::create_dir_all(dst)?;
 
     for entry in fs::read_dir(src)? {
         let entry = entry?;
+        if skip.iter().any(|name| entry.file_name() == *name) {
+            continue;
+        }
+
         let file_type = entry.file_type()?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
 
         if file_type.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
+            copy_dir_recursive(&src_path, &dst_path, &[])?;
         } else if file_type.is_file() {
             fs::copy(&src_path, &dst_path)?;
         } else if file_type.is_symlink() {
