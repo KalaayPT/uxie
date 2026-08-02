@@ -1150,7 +1150,8 @@ impl Workspace {
                 GameFamily::HGSS => "hgss",
             }
         ));
-        let input_files = Self::collect_cached_symbol_inputs(project_root, include_roots)?;
+        let input_files =
+            Self::collect_cached_symbol_inputs(project_root, include_roots, game_family)?;
         let command_database = Self::command_database_path(project_root, game_family);
         let mut cache_input_files = input_files.clone();
         if let Some(command_database) = &command_database {
@@ -1161,7 +1162,10 @@ impl Workspace {
         if cache_path.is_file() {
             match ConstantCache::load(&cache_path) {
                 Ok(cache) if cache.is_current(project_root, game_family, &cache_input_files)? => {
-                    return Ok((Arc::new(SymbolTable::from_snapshot(&cache.snapshot)), false));
+                    return Ok((
+                        Arc::new(SymbolTable::from_snapshot(&cache.snapshot, project_root)),
+                        false,
+                    ));
                 }
                 Ok(_) => {}
                 Err(err) if err.kind() == std::io::ErrorKind::InvalidData => {}
@@ -1195,6 +1199,7 @@ impl Workspace {
     fn collect_cached_symbol_inputs(
         project_root: &Path,
         include_roots: &[PathBuf],
+        game_family: GameFamily,
     ) -> std::io::Result<Vec<PathBuf>> {
         let mut inputs = BTreeSet::new();
         for root in [
@@ -1225,7 +1230,66 @@ impl Workspace {
                 inputs.insert(path);
             }
         }
+        inputs.extend(Self::collect_global_macro_includes(
+            project_root,
+            include_roots,
+            game_family,
+        ));
         Ok(inputs.into_iter().collect())
+    }
+
+    /// The decomp global macro include plus every `.inc` it reaches on disk.
+    ///
+    /// Every field script includes these, so they are loaded into the shared
+    /// symbol table instead of being re-resolved per script. Collecting them
+    /// here is what keeps edits to them invalidating the constant cache, since
+    /// per-script tables no longer record them as dependencies.
+    ///
+    /// Only `.inc` includes are followed: headers and list files reachable from
+    /// them are already collected by extension.
+    fn collect_global_macro_includes(
+        project_root: &Path,
+        include_roots: &[PathBuf],
+        game_family: GameFamily,
+    ) -> BTreeSet<PathBuf> {
+        let Some(relative) = game_family.decomp_global_include() else {
+            return BTreeSet::new();
+        };
+
+        let mut include_dirs = vec![project_root.to_path_buf()];
+        include_dirs.extend(include_roots.iter().cloned());
+        let Some(entry) =
+            SymbolTable::resolve_include_path(project_root, &include_dirs, relative)
+        else {
+            return BTreeSet::new();
+        };
+
+        let sources = SourceManager::new();
+        let mut found = BTreeSet::new();
+        let mut queue = vec![entry];
+        while let Some(path) = queue.pop() {
+            let Ok(canonical) = sources.canonicalize_strict(&path) else {
+                continue;
+            };
+            if !found.insert(canonical.clone()) {
+                continue;
+            }
+            let Ok(parsed) = sources.get_or_parse(&canonical) else {
+                continue;
+            };
+            let parent_dir = canonical.parent().unwrap_or(project_root);
+            for include in &parsed.includes {
+                if include.is_system || !include.path.ends_with(".inc") {
+                    continue;
+                }
+                if let Some(next) =
+                    SymbolTable::resolve_include_path(parent_dir, &include_dirs, &include.path)
+                {
+                    queue.push(next);
+                }
+            }
+        }
+        found
     }
 
     /// Returns the path to the command database for the given game family, if it exists in the current project.

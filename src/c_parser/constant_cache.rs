@@ -8,7 +8,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use xxhash_rust::xxh3::xxh3_64;
 
-pub const CONSTANT_CACHE_VERSION: u32 = 7;
+pub const CONSTANT_CACHE_VERSION: u32 = 8;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Encode, Decode, PartialEq, Eq)]
 pub struct ConstantCache {
@@ -28,6 +28,11 @@ pub struct SymbolSnapshot {
     pub symbol_to_tags: HashMap<String, HashSet<SymbolTag>>,
     pub symbol_to_family: HashMap<String, ConstantFamily>,
     pub family_value_to_name: HashMap<(ConstantFamily, i64), String>,
+    /// Project-relative paths whose symbols this snapshot already contains.
+    ///
+    /// Restored into `SymbolTable::loaded_files` so child tables can skip
+    /// include trees the snapshot covers instead of re-parsing them.
+    pub loaded_files: Vec<String>,
 }
 
 impl ConstantCache {
@@ -43,12 +48,21 @@ impl ConstantCache {
             file_hashes.insert(relative, xxh3_64(&std::fs::read(path)?));
         }
 
+        let mut snapshot = symbols.to_snapshot();
+        // Store project-relative so the cache survives the project moving.
+        // Paths outside the root (rare) stay absolute.
+        for path in &mut snapshot.loaded_files {
+            if let Ok(relative) = relative_cache_path(project_root, Path::new(&path)) {
+                *path = relative;
+            }
+        }
+
         Ok(Self {
             version: CONSTANT_CACHE_VERSION,
             uxie_version: env!("CARGO_PKG_VERSION").to_string(),
             game_family: game_family_key(game_family).to_string(),
             file_hashes,
-            snapshot: symbols.to_snapshot(),
+            snapshot,
         })
     }
 
@@ -154,7 +168,7 @@ mod tests {
         symbols.resolve_all();
 
         let snapshot = symbols.to_snapshot();
-        let restored = SymbolTable::from_snapshot(&snapshot);
+        let restored = SymbolTable::from_snapshot(&snapshot, dir.path());
 
         assert_eq!(restored.resolve_constant("SPECIES_BULBASAUR"), Some(1));
         assert_eq!(restored.resolve_constant("OTHER"), Some(1));
@@ -213,11 +227,13 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(
-            SymbolTable::from_snapshot(&loaded.snapshot).resolve_constant("SPECIES_BULBASAUR"),
+            SymbolTable::from_snapshot(&loaded.snapshot, project_root)
+                .resolve_constant("SPECIES_BULBASAUR"),
             Some(1)
         );
         assert_eq!(
-            SymbolTable::from_snapshot(&loaded.snapshot).constant_family("SPECIES_BULBASAUR"),
+            SymbolTable::from_snapshot(&loaded.snapshot, project_root)
+                .constant_family("SPECIES_BULBASAUR"),
             Some(ConstantFamily::Species)
         );
     }
@@ -326,19 +342,19 @@ mod tests {
             )]),
             symbol_to_family: HashMap::from([("VALUE".to_string(), ConstantFamily::Item)]),
             family_value_to_name: HashMap::from([((ConstantFamily::Item, 5), "VALUE".to_string())]),
+            loaded_files: vec!["include/constants/items.h".to_string()],
         };
 
+        let project_root = std::path::Path::new("/projects/demo");
+        let restored = SymbolTable::from_snapshot(&snapshot, project_root);
+
+        assert_eq!(restored.to_snapshot().symbols.get("VALUE").copied(), Some(5));
+        assert_eq!(restored.constant_family("VALUE"), Some(ConstantFamily::Item));
+        // Relative entries resolve against the project root so child tables can
+        // match them against canonicalized include paths.
         assert_eq!(
-            SymbolTable::from_snapshot(&snapshot)
-                .to_snapshot()
-                .symbols
-                .get("VALUE")
-                .copied(),
-            Some(5)
-        );
-        assert_eq!(
-            SymbolTable::from_snapshot(&snapshot).constant_family("VALUE"),
-            Some(ConstantFamily::Item)
+            restored.loaded_file_paths(),
+            vec![project_root.join("include/constants/items.h")]
         );
     }
 }

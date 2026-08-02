@@ -2,8 +2,10 @@ use crate::c_parser::defines::{CDefine, CFunctionMacro, parse_defines, parse_fun
 use crate::c_parser::enums::{CEnum, parse_enums};
 use crate::c_parser::includes::{CInclude, parse_includes};
 use dashmap::DashMap;
+use regex::Regex;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 #[derive(Debug, Clone)]
 pub struct FileEntry {
@@ -17,11 +19,62 @@ pub struct FileEntry {
 pub struct SourceManager {
     files: Arc<DashMap<PathBuf, Arc<FileEntry>>>,
     canonical_cache: Arc<DashMap<PathBuf, PathBuf>>,
+    metang_types: Arc<DashMap<PathBuf, Arc<HashMap<String, bool>>>>,
+}
+
+static RE_METANG_MASK_TYPE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"'(?P<name>[A-Za-z0-9_]+)'\s*:\s*\{\s*'type'\s*:\s*'(?P<kind>enum|mask)'").unwrap()
+});
+
+/// Parse a metang `meson.build` into `list stem -> is_mask`.
+///
+/// A missing file yields an empty map: directories that are not metang output
+/// simply declare no list types.
+pub fn parse_metang_types(meson_path: &Path) -> std::io::Result<HashMap<String, bool>> {
+    if !meson_path.is_file() {
+        return Ok(HashMap::new());
+    }
+    let meson = std::fs::read_to_string(meson_path).map_err(|err| {
+        std::io::Error::new(
+            err.kind(),
+            format!(
+                "Failed to read metang metadata {} as UTF-8: {err}",
+                meson_path.display()
+            ),
+        )
+    })?;
+
+    let mut types = HashMap::new();
+    for caps in RE_METANG_MASK_TYPE.captures_iter(&meson) {
+        let (Some(name), Some(kind)) = (caps.name("name"), caps.name("kind")) else {
+            continue;
+        };
+        // First entry wins, matching a first-match scan of the file.
+        types
+            .entry(name.as_str().to_owned())
+            .or_insert(kind.as_str() == "mask");
+    }
+    Ok(types)
 }
 
 impl SourceManager {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Metang list types declared by `meson_path`, parsed once per manager.
+    ///
+    /// Decomp projects consult the same `generated/meson.build` for every list
+    /// file they load, so the parsed map is memoized alongside parsed sources.
+    pub fn metang_types(&self, meson_path: &Path) -> std::io::Result<Arc<HashMap<String, bool>>> {
+        if let Some(types) = self.metang_types.get(meson_path) {
+            return Ok(Arc::clone(&types));
+        }
+
+        let types = Arc::new(parse_metang_types(meson_path)?);
+        self.metang_types
+            .insert(meson_path.to_path_buf(), Arc::clone(&types));
+        Ok(types)
     }
 
     pub fn get_or_parse(&self, path: impl AsRef<Path>) -> std::io::Result<Arc<FileEntry>> {

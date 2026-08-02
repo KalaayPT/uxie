@@ -88,6 +88,20 @@ impl GameFamily {
         }
     }
 
+    /// Macro include every decomp field script pulls in, relative to an include root.
+    ///
+    /// These files define the script command macros and are shared by every
+    /// script in the project, so they belong in the shared symbol table rather
+    /// than being re-resolved per script. `None` when the family has no decomp
+    /// project layout.
+    pub fn decomp_global_include(self) -> Option<&'static str> {
+        match self {
+            GameFamily::Platinum => Some("macros/scrcmd.inc"),
+            GameFamily::HGSS => Some("macros/script.inc"),
+            GameFamily::DP => None,
+        }
+    }
+
     /// Get the map header size in bytes for this game family
     pub fn map_header_size(&self) -> usize {
         24

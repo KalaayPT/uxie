@@ -5,7 +5,6 @@ use bitcode::{Decode, Encode};
 use dashmap::DashMap;
 use deunicode::deunicode;
 use rayon::prelude::*;
-use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -167,10 +166,6 @@ pub struct SymbolTable {
 
 static RE_PYTHON_ENUM: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
     regex::Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.+)$").unwrap()
-});
-
-static RE_METANG_MASK_TYPE: std::sync::LazyLock<Regex> = std::sync::LazyLock::new(|| {
-    Regex::new(r"'(?P<name>[A-Za-z0-9_]+)'\s*:\s*\{\s*'type'\s*:\s*'(?P<kind>enum|mask)'").unwrap()
 });
 
 /// Canonicalize a display name into the constant spelling used by script banks.
@@ -399,6 +394,33 @@ impl SymbolTable {
             |sm| sm.canonicalize(path),
         );
         self.loaded_files.insert(tracked);
+    }
+
+    /// Whether the parent chain already loaded `path`.
+    ///
+    /// Mirrors the skip in [`Self::load_recursive_internal`]: the symbols stay
+    /// reachable through the parent, so re-loading them into a child table is
+    /// pure duplicated work.
+    fn parent_already_loaded(&self, path: &Path) -> bool {
+        let Some(parent) = &self.parent else {
+            return false;
+        };
+        let tracked = self.source_manager.as_ref().map_or_else(
+            || path.canonicalize().unwrap_or_else(|_| path.to_path_buf()),
+            |sm| sm.canonicalize(path),
+        );
+        parent.loaded_files.contains(&tracked)
+    }
+
+    /// Load a list file unless the parent chain already provides its symbols.
+    ///
+    /// Used by the unresolved-include fallbacks, which are reached once per
+    /// script for shared generated lists the base table normally already holds.
+    fn load_list_file_unless_in_parent(&mut self, path: &Path) -> std::io::Result<()> {
+        if self.parent_already_loaded(path) {
+            return Ok(());
+        }
+        self.load_list_file(path)
     }
 
     pub fn load_header(&mut self, path: impl AsRef<Path>) -> std::io::Result<()> {
@@ -636,7 +658,7 @@ impl SymbolTable {
         Ok(())
     }
 
-    fn resolve_include_path(
+    pub(crate) fn resolve_include_path(
         parent_dir: &Path,
         include_dirs: &[PathBuf],
         include_path: &str,
@@ -1314,7 +1336,7 @@ impl SymbolTable {
                 ),
             )
         })?;
-        let is_mask = Self::list_file_is_metang_mask(path)?;
+        let is_mask = self.list_file_is_metang_mask(path)?;
         self.record_loaded_file(path);
         self.load_list_file_str_with_tag(&content, path, tag, is_mask)
     }
@@ -1402,7 +1424,13 @@ impl SymbolTable {
         Ok(())
     }
 
-    fn list_file_is_metang_mask(path: &Path) -> std::io::Result<bool> {
+    /// Whether `path` is a metang **mask** list file (values are bit positions)
+    /// rather than a plain enum list.
+    ///
+    /// The answer lives in the sibling `meson.build`, which describes every
+    /// generated list in the directory at once, so it is parsed once per
+    /// [`SourceManager`] rather than once per list file loaded.
+    fn list_file_is_metang_mask(&self, path: &Path) -> std::io::Result<bool> {
         let file_stem = path
             .file_stem()
             .and_then(|stem| stem.to_str())
@@ -1421,26 +1449,13 @@ impl SymbolTable {
         })?;
 
         let meson_path = generated_dir.join("meson.build");
-        if !meson_path.is_file() {
-            return Ok(false);
-        }
-
-        let meson = std::fs::read_to_string(&meson_path).map_err(|err| {
-            std::io::Error::new(
-                err.kind(),
-                format!(
-                    "Failed to read metang metadata {} as UTF-8: {err}",
-                    meson_path.display()
-                ),
-            )
-        })?;
-        for caps in RE_METANG_MASK_TYPE.captures_iter(&meson) {
-            if caps.name("name").map(|m| m.as_str()) == Some(file_stem) {
-                return Ok(caps.name("kind").map(|m| m.as_str()) == Some("mask"));
-            }
-        }
-
-        Ok(false)
+        let types = match &self.source_manager {
+            Some(sources) => sources.metang_types(&meson_path)?,
+            None => Arc::new(crate::c_parser::source_manager::parse_metang_types(
+                &meson_path,
+            )?),
+        };
+        Ok(types.get(file_stem).copied().unwrap_or(false))
     }
 
     fn insert_symbol_at_value(&mut self, id: &str, value: i64, path: &Path) {
@@ -2116,14 +2131,14 @@ impl SymbolTable {
         let txt_path_str = format!("{}.txt", &include_path[..include_path.len() - 2]);
         let direct = parent_dir.join(&txt_path_str);
         if direct.is_file() {
-            self.load_list_file(&direct)?;
+            self.load_list_file_unless_in_parent(&direct)?;
             return Ok(true);
         }
 
         for dir in include_dirs {
             let candidate = dir.join(&txt_path_str);
             if candidate.is_file() {
-                self.load_list_file(&candidate)?;
+                self.load_list_file_unless_in_parent(&candidate)?;
                 return Ok(true);
             }
         }
@@ -2592,6 +2607,11 @@ impl SymbolTable {
             .iter()
             .map(|(key, name)| (*key, name.clone()))
             .collect();
+        let loaded_files = self
+            .loaded_files
+            .iter()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .collect();
 
         SymbolSnapshot {
             symbols,
@@ -2601,10 +2621,17 @@ impl SymbolTable {
             symbol_to_tags,
             symbol_to_family,
             family_value_to_name,
+            loaded_files,
         }
     }
 
-    pub fn from_snapshot(snapshot: &SymbolSnapshot) -> Self {
+    /// Rebuild a table from a persisted snapshot.
+    ///
+    /// `project_root` resolves the snapshot's relative `loaded_files` entries;
+    /// entries that are already absolute are used as-is. Restoring that set is
+    /// what lets child tables skip include trees the snapshot already covers —
+    /// without it every consumer re-reads the whole shared include tree.
+    pub fn from_snapshot(snapshot: &SymbolSnapshot, project_root: &Path) -> Self {
         Self {
             parent: None,
             symbols: snapshot
@@ -2643,11 +2670,17 @@ impl SymbolTable {
                 .iter()
                 .map(|(key, name)| (*key, name.clone()))
                 .collect(),
-            loaded_files: FxHashSet::default(),
+            loaded_files: snapshot
+                .loaded_files
+                .iter()
+                .map(|path| project_root.join(path))
+                .collect(),
             text_messages: FxHashMap::default(),
             eval_cache: Arc::default(),
             shortest_name_cache: Arc::default(),
-            source_manager: None,
+            // A snapshot carries no parsed sources, but children clone this
+            // manager via `with_parent`, so they share one parse cache.
+            source_manager: Some(SourceManager::new()),
         }
     }
 

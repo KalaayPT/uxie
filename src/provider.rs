@@ -623,8 +623,14 @@ mod tests {
         );
     }
 
+    /// A parse failure is cached for the provider's lifetime, so a project whose
+    /// header table cannot be parsed is not re-parsed on every lookup.
+    ///
+    /// Recovery is by constructing a new provider. That is what the language
+    /// server does: saving the file invalidates project state, which rebuilds
+    /// the workspace and with it the provider.
     #[test]
-    fn test_arm9_provider_does_not_cache_parse_failures() {
+    fn test_arm9_provider_caches_parse_failures_until_reconstructed() {
         let dir = tempfile::tempdir().unwrap();
         let arm9_path = dir.path().join("arm9.bin");
         let provider = Arm9Provider::new(&arm9_path, 0, 2, GameFamily::Platinum);
@@ -642,13 +648,19 @@ mod tests {
         }
         file.flush().unwrap();
 
+        assert!(
+            provider.get_text_archive_for_script_file(10).is_err(),
+            "existing provider must keep serving the cached failure"
+        );
+
+        let reloaded = Arm9Provider::new(&arm9_path, 0, 2, GameFamily::Platinum);
         assert_eq!(
-            provider.get_text_archive_for_script_file(10).unwrap(),
+            reloaded.get_text_archive_for_script_file(10).unwrap(),
             Some(100)
         );
-        assert_eq!(provider.find_maps_by_script_file_id(20).unwrap(), vec![1]);
+        assert_eq!(reloaded.find_maps_by_script_file_id(20).unwrap(), vec![1]);
         assert_eq!(
-            provider.find_maps_by_level_script_file_id(0).unwrap(),
+            reloaded.find_maps_by_level_script_file_id(0).unwrap(),
             vec![0, 1]
         );
     }
@@ -903,8 +915,10 @@ mod tests {
         assert!(err.to_string().contains("bikeAllowed"));
     }
 
+    /// Companion to [`test_arm9_provider_caches_parse_failures_until_reconstructed`]
+    /// for the decomp header table.
     #[test]
-    fn test_decomp_provider_does_not_cache_parse_failures() {
+    fn test_decomp_provider_caches_parse_failures_until_reconstructed() {
         let dir = tempfile::tempdir().unwrap();
         let header_path = dir.path().join("include/data/map_headers.h");
         fs::create_dir_all(header_path.parent().unwrap()).unwrap();
@@ -950,8 +964,13 @@ mod tests {
         )
         .unwrap();
 
-        let header = provider.get_map_header(0).unwrap();
-        assert_eq!(header.script_file_id(), 4);
+        assert!(
+            provider.get_map_header(0).is_err(),
+            "existing provider must keep serving the cached failure"
+        );
+
+        let reloaded = DecompProvider::new(dir.path(), SymbolTable::new(), GameFamily::Platinum);
+        assert_eq!(reloaded.get_map_header(0).unwrap().script_file_id(), 4);
     }
 
     #[test]
