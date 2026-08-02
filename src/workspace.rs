@@ -353,10 +353,8 @@ impl Workspace {
 
     /// Load archive `archive_id` into `message_cache` and populate `message_ids`.
     ///
-    /// No-op if the archive is already loaded. Texts are read via
-    /// `read_all_messages` (the single, tested locale-fallback implementation).
-    /// IDs are extracted in a separate lightweight pass over the `"id"` fields
-    /// (JSON archives only; GMM/binary archives have no id fields).
+    /// No-op if the archive is already loaded. Texts and `id` fields both come
+    /// from a single [`read_all_messages`] pass, so they cannot disagree.
     fn load_archive_into_cache(&self, archive_id: u16) -> std::io::Result<()> {
         if self.message_cache.contains_key(&archive_id) {
             return Ok(());
@@ -368,23 +366,13 @@ impl Workspace {
             )
         })?;
 
-        let messages = read_all_messages(&path, self.language)?;
-        self.message_cache.insert(archive_id, messages);
-
-        if path.extension().and_then(|e| e.to_str()) == Some("json") {
-            if let Ok(content) = std::fs::read_to_string(&path) {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(arr) = json["messages"].as_array() {
-                        for (idx, entry) in arr.iter().enumerate() {
-                            if let Some(id) = entry["id"].as_str() {
-                                self.message_ids
-                                    .insert(id.to_string(), (archive_id, idx as u16));
-                            }
-                        }
-                    }
-                }
+        let (messages, ids) = read_all_messages(&path, self.language)?;
+        for (index, id) in ids.into_iter().enumerate() {
+            if let Some(id) = id {
+                self.message_ids.insert(id, (archive_id, index as u16));
             }
         }
+        self.message_cache.insert(archive_id, messages);
         Ok(())
     }
 
@@ -746,8 +734,16 @@ fn message_entry_is_garbage(entry: &serde_json::Value, primary_locale: &str) -> 
     }
 }
 
-/// Read all message strings from a text archive file, dispatching by extension.
-fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec<String>> {
+/// Read a text archive's message strings, dispatching by extension.
+///
+/// Returns the texts plus, for JSON archives, each entry's `id` field. Both are
+/// index-aligned with the `messages` array and produced by one parse, so
+/// callers never re-read the file to recover ids. GMM/binary archives carry no
+/// ids and yield an empty id list.
+fn read_all_messages(
+    path: &Path,
+    language: GameLanguage,
+) -> std::io::Result<(Vec<String>, Vec<Option<String>>)> {
     let content = std::fs::read_to_string(path)?;
     if path.extension().and_then(|e| e.to_str()) == Some("json") {
         let json: serde_json::Value = serde_json::from_str(&content)
@@ -759,39 +755,47 @@ fn read_all_messages(path: &Path, language: GameLanguage) -> std::io::Result<Vec
                 std::io::Error::new(std::io::ErrorKind::InvalidData, "missing messages array")
             })?;
         let lang_key = language.locale_key();
-        Ok(arr
-            .iter()
-            .map(|entry| {
-                // Every array element yields exactly one String, so the result
-                // stays index-aligned with the JSON `messages` array. Entries
-                // with no usable text (id-only placeholder slots, malformed
-                // objects) become empty strings rather than being dropped:
-                // `message_cache` and `flush_pending_messages` rely on this
-                // 1:1 correspondence (a shorter Vec panics the flush slice and
-                // misaligns its garbage-slot loop).
-                let Some(obj) = entry.as_object() else {
-                    return String::new();
-                };
-                // Try the workspace language first, then English, then Japanese,
-                // then whatever key is present — so every entry is counted regardless
-                // of which locale the archive was exported with.
-                let value = pick_message_value(obj, lang_key);
+        let mut texts = Vec::with_capacity(arr.len());
+        let mut ids = Vec::with_capacity(arr.len());
+        for entry in arr {
+            // Every array element yields exactly one String, so the result
+            // stays index-aligned with the JSON `messages` array. Entries
+            // with no usable text (id-only placeholder slots, malformed
+            // objects) become empty strings rather than being dropped:
+            // `message_cache` and `flush_pending_messages` rely on this
+            // 1:1 correspondence (a shorter Vec panics the flush slice and
+            // misaligns its garbage-slot loop).
+            let Some(obj) = entry.as_object() else {
+                texts.push(String::new());
+                ids.push(None);
+                continue;
+            };
+            ids.push(
+                obj.get("id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_owned),
+            );
+            // Try the workspace language first, then English, then Japanese,
+            // then whatever key is present — so every entry is counted regardless
+            // of which locale the archive was exported with.
+            let value = pick_message_value(obj, lang_key);
 
-                // Messages are stored as either a plain string or an array of
-                // line segments (chatot multi-line format). Arrays are joined
-                // without a separator — chatot does the same when encoding.
-                match value {
-                    Some(serde_json::Value::String(s)) => s.clone(),
-                    Some(serde_json::Value::Array(parts)) => {
-                        parts.iter().filter_map(|e| e.as_str()).collect::<String>()
-                    }
-                    _ => String::new(),
+            // Messages are stored as either a plain string or an array of
+            // line segments (chatot multi-line format). Arrays are joined
+            // without a separator — chatot does the same when encoding.
+            texts.push(match value {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(parts)) => {
+                    parts.iter().filter_map(|e| e.as_str()).collect::<String>()
                 }
-            })
-            .collect())
+                _ => String::new(),
+            });
+        }
+        Ok((texts, ids))
     } else {
-        crate::c_parser::SymbolTable::extract_gmm_messages(&content)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+        let texts = crate::c_parser::SymbolTable::extract_gmm_messages(&content)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+        Ok((texts, Vec::new()))
     }
 }
 
