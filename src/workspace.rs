@@ -1404,11 +1404,9 @@ impl Workspace {
     }
 
     fn detect_decomp_game(root: &Path) -> (Game, GameFamily) {
-        let platinum_markers = [
-            root.join("res/field/scripts/scripts.order"),
-            root.join("include/data/map_headers.h"),
-            root.join("src/script_manager.c"),
-        ];
+        // These paths exist in HGSS decomp checkouts and never in Platinum
+        // ones (`files/fielddata/...` is the HGSS asset tree), so their
+        // presence alone decides.
         let hgss_markers = [
             root.join("src/data/map_headers.h"),
             root.join("src/fieldmap.c"),
@@ -1416,10 +1414,7 @@ impl Workspace {
             root.join("files/msgdata/msg"),
         ];
 
-        let has_platinum_marker = platinum_markers.iter().any(|path| path.exists());
-        let has_hgss_marker = hgss_markers.iter().any(|path| path.exists());
-
-        if has_hgss_marker && !has_platinum_marker {
+        if hgss_markers.iter().any(|path| path.exists()) {
             (Game::HeartGold, GameFamily::HGSS)
         } else {
             (Game::Platinum, GameFamily::Platinum)
@@ -3727,5 +3722,52 @@ mod tests {
             Some((199, 1))
         );
         assert_eq!(ws.message_cache.get(&199).unwrap().len(), 2);
+    }
+
+    fn touch_markers(root: &Path, markers: &[&str]) {
+        for marker in markers {
+            let path = root.join(marker);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, "").unwrap();
+        }
+    }
+
+    /// `src/script_manager.c` exists in both decomps (pokeheartgold gained
+    /// one in 2026), so an HGSS tree containing it must still detect as HGSS.
+    #[test]
+    fn detect_decomp_game_stays_hgss_with_script_manager() {
+        let dir = tempdir().unwrap();
+        touch_markers(
+            dir.path(),
+            &[
+                "src/data/map_headers.h",
+                "src/fieldmap.c",
+                "files/fielddata/script/scr_seq",
+                "src/script_manager.c",
+            ],
+        );
+
+        assert_eq!(
+            Workspace::detect_decomp_game(dir.path()),
+            (Game::HeartGold, GameFamily::HGSS)
+        );
+    }
+
+    #[test]
+    fn detect_decomp_game_detects_platinum_without_hgss_markers() {
+        let dir = tempdir().unwrap();
+        touch_markers(
+            dir.path(),
+            &[
+                "res/field/scripts/scripts.order",
+                "include/data/map_headers.h",
+                "src/script_manager.c",
+            ],
+        );
+
+        assert_eq!(
+            Workspace::detect_decomp_game(dir.path()),
+            (Game::Platinum, GameFamily::Platinum)
+        );
     }
 }
