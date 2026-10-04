@@ -135,6 +135,12 @@ impl RomHeader {
             if header_bin.exists() {
                 return Self::from_binary(header_bin);
             }
+
+            // Opening the directory itself as a file fails differently per OS (access denied on Windows).
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("no config.yaml or header.bin in {}", path.display()),
+            ));
         }
 
         let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
@@ -448,6 +454,13 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn open_directory_without_header_files_is_not_found() {
+        let dir = tempdir().unwrap();
+        let err = RomHeader::open(dir.path()).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::NotFound);
+    }
 
     fn header_with_code(game_code: String) -> RomHeader {
         RomHeader {
