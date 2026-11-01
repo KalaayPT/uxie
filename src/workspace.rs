@@ -362,11 +362,19 @@ impl Workspace {
         let path = self.cached_text_archive_path(archive_id).ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
-                format!("no text archive found for ID {archive_id}"),
+                format!(
+                    "no text archive source file found for ID {archive_id} in workspace '{}'",
+                    self.project_path.display()
+                ),
             )
         })?;
 
-        let (messages, ids) = read_all_messages(&path, self.language)?;
+        let (messages, ids) = read_all_messages(&path, self.language).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("failed to read text archive '{}': {error}", path.display()),
+            )
+        })?;
         for (index, id) in ids.into_iter().enumerate() {
             if let Some(id) = id {
                 self.message_ids.insert(id, (archive_id, index as u16));
@@ -526,19 +534,7 @@ impl Workspace {
     /// list in memory only; call [`flush_pending_messages`] after compilation to
     /// persist them to disk.
     pub fn find_or_add_message(&self, archive_id: u16, text: &str) -> std::io::Result<u16> {
-        self.load_archive_into_cache(archive_id).map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    format!(
-                        "no text archive found for ID {archive_id}; \
-                         string literals require a project workspace"
-                    ),
-                )
-            } else {
-                e
-            }
-        })?;
+        self.load_archive_into_cache(archive_id)?;
         let mut entry = self.message_cache.get_mut(&archive_id).unwrap();
         if let Some(pos) = entry.iter().position(|m| m == text) {
             return Ok(pos as u16);
@@ -3521,6 +3517,30 @@ mod tests {
             message_cache: DashMap::new(),
             message_ids: Arc::new(DashMap::new()),
         }
+    }
+
+    #[test]
+    fn text_archive_errors_keep_the_source_path_and_cause() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = make_dspre_workspace(dir.path().to_path_buf());
+        let error = ws.find_or_add_message(1, "hello").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        let message = error.to_string();
+        assert!(message.contains("source file found for ID 1"), "{message}");
+        assert!(
+            message.contains(&dir.path().display().to_string()),
+            "{message}"
+        );
+
+        let archives = dir.path().join("expanded/textArchives");
+        std::fs::create_dir_all(&archives).unwrap();
+        let path = archives.join("0001.json");
+        std::fs::write(&path, "{}").unwrap();
+        let error = ws.find_or_add_message(1, "hello").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        let message = error.to_string();
+        assert!(message.contains(&path.display().to_string()), "{message}");
+        assert!(message.contains("missing messages array"), "{message}");
     }
 
     #[test]

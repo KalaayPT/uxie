@@ -116,14 +116,31 @@ impl Arm9Provider {
         Self::new(arm9_path, 0xE601C, 559, GameFamily::Platinum)
     }
 
+    /// Reads this provider's ARM9 table and returns the map headers, or an error with the file path.
     fn parse_all_headers(&self) -> Result<Vec<MapHeader>> {
-        let mut file = File::open(&self.arm9_path)?;
-        Ok(read_map_headers_from_arm9(
+        let mut file = File::open(&self.arm9_path).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!(
+                    "failed to open ARM9 '{}': {error}",
+                    self.arm9_path.display()
+                ),
+            )
+        })?;
+        read_map_headers_from_arm9(
             &mut file,
             self.header_table_offset,
             self.header_count,
             self.game_family,
-        )?)
+        )
+        .map_err(|error| {
+            UxieError::invalid_format(format!(
+                "failed to read {} map headers from ARM9 '{}' at offset {:#X}: {error}",
+                self.header_count,
+                self.arm9_path.display(),
+                self.header_table_offset,
+            ))
+        })
     }
 
     fn load_all_headers(&self) -> Result<Arc<Vec<MapHeader>>> {
@@ -236,9 +253,15 @@ impl DecompProvider {
         if fallback.exists() { fallback } else { primary }
     }
 
+    /// Reads this provider's C header table and returns the map headers, or an error with the file path.
     fn parse_all_headers(&self) -> Result<Vec<MapHeader>> {
         let path = self.map_headers_path();
-        let content = std::fs::read_to_string(&path)?;
+        let content = std::fs::read_to_string(&path).map_err(|error| {
+            std::io::Error::new(
+                error.kind(),
+                format!("failed to read map headers '{}': {error}", path.display()),
+            )
+        })?;
         let parsed = crate::map_header::parse_map_headers_from_c(&content);
 
         let mut headers = Vec::new();
@@ -413,6 +436,37 @@ mod tests {
         }
         file.flush().unwrap();
         file
+    }
+
+    #[test]
+    fn map_header_errors_identify_the_source_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let arm9 = dir.path().join("arm9.bin");
+        let provider = Arm9Provider::new(&arm9, 0x100, 2, GameFamily::Platinum);
+        let error = provider
+            .get_text_archive_for_script_file(1)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("failed to open ARM9"), "{error}");
+        assert!(error.contains(&arm9.display().to_string()), "{error}");
+
+        std::fs::write(&arm9, []).unwrap();
+        let provider = Arm9Provider::new(&arm9, 0x100, 2, GameFamily::Platinum);
+        let error = provider
+            .get_text_archive_for_script_file(1)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("failed to read 2 map headers"), "{error}");
+        assert!(error.contains(&arm9.display().to_string()), "{error}");
+        assert!(error.contains("0x100"), "{error}");
+
+        let provider = DecompProvider::new(dir.path(), crate::SymbolTable::new(), GameFamily::HGSS);
+        let error = provider
+            .get_text_archive_for_script_file(1)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("failed to read map headers"), "{error}");
+        assert!(error.contains("map_headers.h"), "{error}");
     }
 
     #[test]
