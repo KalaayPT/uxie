@@ -448,8 +448,10 @@ const DP_RANGES: &[GlobalScriptRange] = &[
     GlobalScriptRange::CommonStrings9900,
     GlobalScriptRange::Contests,
     GlobalScriptRange::FollowerPartners,
+    GlobalScriptRange::InitNewGame,
     GlobalScriptRange::DayCareCommon,
     GlobalScriptRange::PoffinCommon,
+    GlobalScriptRange::GroupConnection,
     GlobalScriptRange::PokemonCenterB1fAttendants,
     GlobalScriptRange::CommunicationClub,
     GlobalScriptRange::PokemonCenter2fAttendants,
@@ -480,15 +482,17 @@ const DP_WESTERN_SCRIPT_IDS: &[(u16, u16, u16)] = &[
     (9900, 365, 199),
     (9800, 206, 203),
     (9700, 387, 378),
-    (9500, 464, 464),
+    (9600, 377, 199),
+    (9500, 464, 492),
     (9400, 391, 381),
+    (9300, 372, 329),
     (9200, 388, 379),
     (9100, 0, 9),
     (9000, 207, 207),
     (8970, 390, 7),
-    (8950, 463, 463),
+    (8950, 463, 486),
     (8900, 389, 380),
-    (8800, 462, 462),
+    (8800, 462, 485),
     (8000, 374, 333),
     (7000, 370, 325),
     (5000, 1040, 199),
@@ -708,7 +712,7 @@ impl GlobalScriptTable {
         Self::from_entries(entries_from_ids(
             PLATINUM_RANGES,
             &[
-                (10490, 499, 499),
+                (10490, 499, 541),
                 (10450, 500, 16),
                 (10400, 400, 203),
                 (10300, 1051, 552),
@@ -719,18 +723,18 @@ impl GlobalScriptTable {
                 (9950, 411, 383),
                 (9900, 397, 213),
                 (9800, 212, 217),
-                (9700, 422, 422),
+                (9700, 422, 429),
                 (9600, 412, 213),
-                (9500, 501, 501),
-                (9400, 426, 426),
+                (9500, 501, 547),
+                (9400, 426, 432),
                 (9300, 406, 374),
-                (9200, 423, 423),
+                (9200, 423, 430),
                 (9100, 0, 11),
                 (9000, 213, 221),
                 (8970, 425, 7),
-                (8950, 498, 498),
-                (8900, 424, 424),
-                (8800, 497, 497),
+                (8950, 498, 539),
+                (8900, 424, 431),
+                (8800, 497, 538),
                 (8000, 408, 380),
                 (7000, 404, 369),
                 (5000, 1114, 213),
@@ -749,7 +753,7 @@ impl GlobalScriptTable {
         Self::from_entries(entries_from_ids(
             PLATINUM_RANGES,
             &[
-                (10490, 499, 499),
+                (10490, 499, 535),
                 (10450, 500, 15),
                 (10400, 400, 202),
                 (10300, 1051, 546),
@@ -760,18 +764,18 @@ impl GlobalScriptTable {
                 (9950, 411, 382),
                 (9900, 397, 212),
                 (9800, 212, 216),
-                (9700, 422, 422),
+                (9700, 422, 423),
                 (9600, 412, 212),
-                (9500, 501, 501),
+                (9500, 501, 541),
                 (9400, 426, 426),
                 (9300, 406, 373),
-                (9200, 423, 423),
+                (9200, 423, 424),
                 (9100, 0, 11),
                 (9000, 213, 220),
                 (8970, 425, 7),
-                (8950, 498, 498),
-                (8900, 424, 424),
-                (8800, 497, 497),
+                (8950, 498, 533),
+                (8900, 424, 425),
+                (8800, 497, 532),
                 (8000, 408, 379),
                 (7000, 404, 368),
                 (5000, 1114, 212),
@@ -790,7 +794,7 @@ impl GlobalScriptTable {
         Self::from_entries(entries_from_ids(
             PLATINUM_RANGES,
             &[
-                (10490, 499, 499),
+                (10490, 499, 536),
                 (10450, 500, 15),
                 (10400, 400, 202),
                 (10300, 1051, 547),
@@ -801,18 +805,18 @@ impl GlobalScriptTable {
                 (9950, 411, 382),
                 (9900, 397, 212),
                 (9800, 212, 216),
-                (9700, 422, 422),
+                (9700, 422, 424),
                 (9600, 412, 212),
-                (9500, 501, 501),
-                (9400, 426, 426),
+                (9500, 501, 542),
+                (9400, 426, 427),
                 (9300, 406, 373),
-                (9200, 423, 423),
+                (9200, 423, 425),
                 (9100, 0, 11),
                 (9000, 213, 220),
                 (8970, 425, 7),
-                (8950, 498, 498),
-                (8900, 424, 424),
-                (8800, 497, 497),
+                (8950, 498, 534),
+                (8900, 424, 426),
+                (8800, 497, 533),
                 (8000, 408, 379),
                 (7000, 404, 368),
                 (5000, 1114, 212),
@@ -833,8 +837,8 @@ impl GlobalScriptTable {
 
     /// Hardcoded table for Diamond/Pearl Japanese.
     ///
-    /// Extracted from arm9 func 0x3B6B0, pool 0x3B95C. Includes two extra script
-    /// banks at 9600 and 9300 not present in western DP; those use generic range names.
+    /// Extracted from arm9 func 0x3B6B0, pool 0x3B95C. Its 9600 and 9300 banks keep
+    /// generic range names.
     pub fn dp_japanese_hardcoded() -> Self {
         Self::from_entries(entries_from_ids(
             &[
@@ -918,15 +922,17 @@ impl GlobalScriptTable {
                 (9900, 365, 198),
                 (9800, 206, 202),
                 (9700, 387, 372),
-                (9500, 464, 464),
+                (9600, 377, 198),
+                (9500, 464, 486),
                 (9400, 391, 375),
+                (9300, 372, 328),
                 (9200, 388, 373),
                 (9100, 0, 9),
                 (9000, 207, 206),
                 (8970, 390, 7),
-                (8950, 463, 463),
+                (8950, 463, 480),
                 (8900, 389, 374),
-                (8800, 462, 462),
+                (8800, 462, 479),
                 (8000, 374, 332),
                 (7000, 370, 324),
                 (5000, 1040, 198),
@@ -1060,7 +1066,7 @@ mod tests {
     #[test]
     fn test_dp_western_hardcoded_table() {
         let table = GlobalScriptTable::dp_western_hardcoded();
-        assert_eq!(table.len(), 25);
+        assert_eq!(table.len(), 27);
 
         let entry = table.lookup(2000).unwrap();
         assert_eq!(entry.min_script_id, 2000);
